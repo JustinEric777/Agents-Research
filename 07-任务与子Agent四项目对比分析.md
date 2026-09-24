@@ -180,7 +180,9 @@ async createBranch(name: string, at: string | null, context: Context): Promise<B
 分支的「探索结果回收」靠 `branch_summary`：当**带 `summarize` 的导航**离开分支时，计算 old/new 路径的最近公共祖先，把被放弃的那段压成摘要，写成 `branch_summary` entry 挂在返回点上：
 
 ```ts
-// packages/agent/src/harness/runtime/drive/structural.ts:278-298（节选）
+// packages/agent/src/harness/runtime/drive/structural.ts:260-298（节选）
+if (outcome.kind === "compaction") {
+	...
 } else if (outcome.kind === "branch_summary") {
 	const boundary = navigationBoundary(current.task);
 	const entry: NewEntry<BranchSummaryEntry> = {
@@ -189,11 +191,12 @@ async createBranch(name: string, at: string | null, context: Context): Promise<B
 		type: "branch_summary",
 		fromId: meta.sourceTipId,
 		summary: outcome.result.summary,
-		details: { readFiles: ..., modifiedFiles: ... },
+		details: { readFiles: outcome.result.readFiles, modifiedFiles: outcome.result.modifiedFiles },
 	};
 	writes.push(setValue(branchTip(lane.name), boundary.targetId));
 	...
 	writes.push(insertEntry(entry), setValue(branchTip(lane.name), outcome.resultEntryId));
+}
 ```
 
 #### 4.1.2 真正的子 Agent：扩展层 spawn 独立进程
