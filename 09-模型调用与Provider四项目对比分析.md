@@ -6,6 +6,8 @@
 >
 > **前置依赖**：01（主循环如何消费流式事件）、03（工具 schema 如何投影给 provider）、04（usage 如何参与压缩预算）、05（消息类型与跨 provider 转换损失）。
 >
+> **跨层联动**：12 —— 见 4.4.4。缓存断点打在哪个位置不是本层的自由，它由提示词组装层给出的**静态/动态分界**决定，本层只负责把那个分界翻译成 API 参数。
+>
 > **分析对象**：
 > - **pi** —— `packages/ai/src/{types,models}.ts` + `ai/src/api/{anthropic-messages,openai-completions,lazy}.ts` + `ai/src/utils/{retry,provider-retry,overflow}.ts` + `agent/src/harness/runtime/drive/{response,generation}.ts`
 > - **deepseek-harness** —— `packages/llm/llm/src/*`（`StreamChunk` 契约）+ `llm/llm-deepseek/src/adapter.ts`（自写）+ `llm/llm-pi-ai/src/*`（复用 pi-ai 并打补丁）+ `llm/llm-retry/src/index.ts`
@@ -65,7 +67,7 @@
 │   ⇒ 唯一一层「其抽象宽度决定上层复杂度」的适配层       │
 └────────────────────────────────────────────────────────┘
         ▲                                        │
-        │ 消费                                    │ 上报
+        │ 消费                                   │ 上报
         │                                        ▼
   L1 主循环（流式事件驱动；词汇表多宽，循环就多胖）
         │
@@ -1046,6 +1048,8 @@ export function getCacheControl({ scope, querySource } = {}) {
 1h TTL 的资格判定：Bedrock 显式开关 `ENABLE_PROMPT_CACHING_1H_BEDROCK`（`:396-401`），或订阅者 + GrowthBook allowlist（`:406-433`）。system prompt 的断点另走 `buildSystemPromptBlocks`（`:3213`、`:3228-3234`）。全局关闭开关 `getPromptCachingEnabled`（`:333`）。
 
 > **设计理由** [`推断`]：`skipCacheWrite` 时断点前移一位，是因为最后一个块刚被追加、写缓存不划算。**「只打一个断点」与 pi 的 `promptCache` 字段形成对照**——CC 把缓存策略放进发送逻辑（因为它知道对话结构），pi 把它放进模型元数据（因为它不知道调用方怎么用）。
+
+**但断点打在哪里，本层说了不算**：system 块的断点位置由提示词组装层给出的静态/动态分界决定——分界之前的段可跨会话共享缓存，之后的段每段自带策略甚至显式声明不可缓存（第 12 章 4.4.2）。本层只做两件事：把那个分界翻译成 `cache_control` 参数，以及为「追加了最后一个块」这类**此刻才成立的条件**把断点前移一位。换言之，**缓存命中率的决定权在第 12 章那一层，本层只承担执行与计量**——这也解释了为什么四家在这一维度的差异（`promptCache` 字段 / 服务端自动 / 显式断点）远小于它们在前缀治理上的差异。
 
 #### 4.4.5 重试：次数最多，且唯一的模型 fallback
 

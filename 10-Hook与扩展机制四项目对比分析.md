@@ -6,6 +6,8 @@
 >
 > **前置依赖**：01（主循环，扩展点挂在循环的哪一步）、02（工具调度，工具级拦截的插入位置）、03（工具定义，扩展如何注册工具）、08（权限，hook 与审批的优先级关系）。
 >
+> **跨层联动**：13 —— 见 5.1。MCP 在本层只被当作**一种扩展单位**来计数；它自身的接入协议属于外围区。
+>
 > **分析对象**：
 > - **pi** —— `packages/agent/src/{types,agent,agent-loop}.ts`（内核 11 个生命周期回调）+ `packages/coding-agent/src/core/extensions/{types,loader,runner}.ts`（外壳 36 个事件 + 10 个 `register*`）
 > - **deepseek-harness** —— `vendor/cordis/src/{events,registry}.ts`（插件与 5 种调度模式）+ `packages/hooks/hook-protocol/src/*` + `hooks/hooks-{claude-code,codex}/src/*`（协议兼容层）+ `extensions/cordis-host-runner/src/*`
@@ -52,6 +54,7 @@
 - **不管工具怎么调度** —— 那是 L2。但 `PreToolUse` 这类钩子正是在 L2 的准备阶段插入的，且**权限判定的优先级低于 hook**（见第 8 章 4.3.5）。
 - **不管权限规则怎么写** —— 那是 L8。本层只负责「让外部代码有机会介入权限决策」（CC 的 `PermissionRequest`、codex 的 `run_permission_request_hooks`）。
 - **不管具体某个扩展的功能** —— 那是扩展自己的事。本章只分析**机制**：口子开在哪、能改什么、改完谁复核。
+- **不管 MCP 这类外部能力怎么接进来** —— 那是外围区第 13 章。本层只回答「MCP server 能不能算一个扩展单位、它被画在哪一层、它的调用是否复用同一条权限链」（见 5.1）；server 的生命周期、工具发现、传输方式与凭据传递都在第 13 章。这个切分留了一处跨章的口径分歧：**四家对「MCP 是扩展还是能力」的答案并不一致**——codex 把 `McpTool { server, tool, input, ... }` 直接做成 hook 处理器的一个变体（`config/src/hook_config.rs:161-201`，见 4.3.2），CC 却只认 bash / prompt / agent / http 四类 handler（`src/schemas/hooks.ts:176-189`，见 4.4.2），MCP 在它那里是「注册工具的六层之一」而非「hook 的一种」。本层记录这个分歧，不裁定它。
 
 ### 2.3 层次定位
 

@@ -34,7 +34,7 @@
 
 ### 2.1 子职责拆解
 
-本层可拆成 7 个子职责。四家的架构差异，本质上是**对这 7 个问题给出的答案不同**：
+本层可拆成 8 个子职责。四家的架构差异，本质上是**对这 8 个问题给出的答案不同**：
 
 | # | 子职责 | 要回答的问题 |
 |---|---|---|
@@ -45,6 +45,7 @@
 | ⑤ | **通信** | 父↔子怎么传消息？平级 Agent 之间呢？ |
 | ⑥ | **结果回灌** | 产物以什么形式回到父 Agent 的上下文？ |
 | ⑦ | **资源与配额** | 递归深度、并发上限、内存、取消级联、孤儿回收 |
+| ⑧ | **对等协作的拓扑与载体** | 平级通信的图长什么样（树 / 网）？消息与任务存在哪里？谁可以认领工作？（见 4.5） |
 
 ### 2.2 本层不管什么
 
@@ -98,11 +99,13 @@ L1 主循环 ──┬── L2 工具调用调度 ──→ L3 工具定义/投
 | **深度限制** | 示例未设限 | `maxDepth` 默认 **1** | thread spawn depth 上限 | 非 ant 构建禁用 AgentTool |
 | **并发上限** | 示例 `MAX_CONCURRENCY=4` | `maxActiveSubagents` 默认 **8** | `max_threads`（CAS 递增） | 工具并发 10 / batch 建议 30 |
 | **结果回灌** | 子进程输出文本 | `SubagentResult` | `notify_parent_of_terminal_turn` | `tool_result` 或 `<task-notification>` |
-| **平级协作** | 无 | `send_message` / `interrupt_agent` | 消息板（channel/thread/post） | teammate + mailbox |
+| **平级协作** | 无 | 委派包内仅直接父/子；实验包 `agent-team` 支持任意成员互发 | 消息板（channel/thread/post）+ 按路径点名兄弟 | teammate + mailbox |
+| **共享任务板 / 认领** | 无 | 实验包 `agent-team`（`team_task_*` + CAS 认领） | 无（消息板是论坛，不是任务队列） | file-lock 认领（`tasks.ts`） |
+| **对等通信的载体** | — | 根事务内的持久化 journal（实验包） | SQLite 消息板 + 会话内邮箱 | 文件系统 JSON 邮箱（`proper-lockfile`） |
 | **子会话持久化** | 不落盘（`--no-session`） | 独立 session 日志 + descriptor v3 | SQLite agent graph | sidechain transcript + outputFile |
 | **角色 / 类型体系** | `~/.pi/agent/agents/*.md`（含 frontmatter） | `provider` + `persona` | `explorer` / `worker` 角色 TOML | `subagent_type`（6–7 种内置） |
 | **只读探索特化** | 示例含 scout / planner / reviewer | 无专属角色 | `explorer`（鼓励并行多开） | `Explore`（禁 Edit/Write/Agent） |
-| **「队友」（平级 Agent）** | 无 | 无 | 消息板 + 订阅 | `in_process_teammate` |
+| **「队友」（平级 Agent）** | 无 | 实验包 `agent-team`（`teammate`） | 消息板 + 订阅 | `in_process_teammate` |
 | **超时** | 无（未实现） | **运行本身无 wall-clock 超时** | 未提及 | `TaskOutput` 30s 默认 / 600s 上限 |
 
 ---
@@ -665,6 +668,77 @@ promptMessages = [createUserMessage({ content: prompt })]
 - **后台化**：前台同步 agent 用 `Promise.race([nextMessage, backgroundSignal])`（`AgentTool.tsx:883-897`）；Ctrl+B 走 `backgroundAll`。
 - **并发上限**：工具批次并发 `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` 默认 **10**（`src/services/tools/toolOrchestration.ts:8-12`）；只读/并发安全工具批并发执行、否则串行（`:26-67`）。内置 batch skill 另外建议单次 `MAX_AGENTS = 30`。
 
+### 4.5 对等协作：拓扑、载体与共享任务板
+
+前面四节都把注意力放在「父怎么把活交给子」。这一节换一个方向：**兄弟（平级）Agent 之间能不能直接说话**，如果能，靠什么承载、图长什么样、以及有没有一块「大家都能上去领活」的任务板。
+
+先看拓扑。父子委派天然是**树**；一旦允许平级通信，图就变成**网**，而网的代价是 O(N²) 条潜在通道——这也是 6.8 讨论的嵌套限制存在的根本理由。
+
+```mermaid
+flowchart TB
+    subgraph T["树：只有父子边（pi / dsh 委派包 / codex 委派图）"]
+      A1["父"] --> B1["子 1"]
+      A1 --> B2["子 2"]
+      B3["兄弟之间无通道"] -.->|"✗"| B1
+    end
+    subgraph M["网：任意成员可达（dsh agent-team / codex 消息板 / CC team）"]
+      L["Lead"] --> T1["teammate 1"]
+      L --> T2["teammate 2"]
+      T1 <-->|"直接 DM"| T2
+    end
+```
+
+**图 7-4**：对等协作的两种拓扑。左边是「委派」，右边是「组队」——**二者不是同一个功能的强弱版本，而是两类问题**：委派解决「一件事分给一个新人做」，组队解决「多个人要就同一份工作反复协商」。
+
+#### 4.5.1 pi —— 没有对等通信，而且连"兄弟"这个关系都不存在
+
+pi 的核心只承认**父子（ownership / subtree）**一种跨会话关系，并且用断言把它写死：`assertTaskConversationScope` 要求目标会话必须是当前 task 自己拥有的子树成员，否则抛 `Forbidden: conversation <id> is outside task <id>'s subtree`（`packages/agent/src/harness/pico3/harness.ts:329-340`）。`sendOwned` 与 `abortConversation` 都必须先过这道校验（`harness.ts:251`、`:270`）。
+
+换句话说，pi 不是「没实现兄弟通信」，而是**根本不允许跨兄弟引用**——你的可操作范围在结构上就是你的子树。子 Agent 也只能由父创建并拥有（`harness/pico3/kinds/task-api.ts:18-25` 的 `createOwnedConversation`）。
+
+仓库里确实有一处带 `peer` 语义的代码：`experimental/coordinator.ts` 定义了 `peer_connected` / `peer_disconnected` / `message` 等消息类型（`:20-26`），并维护 `const peers = new Map<string, RoutedPeer>()`（`:291`）。但它的 peer 是**每个 session 一个的 worker 进程**，路由是「一个 server 中心 + N 个 worker」的星形，且只有 server 能广播——`handleRoutedMessage` 对 `broadcast` 的处理是 `if (from !== "server") throw new Error("Only the current server may broadcast")`（`coordinator.ts:424-445`）。**这是会话级的进程路由，不是 Agent 级的对等通信**，两者不应混读。
+
+#### 4.5.2 deepseek-harness —— 两个包给出两个答案
+
+dsh 的答案必须分两层读，因为它的两个包给的结论**正好相反**。
+
+**委派包（`subagent`）：严格父子。** `send_message` 的工具描述把边界写得没有余地——只能发给「直接可续子」，且只有当自己是「常驻可续子」时才能发给直接父（`packages/subagent/tool-subagent-control/src/index.ts:31-36`）。更权威的表述在子系统文档里：
+
+> Authority comes from the exact live sender. Parent-to-child delivery requires the target's `SessionHeader.parentSession` to name the sender; child-to-parent delivery requires the sender's resident Activation to name the target. Siblings, ancestors beyond one edge, self-targets, stale Agent objects, and one-shot children are rejected.
+> —— `docs/subsystems/subagent.md:150`
+
+配套的可见性收窄：`list_agents` 会走完整棵子树，但明确告知模型「You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only」（`tool-subagent-control/src/list-agents.ts:99-101`）。深度也在这里冻结：`maxDepth` 默认 1（`subagent/subagent/src/index.ts:202`），且持久化的父 header 深度是**单调下界**——运行时的 `subagentDepth` 只能加深、不能降低，理由是「a resumed child arrives with fresh options, and counting it from zero would let it delegate as if it were top-level」（`subagent/src/depth.ts:19-24`）。
+
+**实验包（`experimental/agent-team`）：真正的对等。** 这里任意成员可以给任意成员或 Lead 发消息，离线成员的消息排队、恢复后送达——「Messages are never lost and never delivered twice」（`packages/experimental/agent-team/README.md:69`）。投递路径有一条值得注意的细节：Lead 的投递直接调 `Agent.steer()`，而 teammate 的投递走「continuation owner 的 host-only Steer 路径」，从而**在不冒用 Lead 身份的前提下授权 Lead→子这条边**——原文写着「Sibling messages never impersonate the Lead through the public adjacent-Agent messaging operation.」（`README.md:134`）。实现侧对应 `steerHostSubagentPrompt`（`subagent/subagent/src/internal.ts:94`），以及 mailbox 里「先登记分派、再释放根事务」的顺序保证（`agent-team/src/mailbox.ts:145`、`:262`）。
+
+**共享任务板**只存在于实验包：模型侧工具是一整套 `team_task_*`（`spawn_teammate` `tool-agent-team/src/index.ts:176`、`send_message` `:208`、`list_agents` `:225`、`interrupt_agent` `:270`、`team_task_create` `:281`、`team_task_list` `:306`、`team_task_get` `:338`、`team_task_update` `:353`）。认领是**带版本号的乐观并发**：先比 `expectedRevision`，不一致直接抛 `TEAM_TASK_STALE_REVISION`（`agent-team/src/task-board.ts:119-124`）；`claim` 分支再检查「已被他人占用」与「前置依赖未就绪」两种情况（`task-board.ts:133-142`）。名册视图是 `TeamMemberView`，成员角色只有 `lead | teammate` 两种、状态四值（`agent-team/src/types.ts:58-65`）。
+
+**但组织形态是被刻意压扁的**：每个运行时根**隐式**就是自己 Team 的 Lead（`TeamId` 等于 `SessionId`，没有创建事件），而名册是「**Flat immutable roster** — only the Lead creates direct teammates; there is no nested Team, rename, deletion, or name reuse」（`README.md:128`、`:204`）。最后是可兑现性的边界，也是必须如实写出的一条：投递保证是「进程本地重试 + 目标会话去重」，**不是跨进程 exactly-once**——「Mailbox is not cross-process exactly-once — concurrent harness processes over one Team are unsupported.」（`README.md:132`、`:206`）。
+
+#### 4.5.3 codex —— 消息板是论坛，不是任务队列
+
+codex 的对等能力由两代工具面承载：V1 把五个工具包在命名空间 `multi_agent_v1` 里（`handlers/multi_agents_spec.rs:14`），V2 改为扁平工具并默认放在 `collaboration` 命名空间下——`send_message`、`followup_task`、`interrupt_agent`、`list_agents`（`tools/spec_plan.rs:671-680`，各工具定义见 `multi_agents_spec.rs:185`、`:296`、`:342`）。**关键区别是「兄弟能不能被直接点名」**：目标解析支持绝对路径，`AgentPath::resolve` 对以 `/` 开头的引用直接构造绝对路径（`protocol/src/agent_path.rs:59-73`），解析入口在 `agent/control/target.rs:30`、`:42`。也就是说 codex 的兄弟通信**不需要经过父中转**——仓库里有一组单测直接叫 `v2_sibling_reload_preserves_shared_instructions_after_root_unloads`（`core/src/agent/control_tests.rs:1406`），并在用例里让一个 sibling 唤醒另一个 sibling（`:1482`、`:1494`）。相对引用则**不能上溯**：`.` 与 `..` 是保留名，直接报错（`agent_path.rs:132-134`）。
+
+**载体是持久化的 SQLite 消息板**：数据库文件固定为 `agent_message_board_1.sqlite`（`ext/agent-message-board/src/local.rs:55`），表结构包含 `channels` / `posts` / `subscriptions` / `deleted_boards`。模型侧有 9 个工具，名字写在一处常量里：`create_channel`、`get_channels`、`list_threads`、`search_posts`、`read_thread`、`read_post`、`subscribe`、`unsubscribe`、`post`（`agent-message-board/src/tools/spec.rs:10-20`）。**这是一块公告板（频道 / 帖子 / 订阅 / 搜索），不是一块可以「认领」的待办队列**——用 4.5 的框架说：codex 有「组队」，但没有「共享任务板」。
+
+投递语义是 codex 在这一层最锐利的设计。`MessageDeliveryMode` 只有两个值：`QueueOnly`（投递到邮箱但**不启动**空闲 Agent）与 `TriggerTurn`（投递到进行中的 turn，或唤醒空闲 Agent）（`core/src/agent/types.rs:56-61`）。`send_message` 用前者、`followup_task` 用后者，**把「传话」和「派活」明确分成两个工具**。板上的通知更严格：`inject_if_running` 加 `trigger_turn=false`，接收方不在跑就返回 `SkippedInactive`（`core/src/agent_message_board.rs:143-152`），模块头注释写着「This adapter never starts or restores recipients and never queues a notification for an idle agent.」。会话内的邮箱则是内存态：`InputQueue` 的 `mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>`（`core/src/session/input_queue.rs:80`）。
+
+**权限只能裁不能加**这一条在这里有最直接的文字依据：`agent/role.rs` 的模块注释是「Roles may customize the child or reduce its capabilities, but never replace the parent session's authority.」（`core/src/agent/role.rs:1-4`），实现上只接受**关闭**白名单内的特性（`:91-98`），权限档案按交集收敛（`protocol/src/permission_profile_intersection.rs:31`）。规模上限方面：V1 并发默认 6（`core/src/config/mod.rs:251`），V2 默认 4 且生效容量是「上限减一」（`:1582`）；V2 超容量时用 LRU 逐出最久未用的驻留 Agent，而不是直接拒绝（`agent/control/residency.rs:80-104`）。
+
+#### 4.5.4 Claude-Code —— 文件邮箱 + 文件锁任务板
+
+CC 的队友机制最「土」，也因此最容易照着做：**消息存在文件里，并发靠文件锁**。
+
+**邮箱载体**是每个队友一个 JSON 文件，路径 `~/.claude/teams/{team_name}/inboxes/{agent_name}.json`（`src/utils/teammateMailbox.ts:4-6`、`getInboxPath` `:56-62`）。写入用 `proper-lockfile` 加锁后再重读追加（`:165`），消息结构是 `{ from, text, timestamp, read, color?, summary? }`（`:43-51`）。投递是**轮询式、非事件驱动**：进程式队友/领导由 `useInboxPoller` 按 `INBOX_POLL_INTERVAL_MS = 1000` 轮询（`src/hooks/useInboxPoller.ts:107`），进程内队友由 `waitForNextPromptOrShutdown` 按 500 ms 轮询（`src/utils/swarm/inProcessRunner.ts:697`）。
+
+**三种后端**由 `BackendType = 'tmux' | 'iterm2' | 'in-process'` 声明（`src/utils/swarm/backends/types.ts:9`），选择优先级写成了文档注释：在 tmux 内就用 tmux（即使在 iTerm2 里）、iTerm2 且 `it2` 可用就用 iTerm2、否则 tmux 外部会话、都不可用才回退 in-process（`backends/registry.ts:128-140`、`:159`）。非交互 `-p` 模式强制走 in-process。
+
+**共享任务板是真的任务队列**：任务实体是 `{ id, subject, description, activeForm?, owner?, status, blocks[], blockedBy[], metadata? }`（`src/utils/tasks.ts:76-89`），状态机三值 `pending | in_progress | completed`，存储为 `~/.claude/tasks/{taskListId}/{taskId}.json`。认领的原子性靠**文件锁**：`claimTask` 在锁内重读任务、检查 `owner` 与 `blockedBy` 后再写 `owner`（`tasks.ts:541-570`）；需要「该 agent 是否已忙」这种跨任务的原子检查时，改用**任务列表级锁**的 `claimTaskWithBusyCheck`（`tasks.ts:618-640`）。
+
+**组织形态同样是扁平且封闭的**：名册是扁平数组，队友**不能再开队友**——`if (isTeammate() && teamName && name) throw new Error('Teammates cannot spawn other teammates — the team roster is flat. ...')`（`src/tools/AgentTool/AgentTool.tsx:272-275`），提示词侧也重申了这条（`src/tools/AgentTool/prompt.ts:277`）；进程内队友额外禁止再开后台 Agent，因为其生命周期绑定在 leader 进程上（`AgentTool.tsx:276-280`）。队友之间可以直接 DM，而且**领导能看到摘要**：「Peer DM visibility. When a teammate sends a DM to another teammate, a brief summary is included in their idle notification.」（`src/tools/TeamCreateTool/prompt.ts:72`）。发送入口是 `SendMessage`，收件人可以是队友名、`"*"` 广播，或在 `UDS_INBOX` 门控下用 `uds:<socket>` / `bridge:<session-id>` 跨会话寻址（`src/tools/SendMessageTool/SendMessageTool.ts:67-78`、`src/utils/peerAddress.ts:8-14`）；投递语义明确为「消息会入队，在接收方下一个工具轮次排空——没有 busy 状态」（`src/tools/SendMessageTool/prompt.ts:20`）。
+
+**门控必须标清楚**：团队总开关是 `isAgentSwarmsEnabled()` —— 内部构建（`USER_TYPE === 'ant'`）恒开，外部需要 `--agent-teams` 或 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`，且还要过 GrowthBook 的 killswitch（`src/utils/agentSwarmsEnabled.ts:24-40`）；`TeamCreate` 与 `SendMessage` 的 `isEnabled()` 都返回它。跨会话寻址与名册发现是 `feature('UDS_INBOX')`，而 `ListPeersTool` 的**实现文件在还原版里不存在**（`src/tools.ts:126-128` 直接 `require` 一个磁盘上不存在的 `ListPeersTool.js`）。因此凡是引用 `UDS_INBOX` 与 `ListPeers` 的结论，都应标 `[门控]` 与「还原不完整」。
+
 ---
 
 ## 五、横向对比矩阵
@@ -722,9 +796,10 @@ sequenceDiagram
 | 父→子（增量指令） | 无 | `send_message` | `send_input` / `send_message` | SendMessage | 3/4 |
 | 子→父（结果） | 进程 stdout | `SubagentResult` | `notify_parent_of_terminal_turn` | tool_result / `<task-notification>` | 4/4 方式不同 |
 | 父观察子进度 | 无 | `list_agents` | `list_agents` | `TaskOutput`（阻塞/轮询） | 3/4 |
-| 平级通信 | 无 | `send_message`（限直接父/子） | 消息板（channel/thread/subscription） | teammate + mailbox | 3/4 |
-| 广播 | 无 | 无 | 有（`agents_to_notify`，非默认） | `to: "*"` | 2/4 |
-| 空闲 Agent 是否被唤醒 | — | 否 | **明确否**（通知与 turn 原子绑定） | 否（终态丢弃） | 2/2 一致 |
+| 平级通信 | 无 | 委派包内**否**（`send_message` 限直接父/子）；实验包 `agent-team` 有 | 消息板 + 直接点名兄弟（绝对路径） | teammate + mailbox | 2/4 正式支持 |
+| 广播 | 无 | 实验包内任意成员可发任意成员 | 有（`agents_to_notify`，非默认） | `to: "*"` | 2/4 |
+| 共享任务板 | 无 | 实验包 `team_task_*` | 无 | `TaskCreate` / `TaskList` / `TaskUpdate` / `TaskGet` | 2/4 |
+| 空闲 Agent 是否被唤醒 | — | 否（`QueueOnly` 语义等价） | **明确否**（通知与 turn 原子绑定） | 否（终态丢弃） | 2/2 一致 |
 
 ### 5.5 资源配额
 
@@ -744,6 +819,19 @@ sequenceDiagram
 | 与父的关联 | — | header `parentSession` + `origin:'subagent'` | 图中 parent→child 边 | `parentSessionId` | 3/4 有显式父子关联 |
 | 恢复能力 | 无 | **cold resume**（descriptor v3） | 图可查，env 驱逐后可恢复 | 从 sidechain 重建 | 3/4 可恢复，机制各异 |
 | 输出形态 | 进程 stdout | Result 对象 | 父收通知 | `outputFile` + `outputOffset` 增量读 | 4/4 都有，形态各异 |
+
+### 5.7 对等协作的载体与拓扑
+
+| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+|---|---|---|---|---|---|
+| 拓扑 | 树，且兄弟不可引用 | 委派包=树；实验包=Lead + 扁平星形 | 树 + 兄弟可直达（绝对路径） | Lead + 扁平网 | 0/4 一致 |
+| 消息载体 | — | 持久化 journal（实验包） | SQLite 消息板 + 会话内内存邮箱 | 文件系统 JSON + 文件锁 | 0/4 一致 |
+| 投递方式 | — | 事务内先登记后分派 | 事件注入 + `inject_if_running` | 轮询（1000 ms / 500 ms） | — |
+| 共享任务板 | 无 | ✓（实验包） | 无（消息板是论坛） | ✓ | 2/4 |
+| 认领的原子性 | — | 版本号 CAS（`expectedRevision`） | — | 文件锁 + 锁内重读校验 | 2/2 都保证 |
+| 名册发现 | — | `list_agents`（实验包任意成员） | `list_agents`（全树 live） | `ListPeers`（`[门控]`，还原不全） | 2/4 可用 |
+| 队友能否再组队 | — | 否（扁平不可变名册） | 由 feature 与角色决定 | 否（扁平 roster） | 2/2 扁平 |
+| 投递保证 | — | 进程本地重试 + 去重（**非跨进程 exactly-once**） | 不唤醒空闲 Agent | 不唤醒（终态丢弃） | — |
 
 ---
 
@@ -823,6 +911,15 @@ sequenceDiagram
 - **依据**：`host.rs:17-37`；`agent_message_board.rs:143-189`；`local.rs:166-175`；`LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84`。
 - **设计理由**：**「给 Agent 发消息」实质上是一张隐式的 turn 触发器**。若允许消息唤醒空闲 Agent，就产生了「谁来为这次唤醒付费、若唤醒风暴如何处理」的失控面。codex 的做法是把通知降格为**纯投递**——只在接收方本来就要跑下一轮时顺带送达，从根上消除了唤醒风暴与跨 turn 状态泄漏。
 
+### 6.10 共享任务板的争用与重复认领
+
+- **deepseek-harness**：认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`experimental/agent-team/src/task-board.ts:119-124`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:133-142`）。
+- **Claude-Code**：认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`）。
+- **codex**：不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`）。
+- **pi**：不适用——无对等协作，跨会话范围被 `subtree` 断言限制在自身子树内（`harness/pico3/harness.ts:329-340`）。
+
+**设计理由**（`[推断]`，依据两家实现对照）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
+
 ---
 
 ## 七、设计建议
@@ -845,6 +942,7 @@ sequenceDiagram
 5. **提供「可续子 Agent」** —— dsh 的 continuable + `send_message` 让父可以追问、修正、给增量指令；一次性子 Agent 只适合「分头搜索」这类无状态任务。
 6. **角色只做减法** —— codex 的 `explorer`（只读、鼓励并行多开）与 `worker`（强调写入所有权）是一个好的角色划分起点。
 7. **子 Agent 的资源要追踪「它创建了什么」** —— 不只是回收 agent 对象，还要回收它遗留的进程、连接、临时目录。
+8. **共享任务板用「版本号 + 显式冲突错误」，而不是阻塞锁**（学 dsh `task-board.ts:119`）：Agent 场景下重试廉价、等待昂贵；而且冲突错误本身就是一条可读信号，能直接进入模型的下一轮输入，让「谁拿到了这份工作」变成模型能看见的事实。CC 的文件锁方案在跨进程场景下更简单，但代价是排队。
 
 ### 7.3 权衡（没有最优解，取决于场景）
 
@@ -852,6 +950,7 @@ sequenceDiagram
 2. **同步 vs 异步回灌**：`tool_result` 让模型在同一个 turn 里直接看到结果（简单、可预测）；入队消息允许父先去做别的事（灵活、但需要额外机制保证不重复通知）。Claude-Code 两者都保留，说明**这取决于任务时长分布**。
 3. **进程内 vs 进程外**：进程内省启动开销、可共享状态，但有内存爆炸先例；进程外隔离彻底，但每次委派都要付出进程启动 + 协议握手成本。
 4. **平级协作要不要做**：codex 的消息板与 Claude-Code 的 teammate 都很复杂（3,259 / 数百行），且都需要额外的组织约束（扁平 roster、成员校验）。**如果任务是「主从委派」而非「多 Agent 协作」，不做平级通信是更划算的选择**——pi 就是这条路。
+5. **对等协作的载体选型**：内存（最快，进程一死就丢）、文件系统（可读可查，需要锁，跨进程天然可用）、数据库（可检索可订阅，引入依赖与迁移成本）。codex 选 SQLite 是为了「频道 / 帖子 / 订阅 / 搜索」这套论坛语义；CC 选 JSON 文件是因为它的队友本来就可能是**不同终端里的不同进程**，文件是它们唯一共享的东西。**若目标只是「几个进程互相传话」，文件比数据库更划算；若要「历史可检索、可订阅」，数据库才值得。**
 
 ### 7.4 反例（明确不该做什么）
 
@@ -861,6 +960,7 @@ sequenceDiagram
 4. **不要让子 Agent 拥有父没有的权限** —— 三种实现（版本冻结 / feature 关闭 / 白名单）都指向同一条铁律。一旦允许扩权，「父 Agent 的权限边界」这个安全假设就失效了。
 5. **不要把「子 Agent 完成」等同于「资源已释放」** —— codex 的额度直到 `close` 才归还，这是有意的：若完成即释放，父就无法再追问。但反过来说，**若你的父 Agent 不会追问，就应当完成即释放**，否则额度会被僵尸占满。
 6. **不要用「分支切换」冒充「子 Agent 委派」** —— pi 的案例说明这是两件事：分支是**同一上下文内的视图切换**（串行、共享历史、无新实例），委派是**新上下文窗口**（隔离、可并行）。把两者混为一谈会导致「以为在并行探索、实际在串行切换」。
+7. **不要拿「进程级 peer 总线」冒充「Agent 级对等通信」** —— 对照 pi 的 `experimental/coordinator.ts`：它的 peer 是 session worker **进程**，拓扑是星形，且只有中心节点能广播（`coordinator.ts:424-445`）。真正的对等协作需要「成员身份 + 可达性 + 投递保证」三件套，进程总线一件都没提供；把两者混读会让架构判断失准。
 
 ---
 
@@ -882,6 +982,9 @@ sequenceDiagram
 | `packages/coding-agent/examples/extensions/subagent/index.ts` | 300-307 / 344-350 | spawn 独立 pi 进程（`--no-session`） |
 | `packages/coding-agent/examples/extensions/subagent/index.ts` | 33-34 / 219-237 / 645 | `MAX_PARALLEL_TASKS=8` / `MAX_CONCURRENCY=4` |
 | `packages/coding-agent/examples/extensions/subagent/index.ts` | 8-10 / 471-721 | single / parallel / chain 三种编排 |
+| `packages/agent/src/harness/pico3/harness.ts` | 329-340 / 251 / 270 | `subtree` 归属断言（兄弟之间不可引用） |
+| `packages/agent/src/harness/pico3/kinds/task-api.ts` | 18-25 | 子会话只能由父创建并拥有 |
+| `packages/coding-agent/src/experimental/coordinator.ts` | 20-26 / 291 / 424-445 | 会话级 peer 总线（星形，仅中心可广播；非 Agent 级对等通信） |
 
 ### deepseek-harness
 
@@ -909,6 +1012,15 @@ sequenceDiagram
 | `packages/subagent/tool-subagent-control/src/list-agents.ts` | 87 / 101-106 | `list_agents` / scope 语义 |
 | `packages/core/session/src/types.ts` | 123 | `delegationDepth` 字段 |
 | `packages/core/agent/src/index.ts` | 84 | `AgentOptions.subagentDepth` |
+| `packages/subagent/tool-subagent-control/src/index.ts` | 31-36 | `send_message` 仅直接父/直接可续子 |
+| `packages/subagent/tool-subagent-control/src/list-agents.ts` | 99-101 | 名册遍历全树，但仅 depth-1 可发消息 |
+| `docs/subsystems/subagent.md` | 150 | 权威边界：兄弟 / 隔代 / 自身 / 一次性子全部拒绝 |
+| `packages/subagent/subagent/src/depth.ts` | 19-24 | 深度单调（可加深、不可降低） |
+| `packages/experimental/agent-team/README.md` | 69 / 128 / 132 / 134 / 204 / 206 | 任意成员互发 / 隐式 Lead / 投递保证与限制 / 兄弟不冒用 Lead / 扁平名册 |
+| `packages/experimental/agent-team/src/mailbox.ts` | 117 / 145 / 262 | 成员校验与目标解析 / 先登记后释放事务 / host-only 投递 |
+| `packages/experimental/agent-team/src/task-board.ts` | 119 / 133 | 版本号 CAS / `claim` 语义 |
+| `packages/experimental/agent-team/src/types.ts` | 58-65 | `TeamMemberView`（角色与状态） |
+| `packages/experimental/tool-agent-team/src/index.ts` | 176 / 208 / 225 / 270 / 281 / 306 / 338 / 353 | 团队工具清单（`spawn_teammate` / `send_message` / `team_task_*` 等） |
 
 ### codex
 
@@ -916,7 +1028,13 @@ sequenceDiagram
 |---|---|---|
 | `codex-rs/core/src/agent/` | 全目录 | **主体实现（12,298 行）** |
 | `codex-rs/core/src/tools/handlers/multi_agents*.rs` | 全 | 工具 handler（约 5,300 行） |
-| `codex-rs/core/src/agent/types.rs` | 11-19 | `AgentMetadata` |
+| `codex-rs/core/src/agent/types.rs` | 11-19 / 56-61 | `AgentMetadata` / `MessageDeliveryMode` |
+| `codex-rs/protocol/src/agent_path.rs` | 15 / 59-73 / 132-134 | `AgentPath` / 绝对路径解析 / `.` 与 `..` 为保留名 |
+| `codex-rs/core/src/agent/control/target.rs` | 30 / 42 | 目标引用与绝对路径解析入口 |
+| `codex-rs/core/src/agent/control_tests.rs` | 1406 / 1482 | 兄弟直达的单测证据 |
+| `codex-rs/ext/agent-message-board/src/local.rs` | 55 | 消息板 SQLite 文件与表结构 |
+| `codex-rs/ext/agent-message-board/src/tools/spec.rs` | 10-20 | 消息板 9 个工具名 |
+| `codex-rs/core/src/session/input_queue.rs` | 80 | 会话内邮箱（内存待决队列） |
 | `codex-rs/core/src/agent/role.rs` | 1-4 / 91-105 / 341-401 / 405-413 | 权限哲学 / 只能关闭 feature / 内置角色 / assets |
 | `codex-rs/core/src/agent/registry.rs` | 80-86 / 89-108 / 330-346 / 386-395 | 深度判定 / CAS 计数 / 上限 / `Drop` 回收 |
 | `codex-rs/core/src/agent/control/interrupt.rs` | 17-52 | 中断语义（拒绝 root 与自身） |
@@ -969,3 +1087,13 @@ sequenceDiagram
 | `src/tools/TaskUpdateTool/TaskUpdateTool.tsx` | 37-65 / 188-199 / 277-298 | 输入 schema / owner 自动置 / mailbox 通知 |
 | `src/services/tools/toolOrchestration.ts` | 8-12 / 26-67 | 并发上限 10 / 只读批并发 |
 | `src/utils/swarm/permissionSync.ts` / `utils/teammateMailbox.ts` | — | 团队 mailbox 与权限同步 |
+| `src/utils/teammateMailbox.ts` | 4-6 / 43-51 / 56-62 / 165 | 邮箱路径 / 消息结构 / `getInboxPath` / 加锁写入 |
+| `src/hooks/useInboxPoller.ts` | 107 | 领导与进程式队友的轮询间隔（1000 ms） |
+| `src/utils/swarm/inProcessRunner.ts` | 697 | 进程内队友的轮询间隔（500 ms） |
+| `src/utils/swarm/backends/types.ts` | 9 | 三种后端类型 |
+| `src/utils/swarm/backends/registry.ts` | 128-140 / 159 | 后端选择优先级 |
+| `src/utils/tasks.ts` | 76-89 / 541-570 / 618-640 | 任务实体与状态机 / `claimTask` / `claimTaskWithBusyCheck` |
+| `src/tools/TeamCreateTool/prompt.ts` | 72 | 同伴 DM 可见性（领导看到摘要） |
+| `src/tools/SendMessageTool/SendMessageTool.ts` | 67-78 | 收件人语法（含 `[门控: UDS_INBOX]` 的跨会话寻址） |
+| `src/utils/agentSwarmsEnabled.ts` | 24-40 | 团队总开关与 killswitch |
+| `src/tools.ts` | 126-128 | `ListPeersTool` 门控与还原缺口 |
