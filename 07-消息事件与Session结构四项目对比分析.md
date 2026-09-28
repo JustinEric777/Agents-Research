@@ -1,4 +1,4 @@
-# 第 5 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
+# 第 7 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
 
 本章是 L1–L4 全部设计差异的**根源层**：一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建。四个项目在这里给出了四种互不兼容的世界观——**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。不先读懂这一层，前面几章的很多结论都会缺根因。
 
@@ -58,7 +58,7 @@
               msg1 ─▶ msg2 ─▶ msg3 ─▶ leaf
 ```
 
-**图 5-1**：四种数据模型。它们是四种互不兼容的世界观，而不是同一事物的四种实现——这也解释了为什么前三章里到处都是「同一问题、四种答案」。
+**图 7-1**：四种数据模型。它们是四种互不兼容的世界观，而不是同一事物的四种实现——这也解释了为什么前三章里到处都是「同一问题、四种答案」。
 
 ```text
         ┌───── L1 主循环（组装请求） · L4 压缩（替换历史） ────┐
@@ -124,7 +124,7 @@
 └───────────────────────────────────────────────────────────┘
 ```
 
-**图 5-2**：事实源与视图的分离。其余三家都是「历史即事实」——压缩会真的改写历史；只有 dsh 让压缩变成一次「换视图」操作，从而零成本获得回滚能力。
+**图 7-2**：事实源与视图的分离。其余三家都是「历史即事实」——压缩会真的改写历史；只有 dsh 让压缩变成一次「换视图」操作，从而零成本获得回滚能力。
 
 ### 4.1 pi —— 树 + 分支游标
 
@@ -162,13 +162,13 @@ TextContent / ThinkingContent / ImageContent / ToolCall / ToolResultMessage
 export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 ```
 
-**SystemMessage 是「增量变更」载体**（pi 独有）：`sections?: Record<string, string | null>`（命名段落，后续消息按名替换/删除）+ `toolsAdded`/`toolsRemoved`（工具集变更，见 第 3 章）。
+**SystemMessage 是「增量变更」载体**（pi 独有）：`sections?: Record<string, string | null>`（命名段落，后续消息按名替换/删除）+ `toolsAdded`/`toolsRemoved`（工具集变更，见 第 5 章）。
 
 宿主消息（不进 `ai` 包）在 `harness/messages.ts`：`BashExecutionMessage`（`:19`）、`BranchSummaryMessage`（`:40`）、`CompactionSummaryMessage`（`:47`）。
 
 #### 4.1.4 独有能力：并行探索
 
-树模型允许「离开主干去探索」——`BranchSummaryEntry` 在离开分支前生成摘要，回树时恢复（详见 第 4 章 4.1.6）。**dsh（线性日志）与 codex（单线回滚）与 CC（消息 DAG 但无分支摘要）都没有这个语义**。
+树模型允许「离开主干去探索」——`BranchSummaryEntry` 在离开分支前生成摘要，回树时恢复（详见 第 6 章 4.1.6）。**dsh（线性日志）与 codex（单线回滚）与 CC（消息 DAG 但无分支摘要）都没有这个语义**。
 
 ---
 
@@ -193,7 +193,7 @@ export type SessionEvent<T> = { ... }
 ignorable?: true      // ← 关键守卫字段
 ```
 
-**三件套声明合并**：`SessionEventMap`（`types.ts:281`）、`ContentBlockMap`（`llm/types.ts:138`）、`MessageSourceMap`（`llm/message.ts:136`）。插件可 `declare module` 增类型，**核心零改动**——compaction 的四个事件就是这样挂进来的（第 4 章）。
+**三件套声明合并**：`SessionEventMap`（`types.ts:281`）、`ContentBlockMap`（`llm/types.ts:138`）、`MessageSourceMap`（`llm/message.ts:136`）。插件可 `declare module` 增类型，**核心零改动**——compaction 的四个事件就是这样挂进来的（第 6 章）。
 
 #### 4.2.2 消息：强制的 source + 语义轴
 
@@ -255,7 +255,7 @@ pub enum ResponseItem {
 // :2179 FunctionCallOutputPayload（struct 版）
 ```
 
-序列化后**直接作为请求体**发送（与 `ToolSpec` 同理，见 第 3 章）。`MessagePhase`（commentary / final_answer）来自 provider 的分类。
+序列化后**直接作为请求体**发送（与 `ToolSpec` 同理，见 第 5 章）。`MessagePhase`（commentary / final_answer）来自 provider 的分类。
 
 #### 4.3.2 TurnItem：UI/协议视图（20+ 型）
 
@@ -271,7 +271,7 @@ pub enum TurnItem {
 pub struct ContextCompactionItem { ... }
 ```
 
-**没有事件日志**：`TurnItem` 是对外发布的 item 类型（app-server 协议、UI 视图、扩展 item）。类型丰富反映 codex 作为完整 CLI/IDE 产品的定位——UI 需要知道「发生了什么活动」。`ContextCompactionItem` 说明**压缩被建模为一次可见的 turn**（呼应 第 4 章）。
+**没有事件日志**：`TurnItem` 是对外发布的 item 类型（app-server 协议、UI 视图、扩展 item）。类型丰富反映 codex 作为完整 CLI/IDE 产品的定位——UI 需要知道「发生了什么活动」。`ContextCompactionItem` 说明**压缩被建模为一次可见的 turn**（呼应 第 6 章）。
 
 #### 4.3.3 ContextManager：Arc COW + 三版本号
 
@@ -460,7 +460,7 @@ normalizeMessagesForAPI()
 | 未知类型 | 编译期 union | **`ignorable` 守卫（fail-closed）** | serde 失败即错 | 宽松类型（静默容忍） | 1/4 |
 | 序号完整性 | `seq` 单调 | **branded 连续 seq** | Vec 位置 | 文件行序 + uuid | 1/4 |
 | 悬空引用 | `findTurnStartIndex` 抛 `SessionInvariantError` | `sourceEventSeqs` 校验 | `response_id` 元数据 | `buildConversationChain` 截断 + 环检测 | 4/4 有检测 |
-| 损坏恢复 | 抛错 | 合成 closer（第 6 章） | 跳过 + 计数 | 静默 try/catch + 部分链 | 0/4 |
+| 损坏恢复 | 抛错 | 合成 closer（第 8 章） | 跳过 + 计数 | 静默 try/catch + 部分链 | 0/4 |
 
 ---
 
@@ -498,7 +498,7 @@ normalizeMessagesForAPI()
 
 | 项目 | 保证方式 |
 |---|---|
-| pi | 构造时保证（每条 toolCall 必生成结果，见 第 2 章「零逃逸」） |
+| pi | 构造时保证（每条 toolCall 必生成结果，见 第 4 章「零逃逸」） |
 | dsh | 事件层校验：`tool/result` 必须引用 `tool/call` 的 seq |
 | codex | payload 类型校验 + `Fatal` |
 | Claude-Code | **`ensureToolResultPairing` 独立兜底**（`:5133`，7 路修复） |
@@ -524,9 +524,9 @@ normalizeMessagesForAPI()
 ### 6.7 resume 已压缩会话
 
 - **Claude-Code**：`findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`）。
-- **codex**：`InitialHistory::Resumed` + `CompactedItem` 回填（见 第 6 章）。
+- **codex**：`InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章）。
 - **dsh**：`foldSurface` 折叠出不变量。
-- **pi**：`newestCompactionIndex` 检测已有更新的压缩 entry 即跳过（见 第 4 章）。
+- **pi**：`newestCompactionIndex` 检测已有更新的压缩 entry 即跳过（见 第 6 章）。
 
 ### 6.8 会话配置与历史不匹配
 
@@ -551,7 +551,7 @@ normalizeMessagesForAPI()
 ### 7.2 推荐（按收益排序）
 
 1. **事实源与视图分离**（学 dsh）：日志 append-only，模型可见序列是「投影」。上限最高——支持压缩替换、回滚、多视图（模型视图 vs 用户 transcript 视图）。成本：需要 `foldSurface`/`deriveEventMessage` 全套。
-2. **给消息加 `source` 溯源字段**（学 dsh `llm/message.ts:136`）：压缩后仍能回答「这条是工具产的还是用户写的」。这是 第 4 章 checkpoint source 的前提。
+2. **给消息加 `source` 溯源字段**（学 dsh `llm/message.ts:136`）：压缩后仍能回答「这条是工具产的还是用户写的」。这是 第 6 章 checkpoint source 的前提。
 3. **语义与展示解耦**（学 dsh `ContextForm`）：content 声明「是什么」，消费者决定「长什么样」。
 4. **会话配置随会话落盘**（学 dsh `agentPreset`/`delegationDepth`）：凡决定会话语义的配置都必须持久化。
 5. **把「非展示类记录」做成独立消息类型**（学 CC 的 Progress/HookResult/Tombstone）：比塞进普通消息的字段更清晰，也让消费者可以做类型穷尽检查。

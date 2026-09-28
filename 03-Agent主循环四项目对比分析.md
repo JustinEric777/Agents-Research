@@ -1,4 +1,4 @@
-# 第 1 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
+# 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。四个项目在这一层的骨架几乎同源——都是「外层续接 + 内层工具」的双层结构——但**「谁才是状态的主人」给出了四个完全不同的答案**：内存闭包、append-only 日志、`ContextManager`、显式传递的 `State` 对象。这个分歧决定了后面每一层的设计走向。
 
@@ -6,7 +6,7 @@
 >
 > **前置依赖**：无（运行时链路的第一环）。
 >
-> **跨层联动**：12 —— 见 2.3 末行。本章每轮要发出去的那份前缀由启动区组装，而「重算落在循环内还是循环外」会反过来改变循环的形状。
+> **跨层联动**：02 —— 见 2.3 末行。本章每轮要发出去的那份前缀由启动区组装，而「重算落在循环内还是循环外」会反过来改变循环的形状。
 >
 > **分析对象**：
 > - **pi** —— `packages/agent/src/agent-loop.ts`（TypeScript，事件流驱动）
@@ -59,7 +59,7 @@
                     L6 持久化与恢复（跨进程存活）
 ```
 
-**图 1-1**：L1 在运行时栈中的位置。主循环本身极薄，它的复杂度全部来自「它要向谁取状态」——这个答案由下面的 L2–L6 决定。
+**图 3-1**：L1 在运行时栈中的位置。主循环本身极薄，它的复杂度全部来自「它要向谁取状态」——这个答案由下面的 L2–L6 决定。
 
 ```text
         ┌───────────── 上游：用户 / 上层任务 ──────────────────────────┐
@@ -96,7 +96,7 @@
 | 压缩是否在循环内 | 否（回调外挂） | 否（事件驱动） | **是**（直接调） | **是**（流水线） |
 | 提示词重算的位置 | 循环外（`agent-session` 每轮差分） | **循环内**（`preStep`，每步投影） | **循环内**（每步记一次世界状态） | 循环外（`ask()` 内重建） |
 
-> 最后一行指向启动区第 12 章：本章每轮发出去的那份前缀由该层组装，四家的重算与提交时机见第 12 章 4.1.4、4.2.2、4.3.3、4.4.3。这一步落在循环内还是循环外，会反过来改变循环的形状——dsh 与 codex 把它做成了循环内的一个显式步骤（`preStep` / `record_step_world_state_if_changed`），因此前缀稳定性是循环自身的产物；pi 与 Claude-Code 放在循环之外，靠差分补丁消息与段级缓存**间接**维持，循环本身对此无感知。
+> 最后一行指向启动区第 2 章：本章每轮发出去的那份前缀由该层组装，四家的重算与提交时机见第 2 章 4.1.4、4.2.2、4.3.3、4.4.3。这一步落在循环内还是循环外，会反过来改变循环的形状——dsh 与 codex 把它做成了循环内的一个显式步骤（`preStep` / `record_step_world_state_if_changed`），因此前缀稳定性是循环自身的产物；pi 与 Claude-Code 放在循环之外，靠差分补丁消息与段级缓存**间接**维持，循环本身对此无感知。
 
 ---
 
@@ -140,7 +140,7 @@ flowchart TD
     G -- "否" --> A
 ```
 
-**图 1-2**：四家共用的主循环骨架。四家在此完全一致的主干是「无工具调用即完成」；差异全部落在右下的「次要出口」分支——出口数量从 3 个（pi）到 11+ 个（Claude-Code）。
+**图 3-2**：四家共用的主循环骨架。四家在此完全一致的主干是「无工具调用即完成」；差异全部落在右下的「次要出口」分支——出口数量从 3 个（pi）到 11+ 个（Claude-Code）。
 
 ### 4.1 pi —— 双层 while + 事件流
 
@@ -460,7 +460,7 @@ if (streamingFallbackOccured) {
 }
 ```
 
-用墓碑而不是删除，是因为 transcript 是 append-only、有多个消费者（UI / 磁盘 / SDK）。详见 第 5 章。
+用墓碑而不是删除，是因为 transcript 是 append-only、有多个消费者（UI / 磁盘 / SDK）。详见 第 7 章。
 
 ---
 
@@ -562,14 +562,14 @@ if (streamingFallbackOccured) {
 - **codex**：`CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:243`）；已完成 lifecycle 不重写。
 - **Claude-Code**：5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对。
 
-**设计理由**（`[注释]` 见 第 6 章）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
+**设计理由**（`[注释]` 见 第 8 章）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
 
 ### 6.5 流中断（idle watchdog）与 fallback
 
 - **pi / dsh / codex**：无内建 watchdog。
 - **Claude-Code**：`claude.ts:2310-2334` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:712-741`）。
 
-**设计理由**（`[注释]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 5 章 5.3）。
+**设计理由**（`[注释]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
 
 ### 6.6 空转 / 无限循环防护
 
@@ -635,7 +635,7 @@ if (streamingFallbackOccured) {
 
 1. **不要把「模型没调工具」等同于「任务完成」**。四家都是这样实现的，但 CC 额外用 stop hooks + token budget 做二次确认（`:1267-1357`）——因为模型经常在活没干完时提前收尾。
 2. **不要在错误路径上跑用户可编程的 hook**（CC 反例见 `:1262-1265`）。hooks 是用户代码，可能比 API 更脆弱。
-3. **不要用「压缩后 token 低于阈值」当成功判据**（详见 第 4 章 7.4）。压缩可能「成功但无效」，下一轮立刻又超限。
+3. **不要用「压缩后 token 低于阈值」当成功判据**（详见 第 6 章 7.4）。压缩可能「成功但无效」，下一轮立刻又超限。
 4. **不要让取消留下不配对的 tool_use**。Anthropic API 会直接 400；必须合成 tool_result（CC `:1015-1052`）。
 5. **不要把截断当普通错误处理**。截断是可预期的高频事件，需要专门的恢复路径与预算，而不是走通用 error 分支。
 
@@ -664,7 +664,7 @@ if (streamingFallbackOccured) {
 | `packages/core/agent-loop/src/agent.ts` | 275-281 / 558-561 / 476-486 / 342 | 四个钩子（pre-step / request / request-error / turn-stopping） |
 | `packages/core/agent-loop/src/agent.ts` | 331-336 / 512 | max-tokens 粘性 |
 | `packages/core/agent-loop/src/agent.ts` | 516-519 | 工具调度调用点 |
-| `packages/core/agent-loop/src/tool-calls.ts` | 60 / 89-94 / 122 / 147 / 199-243 | 工具调度（见 第 2 章） |
+| `packages/core/agent-loop/src/tool-calls.ts` | 60 / 89-94 / 122 / 147 / 199-243 | 工具调度（见 第 4 章） |
 
 ### codex
 
@@ -695,4 +695,4 @@ if (streamingFallbackOccured) {
 | `src/services/compact/autoCompact.ts` | 62-65 / 70 / 260-265 / 341-349 | 缓冲常量、熔断阈值、检查、计数 |
 | `src/utils/context.ts` | 25 | `ESCALATED_MAX_TOKENS` |
 | `src/services/api/withRetry.ts` | 52 / 54 / 170 / 335-351 / 696 | 重试常量、retry 入口、降级、判定 |
-| `src/utils/StreamingToolExecutor.ts` | 76 / 129 / 140-151 / 210 / 354-364 / 412-440 | 流式执行器（见 第 2 章） |
+| `src/utils/StreamingToolExecutor.ts` | 76 / 129 / 140-151 / 210 / 354-364 / 412-440 | 流式执行器（见 第 4 章） |

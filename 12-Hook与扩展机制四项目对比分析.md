@@ -1,10 +1,10 @@
-# 第 10 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
+# 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。四家的扩展体系挂在完全不同的层次上：pi 在内核留 11 个回调、在外壳给 36 个事件；dsh 只有一种扩展单位，但配了 5 种调度模式；codex 同时开了**进程外**与**进程内**两条互不相通的通道；Claude-Code 则并置了六层能力面。读完能看清一个判断标准——**扩展点的价值不在数量，而在「它能改写什么、以及改写之后谁负责重新校验」**。
 
 > **本层定位**：L10，把运行时内部的事件与能力暴露给外部代码，并规定这些外部代码**能观察什么、能否阻断、能改写什么**。
 >
-> **前置依赖**：01（主循环，扩展点挂在循环的哪一步）、02（工具调度，工具级拦截的插入位置）、03（工具定义，扩展如何注册工具）、08（权限，hook 与审批的优先级关系）。
+> **前置依赖**：03（主循环，扩展点挂在循环的哪一步）、04（工具调度，工具级拦截的插入位置）、05（工具定义，扩展如何注册工具）、10（权限，hook 与审批的优先级关系）。
 >
 > **跨层联动**：13 —— 见 5.1。MCP 在本层只被当作**一种扩展单位**来计数；它自身的接入协议属于外围区。
 >
@@ -51,7 +51,7 @@
 ### 2.2 本层不管什么
 
 - **不管主循环怎么跑** —— 那是 L1。但本层的全部挂载点都定义在循环的骨架上，所以**没有稳定的循环阶段划分，就不可能有干净的扩展点**（pi 的 11 个内核回调就是一例）。
-- **不管工具怎么调度** —— 那是 L2。但 `PreToolUse` 这类钩子正是在 L2 的准备阶段插入的，且**权限判定的优先级低于 hook**（见第 8 章 4.3.5）。
+- **不管工具怎么调度** —— 那是 L2。但 `PreToolUse` 这类钩子正是在 L2 的准备阶段插入的，且**权限判定的优先级低于 hook**（见第 10 章 4.3.5）。
 - **不管权限规则怎么写** —— 那是 L8。本层只负责「让外部代码有机会介入权限决策」（CC 的 `PermissionRequest`、codex 的 `run_permission_request_hooks`）。
 - **不管具体某个扩展的功能** —— 那是扩展自己的事。本章只分析**机制**：口子开在哪、能改什么、改完谁复核。
 - **不管 MCP 这类外部能力怎么接进来** —— 那是外围区第 13 章。本层只回答「MCP server 能不能算一个扩展单位、它被画在哪一层、它的调用是否复用同一条权限链」（见 5.1）；server 的生命周期、工具发现、传输方式与凭据传递都在第 13 章。这个切分留了一处跨章的口径分歧：**四家对「MCP 是扩展还是能力」的答案并不一致**——codex 把 `McpTool { server, tool, input, ... }` 直接做成 hook 处理器的一个变体（`config/src/hook_config.rs:161-201`，见 4.3.2），CC 却只认 bash / prompt / agent / http 四类 handler（`src/schemas/hooks.ts:176-189`，见 4.4.2），MCP 在它那里是「注册工具的六层之一」而非「hook 的一种」。本层记录这个分歧，不裁定它。
@@ -74,7 +74,7 @@
         └── L3 工具定义（扩展注册工具、同名覆盖）
 ```
 
-**图 10-1**：L10 的位置。它的特殊之处在于「反向性」——前九章都是 Agent 内部的机制，只有本层是**外部代码反向伸进运行时**。因此这一层真正的设计问题是权限问题：**给外部代码多大的权力，以及改完之后由谁兜底**。
+**图 12-1**：L10 的位置。它的特殊之处在于「反向性」——前九章都是 Agent 内部的机制，只有本层是**外部代码反向伸进运行时**。因此这一层真正的设计问题是权限问题：**给外部代码多大的权力，以及改完之后由谁兜底**。
 
 ```text
 四家的扩展体系骨架（框越靠上，越接近"外部可写"）
@@ -92,7 +92,7 @@
            └─ 内核不知道"扩展"这个概念，只暴露回调
 ```
 
-**图 10-2**：四种骨架。注意 dsh 的形态最「统一」——它没有为不同扩展能力设计不同机制，而是**把差异全部收敛到调度模式里**；codex 则相反，用两条物理隔离的通道处理两类需求。
+**图 12-2**：四种骨架。注意 dsh 的形态最「统一」——它没有为不同扩展能力设计不同机制，而是**把差异全部收敛到调度模式里**；codex 则相反，用两条物理隔离的通道处理两类需求。
 
 ---
 
@@ -185,7 +185,7 @@ for (const tool of wrappedExtensionTools as AgentTool[]) {
 }
 ```
 
-先建内置表，再让扩展工具 `set` 覆盖。示例 `tool-override.ts:69` 用同名 `read` 替换了内建实现，并在其中做敏感路径拦截。**这是 pi 在没有权限层的前提下，把安全能力下放给扩展的具体路径**（见第 8 章 4.1.3）。
+先建内置表，再让扩展工具 `set` 覆盖。示例 `tool-override.ts:69` 用同名 `read` 替换了内建实现，并在其中做敏感路径拦截。**这是 pi 在没有权限层的前提下，把安全能力下放给扩展的具体路径**（见第 10 章 4.1.3）。
 
 #### 4.1.4 异常与降级：一处有意的例外
 
@@ -209,11 +209,11 @@ throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 > * `event.input` is mutable. Mutate it in place to patch tool arguments before execution.
 > * Later `tool_call` handlers see earlier mutations. No re-validation is performed after mutation.
 > ```
-> 也就是说：**检查与执行之间没有第二次 schema 校验**。若权限逻辑依赖参数内容，而参数可被后续处理器改写，这个窗口必然被利用（已在第 8 章 7.4 列为反例）。
+> 也就是说：**检查与执行之间没有第二次 schema 校验**。若权限逻辑依赖参数内容，而参数可被后续处理器改写，这个窗口必然被利用（已在第 10 章 7.4 列为反例）。
 
 #### 4.1.5 skills 与子 Agent 不是扩展机制
 
-需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 7 章 4.1）。
+需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 9 章 4.1）。
 
 ### 4.2 deepseek-harness：一种扩展单位，五种调度语义
 
@@ -553,7 +553,7 @@ sequenceDiagram
     Note over C: Blocked → RespondToModel 错误返回模型<br/>updated_input → with_updated_hook_input 替换入参
 ```
 
-**图 10-3**：codex 的 PreToolUse 链路。两个细节值得注意：**Sync handler 是并行的**（进 `FuturesUnordered`），但结果**按配置顺序合并**；而 `PreToolUse` 的输入改写却**按完成顺序取最后一个完成者**——报告顺序与裁决顺序故意不同：
+**图 12-3**：codex 的 PreToolUse 链路。两个细节值得注意：**Sync handler 是并行的**（进 `FuturesUnordered`），但结果**按配置顺序合并**；而 `PreToolUse` 的输入改写却**按完成顺序取最后一个完成者**——报告顺序与裁决顺序故意不同：
 
 ```rust
 // hooks/src/events/pre_tool_use.rs:149-153
@@ -708,7 +708,7 @@ flowchart TD
     B["builtinPlugins（{name}@builtin）"] --> P
 ```
 
-**图 10-4**：CC 六层的装配。plugin 是**分发容器**（能携带 commands / agents / hooks / skills / MCP / output-styles / LSP / settings），`builtinPlugins` 与用户 plugin 走同一 `LoadedPlugin` 抽象、在 `/plugin` UI 里可开关（`src/plugins/builtinPlugins.ts:57-102`）。
+**图 12-4**：CC 六层的装配。plugin 是**分发容器**（能携带 commands / agents / hooks / skills / MCP / output-styles / LSP / settings），`builtinPlugins` 与用户 plugin 走同一 `LoadedPlugin` 抽象、在 `/plugin` UI 里可开关（`src/plugins/builtinPlugins.ts:57-102`）。
 
 #### 4.4.5 异常与降级：信任校验是核心防线
 
