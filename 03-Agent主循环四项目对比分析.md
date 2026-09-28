@@ -6,7 +6,7 @@
 >
 > **前置依赖**：无（运行时链路的第一环）。
 >
-> **跨层联动**：02 —— 见 2.3 末行。本章每轮要发出去的那份前缀由启动区组装，而「重算落在循环内还是循环外」会反过来改变循环的形状。
+> **跨层联动**：02 —— 见 2.3 末行。本章每轮要发出去的那份前缀由第 2 章组装，而「重算落在循环内还是循环外」会反过来改变循环的形状。
 >
 > **分析对象**：
 > - **pi** —— `packages/agent/src/agent-loop.ts`（TypeScript，事件流驱动）
@@ -449,10 +449,10 @@ token budget 是「让模型把活干完」的机制：当模型输出结束但 
 
 #### 4.4.6 状态：State 显式传递 + 墓碑撤销
 
-循环状态是显式 `State` 对象（第 1 步解构、第 7 步新建）。当流式 fallback 发生时（`StreamingToolExecutor` 侧失败），已产出的 partial assistant 消息被逐条 **tombstone**（`:713-724`）：
+循环状态是显式 `State` 对象（第 1 步解构、第 7 步新建）。当流式 fallback 发生时（`StreamingToolExecutor` 侧失败），已产出的 partial assistant 消息被逐条 **tombstone**（`src/query.ts:712-724`）：
 
 ```ts
-// :713-724
+// src/query.ts:712-724
 if (streamingFallbackOccured) {
   for (const msg of assistantMessages) yield { type: 'tombstone' as const, message: msg }
   logEvent('tengu_orphaned_messages_tombstoned', {...})

@@ -98,7 +98,7 @@
 
 ## 三、概念对齐表
 
-**同一个概念，四家分别叫什么、有没有这个能力**。空白格本身就是结论。
+**同一个概念，四家分别叫什么、有没有这个能力**。写「无」的格子本身就是结论。
 
 | 概念 | pi | deepseek-harness | codex | Claude-Code |
 |---|---|---|---|---|
@@ -223,7 +223,7 @@ throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 
 dsh 直接 vendor 了 Cordis（`vendor/cordis/src/events.ts`，352 行），并在 README 里界定它的用途：
 
-```md
+```markdown
 # vendor/cordis/README.md:3
 Cordis is a TypeScript plugin framework for applications that need explicit
 dependency injection, scoped services, lifecycle-managed cleanup, and optional

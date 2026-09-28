@@ -106,7 +106,7 @@
 
 ## 三、概念对齐表
 
-**同一个概念，四家分别叫什么、有没有这个东西**。空白格本身就是结论。
+**同一个概念，四家分别叫什么、有没有这个东西**。写「无」的格子本身就是结论。
 
 | 概念 | pi | deepseek-harness | codex | Claude-Code |
 |---|---|---|---|---|
@@ -429,7 +429,7 @@ listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream()
 
 设计文档把意图写得非常明确：
 
-```md
+```markdown
 // .agents/notes/implemented/architecture/2026-06-13-twin-llm-adapters.md:14-18
 - `dsh-llm-deepseek` — direct `fetch` + in-repo translation against the DeepSeek API ...
 - `dsh-llm-pi-ai`     — the same endpoint through the `@earendil-works/pi-ai` library (its own event vocabulary).

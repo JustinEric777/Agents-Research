@@ -87,7 +87,7 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 ## 三、概念对齐表
 
-**同一个概念，四家分别叫什么、有没有这个能力**。空白格本身就是结论。
+**同一个概念，四家分别叫什么、有没有这个能力**。写「无」的格子本身就是结论。
 
 | 概念 | pi | deepseek-harness | codex | Claude-Code |
 |---|---|---|---|---|
@@ -446,7 +446,7 @@ if let Some(features) = role_config.features {
 
 #### 4.3.4 两代委派协议
 
-| | V1（`multi_agent_v1`，默认开） | V2（`multi_agent_v2`，**默认 false**） |
+| 维度 | V1（`multi_agent_v1`，默认开） | V2（`multi_agent_v2`，**默认 false**） |
 |---|---|---|
 | 工具集 | `spawn_agent` / `send_input` / `resume_agent` / `wait_agent` / `close_agent` | `spawn_agent` / `send_message` / `followup_task` / `wait_agent` / `interrupt_agent` / `list_agents` |
 | `spawn_agent` 参数 | `message \| items \| agent_type \| fork_context \| model \| reasoning_effort` | 额外必填 `task_name`，用 `fork_turns: none\|all\|N` 取代 `fork_context` |
@@ -691,7 +691,7 @@ flowchart TB
     end
 ```
 
-**图 9-4**：对等协作的两种拓扑。左边是「委派」，右边是「组队」——**二者不是同一个功能的强弱版本，而是两类问题**：委派解决「一件事分给一个新人做」，组队解决「多个人要就同一份工作反复协商」。
+**图 9-3**：对等协作的两种拓扑。左边是「委派」，右边是「组队」——**二者不是同一个功能的强弱版本，而是两类问题**：委派解决「一件事分给一个新人做」，组队解决「多个人要就同一份工作反复协商」。
 
 #### 4.5.1 pi —— 没有对等通信，而且连"兄弟"这个关系都不存在
 
@@ -792,7 +792,7 @@ sequenceDiagram
     Note over P,C: 四家都不给子 Agent 设运行超时<br/>超时设在「父的等待」上，而非「执行」上
 ```
 
-**图 9-3**：委派链路的时序。注意两处四家共识：深度检查放在「工具是否可见」而非「调用是否报错」，以及超时只加在父的等待侧。
+**图 9-4**：委派链路的时序。注意两处四家共识：深度检查放在「工具是否可见」而非「调用是否报错」，以及超时只加在父的等待侧。
 
 | 维度 | pi | dsh | codex | Claude-Code | 共识度 |
 |---|---|---|---|---|---|
