@@ -1,6 +1,6 @@
 # 第 11 章：模型调用与 Provider 抽象 —— 把 N 种线协议归一成一套事件词汇表
 
-前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。四家的选择差异极大——codex 把协议收敛到只剩一种，pi 支持 41 家但把重试默认关掉，dsh 干脆借用了 pi 的库并给它打了补丁，Claude-Code 则连归一化都不做。读完能拿到一个判断标准：**这一层真正的产出不是「能调通模型」，而是一套词汇表——它的宽度决定了上层循环要写多复杂，也决定了换 provider 时哪一层的代码要动。**
+前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。四家的选择差异极大——codex 把协议收敛到只剩一种，pi 支持 41 家但把重试默认关掉，dsh 干脆借用了 pi 的库并给它打了补丁，CC 则连归一化都不做。读完能拿到一个判断标准：**这一层真正的产出不是「能调通模型」，而是一套词汇表——它的宽度决定了上层循环要写多复杂，也决定了换 provider 时哪一层的代码要动。**
 
 > **本层定位**：L11，把「一次模型调用」这层不稳定、多变、易失败的外部依赖，收敛成循环可以稳定消费的**事件序列 + 计量数据**。
 >
@@ -14,15 +14,15 @@
 > - **codex** —— `codex-rs/model-provider-info/src/lib.rs`（`WireApi`）+ `codex-api/src/sse/responses.rs`（唯一原生事件消化点）+ `model-provider/src/*` + `core/src/client.rs`
 > - **Claude-Code** —— `src/services/api/claude.ts`（流式事件机，核心）+ `api/{client,withRetry,errors}.ts` + `utils/model/*`
 >
-> **易混点**：codex 的 `WireApi` 枚举只有 `Responses` 一个变体，Chat Completions 协议不在本版本源码中（配置里写 `wire_api = "chat"` 会直接报错并附修复指引，见 4.3.1）。Claude-Code 不定义自己的事件词汇表，而是把 Anthropic 原生 `stream_event` 透给上层（见 2.3 与 4.4.3）。
+> **易混点**：codex 的 `WireApi` 枚举只有 `Responses` 一个变体，Chat Completions 协议不在本版本源码中（配置里写 `wire_api = "chat"` 会直接报错并附修复指引，见 4.3.1）。CC 不定义自己的事件词汇表，而是把 Anthropic 原生 `stream_event` 透给上层（见 2.3 与 4.4.3）。
 >
-> **门控提示**：Claude-Code 在本层大量能力由 `feature()` 编译开关门控，逐文件清单见附录。
+> **门控提示**：CC 在本层大量能力由 `feature()` 编译开关门控，逐文件清单见附录。
 
 ---
 
 ## 一、核心结论速览
 
-1. **这一层的真正产物是一套「事件词汇表」，四家的宽度差了 2.4 倍**：pi 收敛出 **12 种** `AssistantMessageEvent`；dsh 压到 **7 种** `StreamChunk`——四家最窄；codex 有 **17 种** `ResponseEvent`（因为它把控制面事件如 `RateLimits` / `ModelsEtag` / `ServerModel` 也塞进了同一条流）；**Claude-Code 一种都不定义**，直接把 Anthropic 原生 `stream_event` 透给上层 `switch`。
+1. **这一层的真正产物是一套「事件词汇表」，四家的宽度差了 2.4 倍**：pi 收敛出 **12 种** `AssistantMessageEvent`；dsh 压到 **7 种** `StreamChunk`——四家最窄；codex 有 **17 种** `ResponseEvent`（因为它把控制面事件如 `RateLimits` / `ModelsEtag` / `ServerModel` 也塞进了同一条流）；**CC 一种都不定义**，直接把 Anthropic 原生 `stream_event` 透给上层 `switch`。
 
 2. **归一化的边界位置，决定了换 provider 要改哪一层**：pi 与 dsh 的边界画在**适配器之内**（对外只出统一事件，原生形态不外泄）；codex 画在 **SSE 解析层**（`codex-api/src/sse/responses.rs` 是唯一的原生事件消化点）；CC 画在**调用方**（`claude.ts:1979` 的 `switch (part.type)`）——只有「全世界只有一家 provider」才付得起这个代价。
 
@@ -30,7 +30,7 @@
 
 4. **两个项目在核心层真的打通了**：dsh 的 `llm-pi-ai` 直接依赖 `@earendil-works/pi-ai ^0.85.1`（`llm-pi-ai/package.json:44`），并且**给它打了补丁**——`patches/@earendil-works__pi-ai@0.85.1.patch` 删掉了 4 个适配器里「每收一个 delta 就全量重解析参数 JSON」的 O(n²) 调用。配套的设计方法论更值得记：dsh 让 `llm-deepseek`（自己写）与 `llm-pi-ai`（借用）跑**同一套 `StreamChunk`**，并在注释里写下「**任何两者都表达不了的东西，就是核心词汇表的 bug**」——用双实现验证抽象的完备性。
 
-5. **重试次数四家全不同，而 pi 在 provider 层默认不重试**：pi 请求级 `maxRetries` 默认 **0**（`provider-retry.ts:109`），重试改由 harness 层 `DEFAULT_RETRY_POLICY.maxRetries = 3` 承担；dsh **5** 次；codex 请求级 **4** / 流级 **5**；Claude-Code **10** 次（529 另限 3 次）。分歧的实质不是「几次」，而是**重试归传输层还是归会话层**——前者重发 HTTP，后者重放一整轮。
+5. **重试次数四家全不同，而 pi 在 provider 层默认不重试**：pi 请求级 `maxRetries` 默认 **0**（`provider-retry.ts:109`），重试改由 harness 层 `DEFAULT_RETRY_POLICY.maxRetries = 3` 承担；dsh **5** 次；codex 请求级 **4** / 流级 **5**；CC **10** 次（529 另限 3 次）。分歧的实质不是「几次」，而是**重试归传输层还是归会话层**——前者重发 HTTP，后者重放一整轮。
 
 ---
 
@@ -108,7 +108,7 @@
 
 **同一个概念，四家分别叫什么、有没有这个东西**。写「无」的格子本身就是结论。
 
-| 概念 | pi | deepseek-harness | codex | Claude-Code |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | **provider 标识** | `ProviderId = KnownProvider \| string`（41 项已知，`types.ts:35`） | 路由键字符串 `LlmProviderInfo.id`（`llm/src/types.ts:224`） | `ModelProviderInfo`（20 字段配置结构，`model-provider-info/src/lib.rs:134`） | `APIProvider` 四值枚举（`model/providers.ts:4`） |
 | **模型标识** | `Model<TApi>` 对象（`types.ts:982`），含 cost / contextWindow / maxTokens | `(provider, id)` 二元组 → `LlmResolvedModelInfo`（`llm/src/types.ts:400`） | `ModelInfo`（`models-manager`），provider 侧只有 slug 字符串 | 仅 `ModelName: string`（`model/model.ts:32`），无结构 |
@@ -135,7 +135,7 @@
 
 ## 四、逐项目实现
 
-### 4.1 pi：41 家 provider，构建期生成元数据
+### 4.1 pi —— 41 家 provider，构建期生成元数据
 
 > pi 的 ai 包是四家里**最像「独立 SDK」**的一个——它不假设自己服务于一个 Agent，因此把「支持多少家」当成核心指标。
 
@@ -192,7 +192,7 @@ export const ANTHROPIC_MODELS: ModelCatalog<typeof values, "anthropic"> =
 refreshModels: async (context) => { ... await loadRadiusGatewayConfig(gateway, apiKey, ...) }
 ```
 
-> **设计理由** [`推断`]：构建期生成让**成本、窗口、能力都变成编译期常量**，代价是模型上线要重新发版。pi 用「只给网关开动态口子」折中了这一点——因为网关后面的模型清单本来就无法预知。
+> **设计理由**（`[推断]`）：构建期生成让**成本、窗口、能力都变成编译期常量**，代价是模型上线要重新发版。pi 用「只给网关开动态口子」折中了这一点——因为网关后面的模型清单本来就无法预知。
 
 #### 4.1.3 主流程：从选模型到事件进循环
 
@@ -365,11 +365,11 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 | 工具参数 | `input_json_delta` 累积 `partialJson` 后 `parseStreamingJson`（`:699-710`、`:740`） | 按 `tool_calls[].index`/`id` **自建块**（`:494` `ensureToolCallBlock()`、`:401` `toolCallBlocksByIndex`） |
 | 停因映射 | `:1494` `mapStopReason` | `openai-completions.ts:1554` 把 `content_filter` 映射为错误 |
 
-> **设计理由** [`注释`]：这两个适配器合计 3,246 行（1520 + 1726），其中大半是「把扁平流补成块结构」和「跨 SDK 探测错误字段」。**归一化的成本不会消失，只会转移**——pi 选择让适配器承担，换来上层只认 12 种事件。
+> **设计理由**（`[注释]`）：这两个适配器合计 3,246 行（1520 + 1726），其中大半是「把扁平流补成块结构」和「跨 SDK 探测错误字段」。**归一化的成本不会消失，只会转移**——pi 选择让适配器承担，换来上层只认 12 种事件。
 
 ---
 
-### 4.2 dsh：契约先行，孪生适配器验证抽象
+### 4.2 deepseek-harness —— 契约先行，孪生适配器验证抽象
 
 > dsh 的做法与 pi 正相反：它先定**最窄的词汇表**，再拿两个完全不同的实现去撞它。
 
@@ -484,7 +484,7 @@ listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream()
 # 命中：anthropic-messages.js / bedrock-converse-stream.js / mistral-conversations.js / openai-completions.js
 ```
 
-> **设计理由** [`注释`]：这是 O(n²) 开销——参数 JSON 每增长一个 delta 就整体重解析一次。dsh 的 README 记录了这件事。**一个下游消费者主动修上游库的性能 bug，是「这层抽象真的被两家共用」的最硬证据**。
+> **设计理由**（`[注释]`）：这是 O(n²) 开销——参数 JSON 每增长一个 delta 就整体重解析一次。dsh 的 README 记录了这件事。**一个下游消费者主动修上游库的性能 bug，是「这层抽象真的被两家共用」的最硬证据**。
 
 #### 4.2.5 重试：无配置插件，策略归 provider
 
@@ -546,7 +546,7 @@ export interface TokenMeasurement {
 NO_COST   // 注释：harness never reads pi-ai's cost metadata
 ```
 
-> **设计理由** [`注释`]：dsh 的计量目标是**预算**（窗口压力），不是账单。`logRevision` 这个字段说明它把「测量」也当成日志的派生视图——同一份日志可以重放出任意时刻的 token 分布，而累加器做不到这一点。
+> **设计理由**（`[注释]`）：dsh 的计量目标是**预算**（窗口压力），不是账单。`logRevision` 这个字段说明它把「测量」也当成日志的派生视图——同一份日志可以重放出任意时刻的 token 分布，而累加器做不到这一点。
 
 #### 4.2.7 鉴权：分层且 fail-loud
 
@@ -573,11 +573,11 @@ override resolve(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
 
 **关键纪律**：已命名但解析不到的引用**直接 fail-loud 为 `MISSING_CREDENTIAL`，不回退到环境发现**（`llm-pi-ai/src/index.ts:189-205`）；只有未命名时才下探 ambient。格式错误另码 `INVALID_CREDENTIAL`（`llm/src/index.ts:149` `assertUsableApiKey`）。
 
-> **设计理由** [`推断`]：静默回退是凭据系统最危险的失败模式——用户以为在用 A 账号，实际用了环境里残留的 B 账号。dsh 选择「宁可启动失败也不猜」。
+> **设计理由**（`[推断]`）：静默回退是凭据系统最危险的失败模式——用户以为在用 A 账号，实际用了环境里残留的 B 账号。dsh 选择「宁可启动失败也不猜」。
 
 ---
 
-### 4.3 codex：协议收敛到一种，配置开放到 20 个字段
+### 4.3 codex —— 协议收敛到一种，配置开放到 20 个字段
 
 > codex 的路线与 pi 截然相反：不追求支持多少家，而是**把协议统一掉**，让所有 provider 都来适配 Responses 形状。
 
@@ -606,7 +606,7 @@ _ => Err(serde::de::Error::unknown_variant(&value, &["responses"])),
 
 同一文件还移除了 `ollama-chat` provider（`:96-99` `OLLAMA_CHAT_PROVIDER_REMOVED_ERROR`）。
 
-> **设计理由** [`注释`]：错误信息**同时给出修复动作和讨论区链接**——这是把「破坏性变更」当产品来做的写法。内置 provider 从 5 个减到 4 个（`openai` / `amazon-bedrock` / `amazon-bedrock-runtime` / `ollama` / `lmstudio` 中的 chat 变体消失，见 `:656-674`）也确认了这次收敛是彻底的。
+> **设计理由**（`[注释]`）：错误信息**同时给出修复动作和讨论区链接**——这是把「破坏性变更」当产品来做的写法。内置 provider 从 5 个减到 4 个（`openai` / `amazon-bedrock` / `amazon-bedrock-runtime` / `ollama` / `lmstudio` 中的 chat 变体消失，见 `:656-674`）也确认了这次收敛是彻底的。
 
 #### 4.3.2 provider 配置有 20 个字段
 
@@ -739,7 +739,7 @@ ResponseEvent::Completed {
 | **控制面** | `ServerModel`、`ModelVerifications`、`TurnModerationMetadata`、`ServerReasoningIncluded`、`RateLimits`、`ModelsEtag` |
 | 安全 | `SafetyBuffering` |
 
-> **设计理由** [`注释`]：`ServerModel` 的注释写着 「This can differ from the requested model when backend safety routing applies」——**服务端可能把请求路由到另一个模型**，客户端必须知道。`ServerReasoningIncluded` 则在告诉客户端「服务端已经算过历史推理 token 了，别再估一遍」。这些字段的存在说明 codex 把这层当作**与服务端的双向协议**，而不只是「取文本」。
+> **设计理由**（`[注释]`）：`ServerModel` 的注释写着 「This can differ from the requested model when backend safety routing applies」——**服务端可能把请求路由到另一个模型**，客户端必须知道。`ServerReasoningIncluded` 则在告诉客户端「服务端已经算过历史推理 token 了，别再估一遍」。这些字段的存在说明 codex 把这层当作**与服务端的双向协议**，而不只是「取文本」。
 
 #### 4.3.5 重试与降级：WebSocket 失败永久退到 HTTP
 
@@ -799,7 +799,7 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 // 从 "try again in Ns" 解析延迟
 ```
 
-> **设计理由** [`推断`]：`retry_429 = false` 的理由是避免**双重退避**——传输层算一次、业务层按服务端建议再等一次，会等出两倍时间。这与 pi 优先读 `x-should-retry` 是同一种「服务端比客户端更知道该等多久」的判断。
+> **设计理由**（`[推断]`）：`retry_429 = false` 的理由是避免**双重退避**——传输层算一次、业务层按服务端建议再等一次，会等出两倍时间。这与 pi 优先读 `x-should-retry` 是同一种「服务端比客户端更知道该等多久」的判断。
 
 **流中断重试与最终降级**（`core/src/responses_retry.rs`）：
 
@@ -858,7 +858,7 @@ let model_info = if let Some(remote) = remote {
 // auto_compact_token_limit    = 90% 且被 config 取 min
 ```
 
-> **设计理由** [`推断`]：`used_fallback_model_metadata` 这个布尔字段是**把不确定性显式记在数据里**——上层可以据此提示用户「你在用一个我不认识的模型，窗口是我猜的」。
+> **设计理由**（`[推断]`）：`used_fallback_model_metadata` 这个布尔字段是**把不确定性显式记在数据里**——上层可以据此提示用户「你在用一个我不认识的模型，窗口是我猜的」。
 
 #### 4.3.7 参数裁剪由能力元数据驱动
 
@@ -910,7 +910,7 @@ pub struct TokenUsage {
 
 ---
 
-### 4.4 Claude-Code：不做归一，因为只有一家 provider 家族
+### 4.4 Claude-Code —— 不做归一，因为只有一家 provider 家族
 
 > CC 是四家中唯一「Provider 层几乎不存在」的实现——它的「抽象」只有一层薄薄的别名映射。
 
@@ -1028,7 +1028,7 @@ return {
 }
 ```
 
-> **设计理由** [`推断`]：`switch (part.type)` 少说十几个分支，且每个分支都要处理「SDK 类型丢状态」的问题（例如 529 在流式下状态码丢失，只能匹配 `"type":"overloaded_error"` 文本）。**这是「不做抽象」的完整账单**：省下了适配层的数千行，代价是调用方与某一家 API 的事件名永久绑定。
+> **设计理由**（`[推断]`）：`switch (part.type)` 少说十几个分支，且每个分支都要处理「SDK 类型丢状态」的问题（例如 529 在流式下状态码丢失，只能匹配 `"type":"overloaded_error"` 文本）。**这是「不做抽象」的完整账单**：省下了适配层的数千行，代价是调用方与某一家 API 的事件名永久绑定。
 
 #### 4.4.4 缓存：只打一个断点，且位置会因场景前移
 
@@ -1047,7 +1047,7 @@ export function getCacheControl({ scope, querySource } = {}) {
 
 1h TTL 的资格判定：Bedrock 显式开关 `ENABLE_PROMPT_CACHING_1H_BEDROCK`（`:396-401`），或订阅者 + GrowthBook allowlist（`:406-433`）。system prompt 的断点另走 `buildSystemPromptBlocks`（`:3213`、`:3228-3234`）。全局关闭开关 `getPromptCachingEnabled`（`:333`）。
 
-> **设计理由** [`推断`]：`skipCacheWrite` 时断点前移一位，是因为最后一个块刚被追加、写缓存不划算。**「只打一个断点」与 pi 的 `promptCache` 字段形成对照**——CC 把缓存策略放进发送逻辑（因为它知道对话结构），pi 把它放进模型元数据（因为它不知道调用方怎么用）。
+> **设计理由**（`[推断]`）：`skipCacheWrite` 时断点前移一位，是因为最后一个块刚被追加、写缓存不划算。**「只打一个断点」与 pi 的 `promptCache` 字段形成对照**——CC 把缓存策略放进发送逻辑（因为它知道对话结构），pi 把它放进模型元数据（因为它不知道调用方怎么用）。
 
 **但断点打在哪里，本层说了不算**：system 块的断点位置由提示词组装层给出的静态/动态分界决定——分界之前的段可跨会话共享缓存，之后的段每段自带策略甚至显式声明不可缓存（第 2 章 4.4.2）。本层只做两件事：把那个分界翻译成 `cache_control` 参数，以及为「追加了最后一个块」这类**此刻才成立的条件**把断点前移一位。换言之，**缓存命中率的决定权在第 2 章那一层，本层只承担执行与计量**——这也解释了为什么四家在这一维度的差异（`promptCache` 字段 / 服务端自动 / 显式断点）远小于它们在前缀治理上的差异。
 
@@ -1076,7 +1076,7 @@ return baseDelay + jitter
 FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRetryError（:318-324）
 ```
 
-> **设计理由** [`注释`]：注释写明了原因——前台用户正阻塞等结果，值得重试；后台任务（摘要、标题、分类器）重试只会加剧过载。
+> **设计理由**（`[注释]`）：注释写明了原因——前台用户正阻塞等结果，值得重试；后台任务（摘要、标题、分类器）重试只会加剧过载。
 
 **唯一的模型 fallback**：
 
@@ -1087,7 +1087,7 @@ FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRet
 //   :900-950 同时清空 assistantMessages、丢弃流式工具执行器
 ```
 
-> **设计理由** [`推断`]：注意它**丢弃流式工具执行器**——因为降级重放会让工具跑第二遍。这与第 4 章「工具调用保序与去重」是同一个坑的两处防御。
+> **设计理由**（`[推断]`）：注意它**丢弃流式工具执行器**——因为降级重放会让工具跑第二遍。这与第 4 章「工具调用保序与去重」是同一个坑的两处防御。
 
 **流式失败降级到非流式**（`claude.ts:2551` `executeNonStreamingRequest`），可用门控关闭：
 
@@ -1112,7 +1112,7 @@ FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRet
 // :144  getModelCosts —— 未知模型回退默认并打点 tengu_unknown_model_cost（:166）
 ```
 
-> **设计理由** [`注释`]：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:764`）。
+> **设计理由**（`[注释]`）：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:764`）。
 
 #### 4.4.7 鉴权：OAuth 与 API key 二选一
 
@@ -1176,91 +1176,83 @@ return expiresWithBuffer >= expiresAt
 
 ### 6.1 上下文超限：四种检测路径
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| pi | `isContextOverflow()` 覆盖 **3 类**：报错文本（约 24 条正则）、静默溢出（usage 超窗）、length-零输出；另设 `NON_OVERFLOW_PATTERNS` 排除误判 | `packages/ai/src/utils/overflow.ts:136`、`:37`、`:152`、`:162`、`:75` | `[注释]` 排除表专门防 Bedrock 限流被误判为溢出——**误判会导致不必要的压缩，压缩又可能丢上下文** |
-| dsh | 用**稳定错误码** `CONTEXT_WINDOW_EXCEEDED` | `packages/llm/llm/src/error.ts:25`；pi-ai 侧 `llm-pi-ai/src/stream.ts:80-93` | `[注释]` 「consumers 不解析 message」——错误码是可路由的，文本不是 |
-| codex | 错误枚举 `ContextWindowExceeded`，在 `retry_delay` 中列为**不可重试** | `protocol/src/error.rs:396`、`:406`；turn 层 `session/turn.rs:1659-1662` | `[推断]` 重试同一超长请求必然再失败，不如直接置满并交给压缩 |
-| CC | 双路：`stop_reason==='model_context_window_exceeded'` 复用 max_output 恢复路径；旧 400 文本解析后**下调 `max_tokens` 重试** | `claude.ts:2279-2292`；`withRetry.ts:388-425`；预检 `query.ts:641-646` | `[注释]` 新老 API 双兼容——用户可能用旧版端点 |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `isContextOverflow()` 覆盖 **3 类**：报错文本（约 24 条正则）、静默溢出（usage 超窗）、length-零输出；另设 `NON_OVERFLOW_PATTERNS` 排除误判 | 用**稳定错误码** `CONTEXT_WINDOW_EXCEEDED` | 错误枚举 `ContextWindowExceeded`，在 `retry_delay` 中列为**不可重试** | 双路：`stop_reason==='model_context_window_exceeded'` 复用 max_output 恢复路径；旧 400 文本解析后**下调 `max_tokens` 重试** |
+| 源码依据 | `packages/ai/src/utils/overflow.ts:136`、`:37`、`:152`、`:162`、`:75` | `packages/llm/llm/src/error.ts:25`；pi-ai 侧 `llm-pi-ai/src/stream.ts:80-93` | `protocol/src/error.rs:396`、`:406`；turn 层 `session/turn.rs:1659-1662` | `claude.ts:2279-2292`；`withRetry.ts:388-425`；预检 `query.ts:641-646` |
+
+> **设计理由**：**pi**：`[注释]` 排除表专门防 Bedrock 限流被误判为溢出——**误判会导致不必要的压缩，压缩又可能丢上下文**；**dsh**：`[注释]` 「consumers 不解析 message」——错误码是可路由的，文本不是；**codex**：`[推断]` 重试同一超长请求必然再失败，不如直接置满并交给压缩；**CC**：`[注释]` 新老 API 双兼容——用户可能用旧版端点
 
 **共识**：四家都**没有**把超限当致命错误。差异在于**识别手段**——provider 越多，越只能靠文本嗅探。
 
 ### 6.2 工具参数 JSON 截断/非法
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | 三级兜底：`JSON.parse` → `repairJson` → `partial-json`，最终返回 `{}` | `packages/ai/src/utils/json-parse.ts:104`（注释 `:98` 「Always returns a valid object」） |
-| dsh | 上游 patch 后**不再每个 delta 重解析**；适配层只读 delta 串，结束时 `JSON.stringify(event.toolCall.arguments)` 还原原始 JSON 约定 | patch 文件；`llm-pi-ai/src/stream.ts:183-192`、`:204` |
-| codex | 参数**始终是字符串**，服务端不预解析，客户端也不在流中解析 | `protocol/src/models.rs:1081-1084` |
-| CC | 流中按字符串累加，结束时 `normalizeContentFromAPI` 递归 parse，失败回退 `{}` 并打点 | `claude.ts:2111`；`src/utils/messages.ts:2677` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 三级兜底：`JSON.parse` → `repairJson` → `partial-json`，最终返回 `{}` | 上游 patch 后**不再每个 delta 重解析**；适配层只读 delta 串，结束时 `JSON.stringify(event.toolCall.arguments)` 还原原始 JSON 约定 | 参数**始终是字符串**，服务端不预解析，客户端也不在流中解析 | 流中按字符串累加，结束时 `normalizeContentFromAPI` 递归 parse，失败回退 `{}` 并打点 |
+| 源码依据 | `packages/ai/src/utils/json-parse.ts:104`（注释 `:98` 「Always returns a valid object」） | patch 文件；`llm-pi-ai/src/stream.ts:183-192`、`:204` | `protocol/src/models.rs:1081-1084` | `claude.ts:2111`；`src/utils/messages.ts:2677` |
 
-> **设计理由** [`注释`]：CC 的注释写明「宁可空输入走下游校验，也不让半截 JSON 崩掉整轮」。**四家在此高度一致**——这是流式工具调用的共同现实：JSON 是增量拼出来的，任何时刻都可能不完整。
+> **设计理由**（`[注释]`）：CC 的注释写明「宁可空输入走下游校验，也不让半截 JSON 崩掉整轮」。**四家在此高度一致**——这是流式工具调用的共同现实：JSON 是增量拼出来的，任何时刻都可能不完整。
+
 
 ### 6.3 限流（429）：谁负责退避
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | 请求级读 `x-should-retry` 头；额度类错误（`insufficient_quota`/billing）**刻意不重试** | `provider-retry.ts:23`；`utils/retry.ts:7-9` |
-| dsh | `RATE_LIMIT` 在默认可重试集；有效 `providerRetryAfterMs` **覆盖**本地退避 | `retry-policy.ts:20`；`llm-retry/src/index.ts:227` |
-| codex | 传输层 `retry_429 = false`，**429 只走业务层**；延迟从 `try again in Ns` 文本抠出 | `model-provider-info/src/lib.rs:445`；`sse/responses.rs:692-719` |
-| CC | 429 在重试集内（非订阅者或 Enterprise）；`x-should-retry` 头优先 | `withRetry.ts:696`、`:732-751` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 请求级读 `x-should-retry` 头；额度类错误（`insufficient_quota`/billing）**刻意不重试** | `RATE_LIMIT` 在默认可重试集；有效 `providerRetryAfterMs` **覆盖**本地退避 | 传输层 `retry_429 = false`，**429 只走业务层**；延迟从 `try again in Ns` 文本抠出 | 429 在重试集内（非订阅者或 Enterprise）；`x-should-retry` 头优先 |
+| 源码依据 | `provider-retry.ts:23`；`utils/retry.ts:7-9` | `retry-policy.ts:20`；`llm-retry/src/index.ts:227` | `model-provider-info/src/lib.rs:445`；`sse/responses.rs:692-719` | `withRetry.ts:696`、`:732-751` |
 
-> **设计理由** [`推断`]：codex 的 `retry_429 = false` 是最有信息量的一个选择——它明确避免**双重退避**（传输层 + 业务层各等一次 = 等两倍）。**若服务端给了等待时长，客户端就不该再自己算一遍。**
+> **设计理由**（`[推断]`）：codex 的 `retry_429 = false` 是最有信息量的一个选择——它明确避免**双重退避**（传输层 + 业务层各等一次 = 等两倍）。**若服务端给了等待时长，客户端就不该再自己算一遍。**
+
 
 ### 6.4 流式中断
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | 主动抛错并把临时字段（`index`/`partialJson`）剥掉，**不让流式草稿进入会话历史** | `anthropic-messages.ts:791`、`:817`（注释 `:820`） |
-| dsh | 未完成时关闭上游迭代器；只保留**可见前缀**（`live.interruptedBlocks()`） | `llm/src/index.ts:1093-1098`；`agent.ts:431` |
-| codex | 未收到 `response.completed` 即关闭 → 报错；**SSE 无 `Last-Event-ID` 续传**，只能整请求重发 | `sse/responses.rs:603-609`；重试 `core/src/responses_retry.rs:113-134` |
-| CC | 只有 `content_block_stop` 才产出消息，故 partial 不落库；流式失败降级到非流式 | `claude.ts:2171`、`:2551` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 主动抛错并把临时字段（`index`/`partialJson`）剥掉，**不让流式草稿进入会话历史** | 未完成时关闭上游迭代器；只保留**可见前缀**（`live.interruptedBlocks()`） | 未收到 `response.completed` 即关闭 → 报错；**SSE 无 `Last-Event-ID` 续传**，只能整请求重发 | 只有 `content_block_stop` 才产出消息，故 partial 不落库；流式失败降级到非流式 |
+| 源码依据 | `anthropic-messages.ts:791`、`:817`（注释 `:820`） | `llm/src/index.ts:1093-1098`；`agent.ts:431` | `sse/responses.rs:603-609`；重试 `core/src/responses_retry.rs:113-134` | `claude.ts:2171`、`:2551` |
 
-> **设计理由** [`注释`]：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
+> **设计理由**（`[注释]`）：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
+
 
 ### 6.5 usage 缺失
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | Anthropic 只覆盖非 null 字段（保 `message_start` 真值）；OpenAI 兜底读 `choice.usage`（Moonshot 等） | `anthropic-messages.ts:763-765`；`openai-completions.ts:569-571` |
-| dsh | `usage` chunk 可选；无 usage 时回落 `baseline.kind='estimated'` | `token-meter/src/index.ts:176-180` |
-| codex | `Completed.token_usage` 是 `Option`；仅 `Some` 时累计 | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` |
-| CC | `updateUsage` 对 undefined 直接返回拷贝；输入类 token 用 `> 0` 守卫 | `claude.ts:2928`、`:2932-2945` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | Anthropic 只覆盖非 null 字段（保 `message_start` 真值）；OpenAI 兜底读 `choice.usage`（Moonshot 等） | `usage` chunk 可选；无 usage 时回落 `baseline.kind='estimated'` | `Completed.token_usage` 是 `Option`；仅 `Some` 时累计 | `updateUsage` 对 undefined 直接返回拷贝；输入类 token 用 `> 0` 守卫 |
+| 源码依据 | `anthropic-messages.ts:763-765`；`openai-completions.ts:569-571` | `token-meter/src/index.ts:176-180` | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` | `claude.ts:2928`、`:2932-2945` |
 
-> **设计理由** [`注释]`：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
+> **设计理由**（`[注释]`）：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
+
 
 ### 6.6 provider 不支持某能力：三种态度
 
-| 项目 | 态度 | 源码依据 |
-|---|---|---|
-| pi | **静默降级**：图片 → 占位文本；redacted thinking 跨模型时降级或丢弃；maxTokens 超窗自动夹紧 | `utils/transform-messages.ts:35`、`:100-148`；`api/simple-options.ts:15` |
-| dsh | **显式拒绝**：`UNSUPPORTED_CONTENT`；文件永不外发只换 handle | `llm-pi-ai/src/adapter.ts:359`；`llm/src/index.ts:1051` |
-| codex | **元数据驱动裁剪**：不支持就 `warn!` 后丢弃参数 | `core/src/client.rs:959-965`、`:936-947`、`:973-976` |
-| CC | **按 provider 分集合**：`modelSupportsThinking` 决定发不发 `thinking`；可被环境变量覆盖 | `utils/model/thinking.ts:90`；`claude.ts:1604`；`modelSupportOverrides.ts:30` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 态度 | **静默降级**：图片 → 占位文本；redacted thinking 跨模型时降级或丢弃；maxTokens 超窗自动夹紧 | **显式拒绝**：`UNSUPPORTED_CONTENT`；文件永不外发只换 handle | **元数据驱动裁剪**：不支持就 `warn!` 后丢弃参数 | **按 provider 分集合**：`modelSupportsThinking` 决定发不发 `thinking`；可被环境变量覆盖 |
+| 源码依据 | `utils/transform-messages.ts:35`、`:100-148`；`api/simple-options.ts:15` | `llm-pi-ai/src/adapter.ts:359`；`llm/src/index.ts:1051` | `core/src/client.rs:959-965`、`:936-947`、`:973-976` | `utils/model/thinking.ts:90`；`claude.ts:1604`；`modelSupportOverrides.ts:30` |
 
 > **设计理由**：dsh 的选择最值得记——README 与源码注释都写明「以 capability 显式拒绝而非静默丢弃」。**静默降级会让模型收到一个它以为完整的上下文**（图片变占位文本后，模型可能基于「[image omitted]」编造内容）。三种态度都合理，但「静默降级」是唯一会让用户误判的。
 
+
 ### 6.7 模型不存在 / 未知模型
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | `getModel` 返回 undefined，由调用方处理 | `models.ts` |
-| dsh | 凭据已命名但解析不到 → `MISSING_CREDENTIAL` **fail-loud，不回退** | `llm-pi-ai/src/index.ts:189-205`；`llm/src/index.ts:149` |
-| codex | 最长前缀匹配失败 → 回落 fallback 元数据并**显式标记** `used_fallback_model_metadata` | `models-manager/src/manager.rs:789-800` |
-| CC | 未知模型成本回退默认价并打点 `tengu_unknown_model_cost` | `modelCost.ts:144`、`:166` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `getModel` 返回 undefined，由调用方处理 | 凭据已命名但解析不到 → `MISSING_CREDENTIAL` **fail-loud，不回退** | 最长前缀匹配失败 → 回落 fallback 元数据并**显式标记** `used_fallback_model_metadata` | 未知模型成本回退默认价并打点 `tengu_unknown_model_cost` |
+| 源码依据 | `models.ts` | `llm-pi-ai/src/index.ts:189-205`；`llm/src/index.ts:149` | `models-manager/src/manager.rs:789-800` | `modelCost.ts:144`、`:166` |
 
-> **设计理由** [`推断`]：这一组的差异揭示了两类失败观。codex/CC 选择「**继续跑但留痕**」，dsh 选择「**直接失败**」。dsh 的理由在凭据那条已经写过：静默猜错比启动失败代价更高。**注意 codex 的 `used_fallback_model_metadata` 其实是折中——既继续跑，又把不确定性写进数据结构**，这是四家里最精细的处理。
+> **设计理由**（`[推断]`）：这一组的差异揭示了两类失败观。codex/CC 选择「**继续跑但留痕**」，dsh 选择「**直接失败**」。dsh 的理由在凭据那条已经写过：静默猜错比启动失败代价更高。**注意 codex 的 `used_fallback_model_metadata` 其实是折中——既继续跑，又把不确定性写进数据结构**，这是四家里最精细的处理。
+
 
 ### 6.8 鉴权失效（401）
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | OAuth 双检锁刷新（5 分钟窗口） | `auth/resolve.ts:119`、`:127` |
-| dsh | 凭据服务 `resolve()` 分层；不自动重试凭据错误 | `credentials-local/src/index.ts:609-617` |
-| codex | **仅 401 视为可恢复**；刷新令牌后重试一次 | `model-provider/src/provider.rs:194-199`；`core/src/client.rs:2531` |
-| CC | 401 清 key 缓存后重试；403 revoked 调 `handleOAuth401Error` | `withRetry.ts:696`、`:241-249` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | OAuth 双检锁刷新（5 分钟窗口） | 凭据服务 `resolve()` 分层；不自动重试凭据错误 | **仅 401 视为可恢复**；刷新令牌后重试一次 | 401 清 key 缓存后重试；403 revoked 调 `handleOAuth401Error` |
+| 源码依据 | `auth/resolve.ts:119`、`:127` | `credentials-local/src/index.ts:609-617` | `model-provider/src/provider.rs:194-199`；`core/src/client.rs:2531` | `withRetry.ts:696`、`:241-249` |
 
-**共识**：都区分「凭据过期（可刷新）」与「凭据无效（不可恢复）」。**只有 codex 把 401 单列为唯一的可恢复鉴权状态**（`provider.rs:194-199`）——这个窄口径是刻意的：403 通常代表权限问题，刷新也没用。
+> **设计理由**：**共识**——都区分「凭据过期（可刷新）」与「凭据无效（不可恢复）」。**只有 codex 把 401 单列为唯一的可恢复鉴权状态**（`provider.rs:194-199`）——这个窄口径是刻意的：403 通常代表权限问题，刷新也没用。
 
 ---
 

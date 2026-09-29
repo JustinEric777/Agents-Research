@@ -1,6 +1,6 @@
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
-前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。四家的扩展体系挂在完全不同的层次上：pi 在内核留 11 个回调、在外壳给 36 个事件；dsh 只有一种扩展单位，但配了 5 种调度模式；codex 同时开了**进程外**与**进程内**两条互不相通的通道；Claude-Code 则并置了六层能力面。读完能看清一个判断标准——**扩展点的价值不在数量，而在「它能改写什么、以及改写之后谁负责重新校验」**。
+前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。四家的扩展体系挂在完全不同的层次上：pi 在内核留 11 个回调、在外壳给 36 个事件；dsh 只有一种扩展单位，但配了 5 种调度模式；codex 同时开了**进程外**与**进程内**两条互不相通的通道；CC 则并置了六层能力面。读完能看清一个判断标准——**扩展点的价值不在数量，而在「它能改写什么、以及改写之后谁负责重新校验」**。
 
 > **本层定位**：L12，把运行时内部的事件与能力暴露给外部代码，并规定这些外部代码**能观察什么、能否阻断、能改写什么**。
 >
@@ -20,13 +20,13 @@
 
 ## 一、核心结论速览
 
-1. **「扩展机制」不是一个东西，四家把口子开在了不同楼层**：pi 在**内核**留 11 个生命周期回调、在**外壳**给 36 个事件加 10 个 `register*`；dsh 只提供**一种扩展单位**（Cordis 插件），靠 5 种调度模式区分语义；codex 开了**两条互不相通的通道**——进程外的 hooks 与进程内的 `extension-api`；Claude-Code 则把 hooks / plugins / skills / commands / MCP / subagents **并置成六层**。
+1. **「扩展机制」不是一个东西，四家把口子开在了不同楼层**：pi 在**内核**留 11 个生命周期回调、在**外壳**给 36 个事件加 10 个 `register*`；dsh 只提供**一种扩展单位**（Cordis 插件），靠 5 种调度模式区分语义；codex 开了**两条互不相通的通道**——进程外的 hooks 与进程内的 `extension-api`；CC 则把 hooks / plugins / skills / commands / MCP / subagents **并置成六层**。
 
 2. **只有 codex 同时提供进程外与进程内两种扩展，而且源码里写明了分工线**：要改写工具 payload 用 hooks，要拥有工具实现用 `ToolContributor`（`ext/extension-api/src/contributors.rs:346-351` 的注释）。**这条分工线是全章最值得抄的一句话**——它解释了为什么单靠 hook 做不了完整扩展。
 
 3. **hook 协议正在形成事实标准，而 dsh 用代码把它证明了**：`hooks-claude-code` 与 `hooks-codex` 两个包把 CC 与 codex 的 hook 协议**各实现了一遍**——配置结构、stdin JSON、`exit 2` 语义、matcher 语义全部对齐。但兼容的是**子集**：CC 的 27 个事件里只接线 7 个、codex 的 12 个里只接线 5 个，未支持字段采取「解析后跳过 + 告警」的有界降级。
 
-4. **「阻断」的语义三家完全统一在一个数字上：`exit code 2`**。codex、Claude-Code、dsh 都复刻这一约定，dsh 甚至明确写下「忠实复刻两个参考实现，不发明第三种阈值」。与之配套的是一条同样统一的纪律：**其他非零退出码不是阻断**，只是把 stderr 展示给用户。
+4. **「阻断」的语义三家完全统一在一个数字上：`exit code 2`**。codex、CC、dsh 都复刻这一约定，dsh 甚至明确写下「忠实复刻两个参考实现，不发明第三种阈值」。与之配套的是一条同样统一的纪律：**其他非零退出码不是阻断**，只是把 stderr 展示给用户。
 
 5. **设计成熟度体现在「明确不做什么」上**：codex 显式拒绝 `updatedMCPToolOutput` 与 `updatedPermissions`，CC 保证 hook 的 `allow` **不越过** settings 的 deny 规则，dsh 有一份「永不支持」清单。**唯一的反例是 pi**——它的扩展改写工具输入之后**不做重新校验**（`extensions/types.ts:1026` 的注释直说了这一点），这是本章唯一一处明示的缺口。
 
@@ -100,7 +100,7 @@
 
 **同一个概念，四家分别叫什么、有没有这个能力**。写「无」的格子本身就是结论。
 
-| 概念 | pi | deepseek-harness | codex | Claude-Code |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | **扩展单位** | 进程内模块（jiti 加载） | Cordis 插件（`apply(ctx, config)`） | ① 外部命令/MCP ② Rust trait contributor | 六层：hook / plugin / skill / command / MCP / subagent |
 | **内核是否知道「扩展」** | **否**（只有回调） | 是（插件即唯一单位） | 是（注册表） | 是 |
@@ -124,7 +124,7 @@
 
 ## 四、逐项目实现
 
-### 4.1 pi：内核留回调，外壳给事件
+### 4.1 pi —— 内核留回调，外壳给事件
 
 > pi 是四家中**唯一把「扩展点」与「扩展机制」分成两层**做的：内核（`packages/agent`）只暴露一组通用回调，外壳（`packages/coding-agent`）才把它们接到事件总线上。
 
@@ -215,7 +215,7 @@ throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 
 需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 9 章 4.1）。
 
-### 4.2 deepseek-harness：一种扩展单位，五种调度语义
+### 4.2 deepseek-harness —— 一种扩展单位，五种调度语义
 
 > dsh 的形态在四家中最「统一」——它不为不同扩展能力设计不同机制，而是**把全部差异收敛到调度模式里**：`emit` / `parallel` / `serial` / `bail` / `waterfall`。理解这 5 个词，就理解了 dsh 的整个扩展层。
 
@@ -447,7 +447,7 @@ try {
  * degraded — e.g. Codex ignores `allow`/`ask`).
 ```
 
-### 4.3 codex：两条互不相通的通道
+### 4.3 codex —— 两条互不相通的通道
 
 > **先做一处必须的事实辨析**：`codex-rs/` 下有三个容易误判的目录。实测结论是——`hooks/`（15,671 行）是**机制**；`ext/extension-api/`（2,932 行）是**机制**；`core-plugins/`（47,669 行）是**机制**（加载器/市场/存储）；而 `ext/` 下**其余 15 个 crate 是「用机制实现的内置扩展内容」**（`ext/skills` 非测试 11,582 行、`ext/guardian-v2` 4,057 行、`ext/goal` 3,325 行…）。**判定依据**：机制没有 `install()`；内置扩展有，且被统一注册。
 
@@ -620,7 +620,7 @@ if enabled && (source.bypass_hook_trust || matches!(trust_status, HookTrustStatu
 - **无 hooks 配置时零开销**：feature 关闭且无插件 hook 时引擎直接空构造，不做发现（`engine/mod.rs:238-246`）。
 - **legacy `notify` 与新引擎隔离**：旧 `notify` 被包装成一个独立 `Hook` 挂在 `AfterAgent` 上，**不进** `ClaudeHooksEngine`（`registry.rs:124-129`），且源码里有待删除标记（`legacy_notify.rs:44-45` 的 TODO）。
 
-### 4.4 Claude-Code：六层并置，hooks 是最强的一层
+### 4.4 Claude-Code —— 六层并置，hooks 是最强的一层
 
 > CC 的扩展体系是四家中「面最宽」的：hooks / plugins / skills / slash commands / MCP / subagents 六层并列。其中 **hooks 是唯一能阻断与改写的一层**，其余五层都是「提供内容」。
 
@@ -768,23 +768,23 @@ flowchart TD
 
 ### 5.4 失败与降级
 
-| 场景 | pi | dsh | codex | CC |
-|---|---|---|---|---|
-| 普通事件抛错 | 记录后继续 | **永不抛进循环** | 记 Failed 不阻断 | 记 non_blocking |
-| 工具级钩子抛错 | **阻断该工具** | 决策为 deny | 不阻断 | 不阻断 |
-| 配置解析失败 | 跳过该扩展 | warn 且不注册 | 记 load_failure | 降级跳过 |
-| 输出非法 | — | 按纯文本处理 | 降级 Failed | 降级 plainText |
-| 超时 | — | 非阻断 | 非阻断（分级） | 非阻断 |
-| 未支持字段 | `updatedInput` 不重校验 | **有界降级 + warn** | 显式拒绝 | `deny` 时丢弃 |
+| 场景 | pi | dsh | codex | CC | 共识度 |
+|---|---|---|---|---|---|
+| 普通事件抛错 | 记录后继续 | **永不抛进循环** | 记 Failed 不阻断 | 记 non_blocking | 4/4 不阻断 |
+| 工具级钩子抛错 | **阻断该工具** | 决策为 deny | 不阻断 | 不阻断 | 1/4 阻断 |
+| 配置解析失败 | 跳过该扩展 | warn 且不注册 | 记 load_failure | 降级跳过 | 4/4 |
+| 输出非法 | — | 按纯文本处理 | 降级 Failed | 降级 plainText | 3/4 |
+| 超时 | — | 非阻断 | 非阻断（分级） | 非阻断 | 3/4 |
+| 未支持字段 | `updatedInput` 不重校验 | **有界降级 + warn** | 显式拒绝 | `deny` 时丢弃 | 4/4 |
 
 ### 5.5 信任模型
 
-| 维度 | pi | dsh | codex | CC |
-|---|---|---|---|---|
-| 机制 | 项目信任（管资源加载） | **声明「不是安全边界」** | hook trust hash + 状态枚举 | 交互式信任校验 |
-| 默认 | 无项目资源则放行 | 按 bash 对待 | Untrusted 只列表不执行 | 需校验通过才执行 |
-| 关闭开关 | — | — | bypass_hook_trust | `disableAllHooks` / managed-only |
-| 覆盖范围 | 扩展/技能/安装包 | 全部扩展 | hooks | hooks |
+| 维度 | pi | dsh | codex | CC | 共识度 |
+|---|---|---|---|---|---|
+| 机制 | 项目信任（管资源加载） | **声明「不是安全边界」** | hook trust hash + 状态枚举 | 交互式信任校验 | 4/4 |
+| 默认 | 无项目资源则放行 | 按 bash 对待 | Untrusted 只列表不执行 | 需校验通过才执行 | 4/4 |
+| 关闭开关 | — | — | bypass_hook_trust | `disableAllHooks` / managed-only | 2/4 |
+| 覆盖范围 | 扩展/技能/安装包 | 全部扩展 | hooks | hooks | 4/4 |
 
 ---
 
@@ -792,100 +792,100 @@ flowchart TD
 
 ### 6.1 钩子抛错时是否阻断
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| dsh | **永不抛进循环**：executor reject 转成「无 exit code」的非阻断 outcome | `hook-protocol/src/runner.ts:96-99` | 钩子不能拖垮 calling turn |
-| CC | 非 `exit 2` 一律 non_blocking | `utils/hooks.ts:2670-2730` | 区分「有意阻断」与「脚本 bug」 |
-| codex | 记 Failed/Error entry，继续其他 handler 与该次调用 | `events/permission_request.rs:265-271` | 单个 hook 失败不中断该次调用 |
-| pi | **普通事件不阻断，但 `tool_call` 抛错阻断该工具** | `runner.ts:1003` vs `runner.ts:1134-1152` | 「安全的默认是拒绝」——权限钩子崩了不能当通过 |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | **普通事件不阻断，但 `tool_call` 抛错阻断该工具** | **永不抛进循环**：executor reject 转成「无 exit code」的非阻断 outcome | 记 Failed/Error entry，继续其他 handler 与该次调用 | 非 `exit 2` 一律 non_blocking |
+| 源码依据 | `runner.ts:1003` vs `runner.ts:1134-1152` | `hook-protocol/src/runner.ts:96-99` | `events/permission_request.rs:265-271` | `utils/hooks.ts:2670-2730` |
+
+> **设计理由**：**pi**：「安全的默认是拒绝」——权限钩子崩了不能当通过；**dsh**：钩子不能拖垮 calling turn；**codex**：单个 hook 失败不中断该次调用；**CC**：区分「有意阻断」与「脚本 bug」
 
 > **四家的分歧点很清晰**：dsh / CC / codex 都选择「钩子是增强，坏了不该影响主流程」；pi 只在**工具级**选择相反方向。两种都自洽，但要注意 pi 的规则是**按事件类型**区分的——这要求扩展作者记住「哪个事件的异常会阻断」。
 
+
 ### 6.2 扩展改写输入之后谁复核
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | **不重校验**（明示） | `extensions/types.ts:1026-1027` |
-| CC | `updatedInput` 仅在 `allow`/`ask` 下生效，`deny` 时丢弃；且仍过 `checkRuleBasedPermissions` | `utils/hooks.ts:2850-2880`、`toolHooks.ts:373-405` |
-| codex | 仅 `permissionDecision:allow` 时可改写；改后由 `with_updated_hook_input` 走工具自己的接受路径 | `engine/output_parser.rs:162-170`、`core/src/tools/registry.rs:598-617` |
-| dsh | waterfall 可改写，但改写结果要满足下游的判别（`kind !== 'enter'` 即返回下游原值） | `hooks-claude-code/src/index.ts:232` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | **不重校验**（明示） | waterfall 可改写，但改写结果要满足下游的判别（`kind !== 'enter'` 即返回下游原值） | 仅 `permissionDecision:allow` 时可改写；改后由 `with_updated_hook_input` 走工具自己的接受路径 | `updatedInput` 仅在 `allow`/`ask` 下生效，`deny` 时丢弃；且仍过 `checkRuleBasedPermissions` |
+| 源码依据 | `extensions/types.ts:1026-1027` | `hooks-claude-code/src/index.ts:232` | `engine/output_parser.rs:162-170`、`core/src/tools/registry.rs:598-617` | `utils/hooks.ts:2850-2880`、`toolHooks.ts:373-405` |
 
-**这是本章最重要的一张表**：三家都把「改写」与「授权」绑定（要么限定在 allow 前提下、要么由下游重新判别），只有 pi 允许无条件改写且不重校验。
+> **设计理由**：**这是本章最重要的一张表**——三家都把「改写」与「授权」绑定（要么限定在 allow 前提下、要么由下游重新判别），只有 pi 允许无条件改写且不重校验。
 
 ### 6.3 多个扩展同时命中时的裁决
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| dsh | most-restrictive 折叠，**结论与顺序无关**；串行只为日志相邻 | `hook-protocol/src/merge.ts:35/91` | 让「谁先注册」不影响安全结论 |
-| CC | 权限结论按 `deny > ask > allow`；matcher 按来源优先级排序（本地 > 项目 > 用户，插件最低） | `utils/hooks.ts:2820-2847`、`hooksSettings.ts:230-271` | 越靠近本地的配置越优先 |
-| codex | 报告按配置顺序；**输入改写按完成顺序取最后完成者** | `dispatcher.rs:157-164`、`events/pre_tool_use.rs:149-153` | 报告要稳定，裁决要「最新」 |
-| pi | 按注册顺序，`tool_call` 后写覆盖前写（同一事件内先到先得） | `runner.ts:1134-1152`、`:586-597` | 简单可预测 |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 按注册顺序，`tool_call` 后写覆盖前写（同一事件内先到先得） | most-restrictive 折叠，**结论与顺序无关**；串行只为日志相邻 | 报告按配置顺序；**输入改写按完成顺序取最后完成者** | 权限结论按 `deny > ask > allow`；matcher 按来源优先级排序（本地 > 项目 > 用户，插件最低） |
+| 源码依据 | `runner.ts:1134-1152`、`:586-597` | `hook-protocol/src/merge.ts:35/91` | `dispatcher.rs:157-164`、`events/pre_tool_use.rs:149-153` | `utils/hooks.ts:2820-2847`、`hooksSettings.ts:230-271` |
+
+> **设计理由**：**pi**：简单可预测；**dsh**：让「谁先注册」不影响安全结论；**codex**：报告要稳定，裁决要「最新」；**CC**：越靠近本地的配置越优先
 
 ### 6.4 输出格式非法时如何处理
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| dsh | JSON 仅在 `exit 0` 且 stdout 以 `{` 开头才解析；解析失败按纯文本；顶层 `decision` 越界值忽略（避免产生真实阻断） | `codec.ts:66/32/71/80` |
-| CC | `safeParse` 失败降级 plainText + non_blocking error | `utils/hooks.ts:399-451` |
-| codex | 逐事件 schema 解析，失败记 Failed | `engine/output_parser.rs` |
-| pi | —（进程内调用，无序列化协议） | — |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | —（进程内调用，无序列化协议） | JSON 仅在 `exit 0` 且 stdout 以 `{` 开头才解析；解析失败按纯文本；顶层 `decision` 越界值忽略（避免产生真实阻断） | 逐事件 schema 解析，失败记 Failed | `safeParse` 失败降级 plainText + non_blocking error |
+| 源码依据 | — | `codec.ts:66/32/71/80` | `engine/output_parser.rs` | `utils/hooks.ts:399-451` |
+
+> **设计理由**：四家的共同点是「解析失败不等于阻断」——dsh 只在 `exit 0` 且 stdout 以 `{` 开头时才尝试解析，失败即按纯文本；codex 逐事件 schema 解析，失败记 Failed 但不中断；CC `safeParse` 失败降级 plainText + non_blocking error；pi 没有序列化协议，因此不存在这个问题。**关键设计是降级后的默认动作**：dsh 连顶层 `decision` 的越界值都选择忽略，理由是「避免产生真实阻断」——解析器不能因为读不懂就替用户拒绝。
 
 ### 6.5 hook 输出过大
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| codex | 默认超过 2,500 token 落盘 `hook_outputs/`，只给头尾预览 + 恢复路径；`limit=0` 关闭 | `output_spill.rs:11-12` | hook 输出吃爆上下文比 hook 失败更危险（且用户不可见） |
-| CC | 输出转为附件参与聚合 | `utils/hooks.ts:2783-2790` | 避免 hook 输出直接挤占上下文，阈值交给上下文机制 |
-| dsh / pi | 无专门机制 | — | — |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 无专门机制 | 无专门机制 | 默认超过 2,500 token 落盘 `hook_outputs/`，只给头尾预览 + 恢复路径；`limit=0` 关闭 | 输出转为附件参与聚合 |
+| 源码依据 | — | — | `output_spill.rs:11-12` | `utils/hooks.ts:2783-2790` |
+
+> **设计理由**：**codex**：hook 输出吃爆上下文比 hook 失败更危险（且用户不可见）；**CC**：避免 hook 输出直接挤占上下文，阈值交给上下文机制
 
 ### 6.6 无 UI / 非交互环境
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | 默认 `noOpUIContext`，`hasUI()` 据此判断；示例权限门在 `!ctx.hasUI` 时直接 block | `runner.ts:320-351/578`、`permission-gate.ts:20-23` |
-| CC | 非交互（SDK）视为已信任、跳过交互校验；`CLAUDE_CODE_SIMPLE` 跳过全部 hooks | `utils/hooks.ts:286-296/1982` |
-| codex | 按 `HookScope{Thread,Turn}` 区分作用域；无 UI 不影响 hooks（hooks 本身就是非交互的） | `protocol.rs:1610` |
-| dsh | 兼容层无 UI 依赖；`ui-cordis` 由页面半边承担 | `cordis-client-runner/src/client/orchestrator.ts:56-83` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 默认 `noOpUIContext`，`hasUI()` 据此判断；示例权限门在 `!ctx.hasUI` 时直接 block | 兼容层无 UI 依赖；`ui-cordis` 由页面半边承担 | 按 `HookScope{Thread,Turn}` 区分作用域；无 UI 不影响 hooks（hooks 本身就是非交互的） | 非交互（SDK）视为已信任、跳过交互校验；`CLAUDE_CODE_SIMPLE` 跳过全部 hooks |
+| 源码依据 | `runner.ts:320-351/578`、`permission-gate.ts:20-23` | `cordis-client-runner/src/client/orchestrator.ts:56-83` | `protocol.rs:1610` | `utils/hooks.ts:286-296/1982` |
+
+> **设计理由**：没有 UI 时「问」这条路断了，四家必须给出一个默认方向：CC 把非交互（SDK）视为已信任并跳过交互校验，codex 在无应答者时默认 allow（靠沙箱兜底），dsh 归一为 `unavailable`，pi 由扩展自行 fail-closed。这与 第 10 章 6.6 是同一个问题在本层的投影——**默认方向取决于对下游隔离能力的信任度**。
 
 ### 6.7 能力降级时如何对待「未支持」
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| dsh | **有界降级 + 显式告警**：CC 的 `updatedInput` 只 warn 不生效；codex 只支持 `deny` | `hooks-claude-code/src/index.ts:181`、`hook-protocol/src/types.ts:81` | 「宁可显式降级也不伪造能力」 |
-| codex | **显式拒绝**未实现的 handler 类型（`prompt` / `agent` 解析后跳过并记原因） | `engine/discovery.rs:635-643` | 配置能解析不代表能执行，必须让人看见差距 |
-| CC | 类型层面就是联合，不存在的字段无法表达 | `types/hooks.ts:70-164` | 用 schema 消除歧义 |
-| pi | —（无跨实现兼容问题） | — | — |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | —（无跨实现兼容问题） | **有界降级 + 显式告警**：CC 的 `updatedInput` 只 warn 不生效；codex 只支持 `deny` | **显式拒绝**未实现的 handler 类型（`prompt` / `agent` 解析后跳过并记原因） | 类型层面就是联合，不存在的字段无法表达 |
+| 源码依据 | — | `hooks-claude-code/src/index.ts:181`、`hook-protocol/src/types.ts:81` | `engine/discovery.rs:635-643` | `types/hooks.ts:70-164` |
+
+> **设计理由**：**dsh**：「宁可显式降级也不伪造能力」；**codex**：配置能解析不代表能执行，必须让人看见差距；**CC**：用 schema 消除歧义
 
 ### 6.8 扩展加载失败
 
-| 项目 | 做法 | 源码依据 |
-|---|---|---|
-| pi | 单个扩展失败只记录并继续 | `loader.ts:622-625` |
-| dsh | preset 服务泄漏到 root realm 直接拒绝挂载；host-half 启动失败先 dispose 再抛 | `agent-preset-registry/src/mount.ts:261`、`lifecycle.ts:29` |
-| codex | 记 `load_failure` 进 warnings；`required_load_errors` 另分一类 | `engine/discovery.rs` |
-| CC | 逐级降级：manifest 缺失合成默认 → 非法抛错 → commands/skills 失败 catch 成空数组 | `pluginLoader.ts:1154-1211`、`commands.ts:361-372` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 单个扩展失败只记录并继续 | preset 服务泄漏到 root realm 直接拒绝挂载；host-half 启动失败先 dispose 再抛 | 记 `load_failure` 进 warnings；`required_load_errors` 另分一类 | 逐级降级：manifest 缺失合成默认 → 非法抛错 → commands/skills 失败 catch 成空数组 |
+| 源码依据 | `loader.ts:622-625` | `agent-preset-registry/src/mount.ts:261`、`lifecycle.ts:29` | `engine/discovery.rs` | `pluginLoader.ts:1154-1211`、`commands.ts:361-372` |
+
+> **设计理由**：四家一致选择「单个扩展失败不拖垮整体」，但**失败的记账粒度**不同：pi 只记录并继续；codex 把 `load_failure` 与 `required_load_errors` 分成两类 warnings；CC 逐级降级（manifest 缺失合成默认 → 非法抛错 → 子资源失败 catch 成空数组）；dsh 对 preset 泄漏到 root realm 直接拒绝挂载。**dsh 的例外值得注意**：它区分了「插件自身坏了」（可继续）与「插件污染了宿主」（必须拒绝）。
 
 ### 6.9 资源清理与残留
 
-| 项目 | 做法 | 源码依据 | 设计理由 |
-|---|---|---|---|
-| dsh | **框架级保证**：effect/listener/service 随 fiber dispose 一起移除；detached 链 dispose 时先 abort 再 drain | `vendor/cordis/README.md:61`、`hook-protocol/src/detached.ts:53` | `dispose()` 返回即代表无残留回调 |
-| codex | `shutdown()` 关闭信号量 → `abort_all` → join，避免会话残留进程 | `engine/command_runner.rs:180-187` | `shutdown()` 返回即代表无残留子进程 |
-| pi | 重载时 `invalidate()` 旧 runner，旧 `ctx` 再调用会抛错 | `loader.ts:185-192`、`agent-session.ts:3295-3315` | 用抛错代替静默失效 |
-| CC | 热重载 plugin hooks；子进程由套在 `Promise.race` 的 abort 收束 | `loadPluginHooks.ts:147-148`、`utils/hooks.ts:1273` | — |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 重载时 `invalidate()` 旧 runner，旧 `ctx` 再调用会抛错 | **框架级保证**：effect/listener/service 随 fiber dispose 一起移除；detached 链 dispose 时先 abort 再 drain | `shutdown()` 关闭信号量 → `abort_all` → join，避免会话残留进程 | 热重载 plugin hooks；子进程由套在 `Promise.race` 的 abort 收束 |
+| 源码依据 | `loader.ts:185-192`、`agent-session.ts:3295-3315` | `vendor/cordis/README.md:61`、`hook-protocol/src/detached.ts:53` | `engine/command_runner.rs:180-187` | `loadPluginHooks.ts:147-148`、`utils/hooks.ts:1273` |
+
+> **设计理由**：**pi**：用抛错代替静默失效；**dsh**：`dispose()` 返回即代表无残留回调；**codex**：`shutdown()` 返回即代表无残留子进程
 
 ---
 
 ## 七、设计建议
 
-### 7.1 共识（四家一致，照做）
+### 7.1 共识（四家一致，可直接采纳）
 
 1. **扩展点必须挂在稳定的事件名上，而不是内部函数上** —— 四家全部用「事件名 + payload」解耦，无一让扩展直接调内部方法。
 2. **阻断信号要单一且明确** —— 三家外部协议实现都用 `exit 2`，其他非零一律非阻断。**这个统一不是巧合，而是「阻断必须罕见且显式」这一诉求的自然结果**。
 3. **扩展抛错默认不阻断主流程** —— 除 pi 的工具级钩子外，四家都选择「扩展坏了不影响 Agent 干活」。
 4. **注册即扩展** —— 四家都允许扩展注册工具/命令等一等能力，而不只是「监听」。
 
-### 7.2 推荐（至少一家验证有效）
+### 7.2 推荐（多数做对，值得抄）
 
 1. **把「改 payload」与「拥有实现」分成两条通道**（学 codex）。这是本章最值得抄的一条。只用 hook 做扩展，会陷入两难：要么让外部进程持有工具实现（不安全、状态无法同步），要么让 hook 改写输入（那就必须规定谁来重新校验）。codex 的注释把这条线写得很清楚。
 2. **把调度语义做成可选模式，而不是一种固定行为**（学 dsh 的 5 模式）。同一个事件在不同场景下的正确语义不同：会话收尾要「只读广播」（`serial`），上下文改写要「可包裹可否决」（`waterfall`），启动通知要「并发不等」（`emit`）。**用一张枚举表把语义说清楚，比为每个事件单独设计行为更省事**。
@@ -893,7 +893,7 @@ flowchart TD
 4. **对未支持的能力做「有界降级 + 显式告警」**（学 dsh 的兼容层）。兼容对手协议时，与其假装支持（静默忽略），不如解析后跳过并 warn。codex 连「配置里能写但引擎不支持」都要记一条 `load_failure`。
 5. **给 hook 输出设体积上限并落盘**（学 codex 的 `output_spill`）。扩展输出吃爆上下文是最隐蔽的故障——用户看不见原因，只看到上下文变短了。
 
-### 7.3 权衡（没有最优，看场景）
+### 7.3 权衡（各有代价，按场景选）
 
 1. **进程内 vs 进程外**。
    - 进程内（pi / codex contributor）：启动快、可持有状态、可注册工具；但扩展与宿主同生共死，一个段错误带走一切，且版本兼容是编译期问题。
@@ -907,7 +907,7 @@ flowchart TD
 
 3. **信任机制做成机制还是声明**。codex 用 hash + 状态枚举（可执行）；CC 用交互校验（用户确认）；dsh 明确声明不是边界（要求当 bash 对待）。**最不可取的做法是「做了个沙箱但没说它不防恶意代码」**。
 
-### 7.4 反例（明确不该做什么）
+### 7.4 反例（明确不该做的）
 
 1. **不要让扩展改写输入之后免于重新校验**。pi 自己把这一点写在注释里（`extensions/types.ts:1026-1027`）。只要「检查」与「执行」之间存在可改写窗口，检查就是装饰。正确顺序是：改写 → 重校验 → 判定 → 执行；或者像 CC/codex 那样把改写**绑定在授权前提下**。
 
@@ -1011,4 +1011,4 @@ flowchart TD
 
 ---
 
-*本章所有断言均经 `grep -n` / Read 实测核验；Claude-Code 的实现均标注门控状态。*
+*本章所有断言均经 `grep -n` / Read 实测核验；CC 的实现均标注门控状态。*

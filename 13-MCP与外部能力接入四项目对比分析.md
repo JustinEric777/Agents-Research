@@ -108,7 +108,7 @@
 
 ## 三、概念对齐表
 
-| 概念 | pi | deepseek-harness | codex | CC |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 本层的实体 | 无 | Cordis 插件（`McpClient`）+ 作用域服务（`McpResourceRuntime`） | `McpConnectionSet`（连接集）+ `McpServerRegistration` / `ResolvedMcpCatalog`（登记项与解析后目录） | `MCPServerConnection`（5 态 union） |
 | 配置载体 | 无（核心 settings 无 `mcp` 字段，`settings-manager.ts:110-163`） | `cordis.yml` 的插件 `config`（每行一个 server，`index.ts:119-135`） | `config.toml` 的 `[mcp_servers]`（`config_toml.rs:290`） | `.mcp.json` 等 7 种 `ConfigScope`（`types.ts:10-20`） |
@@ -1318,7 +1318,7 @@ pub(crate) fn with_current_trace(mut meta: Option<RequestMetaObject>) -> Option<
 
 **小结**：codex 在这一层上把三件事做到了四家唯一——**server 来源可解释**（5 类来源 + 优先级仲裁）、**调用可归因**（专用审批动作带 server 与凭据身份）、**失败不越界**（默认降级、`required` 才阻断、fail closed）。它付出的是 5.9 万行实现与两个 crate 的维护成本。
 
-### 4.4 CC —— 七种作用域与八种传输的「全家桶」
+### 4.4 Claude-Code —— 七种作用域与八种传输的「全家桶」
 
 > 一句话定性：把 MCP 做成一个**有完整管理界面的一等下游**——配置按 7 种作用域分层且企业可独占，传输按 8 种形态分派，凭据有独立存储与授权协议，连接状态是一台给 UI 用的 React 状态机。
 
@@ -2052,7 +2052,7 @@ flowchart TD
 | `codex-rs/core/src/mcp_tool_exposure.rs` | 工具暴露策略与预算判定 | 214 |
 | `codex-rs/core/src/tools/spec_plan.rs` | 工具表装配与 MCP 工具注册 | 1,246 |
 
-### CC
+### Claude-Code
 
 | 文件 | 职责 | 行数 |
 |---|---|---|

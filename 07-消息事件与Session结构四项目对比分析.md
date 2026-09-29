@@ -6,29 +6,31 @@
 >
 > **前置依赖**：无（本层是其余各层的上游）。
 >
+> **跨层联动**：06 —— 见 2.3 与第 6 章 6.5。压缩与提示词组装争用同一个资源（前缀）：第 2 章的全部缓存策略都以「前缀稳定」为前提，而压缩的本职就是重写前缀。这条线在第 6 章 6.5 有完整展开；本章只负责给出「前缀」这个对象本身的定义——什么算一段消息、什么算一次替换。
+>
 > **分析对象**：
 > - **pi** —— `packages/agent/src/harness/session/types.ts`（Entry/Branch）+ `packages/ai/src/types.ts`（Message）+ `harness/messages.ts`（宿主消息）
 > - **deepseek-harness** —— `packages/core/session/src/{types,surface}.ts` + `packages/llm/llm/src/{message,types}.ts`
 > - **codex** —— `codex-rs/protocol/src/{items,models}.rs` + `core/src/context_manager/history.rs` + `core/src/state/session.rs`
 > - **Claude-Code** —— `src/types/message.ts` + `src/types/ids.ts` + `src/utils/messages.ts`（规范化与配对）+ `src/utils/sessionStorage.ts`（消息链落盘）
 >
-> **易混点**：Claude-Code 的 `src/history.ts` 是**用户输入的 prompt/命令历史**（Up 箭头复用、Ctrl+R 搜索，存 `~/.claude/history.jsonl`），与会话消息无关；会话消息落在 `src/utils/sessionStorage.ts`。
+> **易混点**：CC 的 `src/history.ts` 是**用户输入的 prompt/命令历史**（Up 箭头复用、Ctrl+R 搜索，存 `~/.claude/history.jsonl`），与会话消息无关；会话消息落在 `src/utils/sessionStorage.ts`。
 
 ---
 
 ## 一、核心结论速览
 
-1. **四种世界观**：pi 是**可分支文档树**（Entry 是树节点，Branch 是游标）；dsh 是**可审计事件流**（append-only 日志为唯一事实源，消息从事件 derive）；codex 是**provider 原生 item 数组**（`ResponseItem` 直出 API，零转换）；Claude-Code 是**带父指针的消息 DAG**（`uuid` + `parentUuid`，写入时线性、读取时从 leaf 回溯）。
+1. **四种世界观**：pi 是**可分支文档树**（Entry 是树节点，Branch 是游标）；dsh 是**可审计事件流**（append-only 日志为唯一事实源，消息从事件 derive）；codex 是**provider 原生 item 数组**（`ResponseItem` 直出 API，零转换）；CC 是**带父指针的消息 DAG**（`uuid` + `parentUuid`，写入时线性、读取时从 leaf 回溯）。
 2. **只有 dsh 有独立的「事实源 vs 视图」分离**：`surfaceOp: 'replace'` 让模型可见序列可被替换（压缩用），而日志永远保留被替换前的全部事件。pi/codex/CC 都是「历史即事实」。
-3. **只有 dsh 与 Claude-Code 把「不是模型可见消息」的记录也结构化保留**：dsh 的 `assistant/attempt`（失败的模型尝试）、`request/header`（log-only 事件）；CC 的 `ProgressMessage`/`HookResultMessage`/`TombstoneMessage`（判别联合的独立成员，而不是塞进某条消息的字段）。
-4. **Claude-Code 的 `TombstoneMessage`（墓碑）是四家中唯一的「就地删除标记」**：transcript 是 append-only 且有多消费者（UI/磁盘/SDK），删除通过墓碑广播，磁盘侧再按 UUID 做 truncate。
+3. **只有 dsh 与 CC 把「不是模型可见消息」的记录也结构化保留**：dsh 的 `assistant/attempt`（失败的模型尝试）、`request/header`（log-only 事件）；CC 的 `ProgressMessage`/`HookResultMessage`/`TombstoneMessage`（判别联合的独立成员，而不是塞进某条消息的字段）。
+4. **CC 的 `TombstoneMessage`（墓碑）是四家中唯一的「就地删除标记」**：transcript 是 append-only 且有多消费者（UI/磁盘/SDK），删除通过墓碑广播，磁盘侧再按 UUID 做 truncate。
 5. **最严的边界守卫是 dsh 的 `ignorable`**（`session/types.ts:511`）：未知事件类型若无 `ignorable: true` 标记，读取方**必须拒绝重建**——「宁可误拒（不便），也不静默续上一个被掏空的会话（灾难）」（源码注释）。
 
 ---
 
 ## 二、本层职责与边界
 
-### 2.1 本层解决什么问题
+### 2.1 子职责拆解
 
 | 职责 | 问题 |
 |---|---|
@@ -39,7 +41,26 @@
 | **⑤ 协议转换** | 内部模型 → provider 请求体怎么走？ |
 | **⑥ 扩展与演进** | 新增消息类型/事件类型要不要改核心？ |
 
-### 2.2 层次定位
+四家对这些职责的**边界画在哪里**给出的是不同答案：
+
+| 边界问题 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 事实源 | 树（Entry + Branch） | append-only 日志 + surface | `ResponseItem` 数组（Arc COW） | 消息 DAG（`parentUuid`） |
+| 模型可见 == 记录？ | 是 | **否**（surface 可替换） | 是 | 是（但可用墓碑撤销） |
+| 顺序标识 | `seq`（单调）+ `parentId` | `seq`（连续 branded） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` + 文件行序 |
+| 转换成本 | 有（`convertToLlm`） | 有（`deriveEventMessage`） | **零**（直接 serde） | 中（`normalizeMessagesForAPI`） |
+
+---
+
+### 2.2 本层不管什么
+
+- **不管怎么落盘**（那是 L8，见第 8 章）。本层决定「事实源是什么」，第 8 章决定「它如何跨进程存活」。
+- **不管压缩怎么选段与产出**（那是 L6，见第 6 章）。本层只提供「surface 可否替换」这个能力位。
+- **不管循环怎么驱动**（那是 L3，见第 3 章）。本层定义模型与事件的数据形态，谁在推它归第 3 章。
+- **不管 provider 的具体协议差异**（那是 L11，见第 11 章）。本层给出内部模型与转换成本，各家线协议的细节归第 11 章。
+- **不管工具的定义与准入**（那是 L5 与 L10）。本层的 `tool_use` / `tool_result` 只作为消息单元存在，它是什么、能不能跑不在本章。
+
+### 2.3 层次定位
 
 ```text
 四家如何回答「事实源是什么」
@@ -78,20 +99,10 @@
           └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
-### 2.3 四家边界差异
-
-| 边界问题 | pi | dsh | codex | Claude-Code |
-|---|---|---|---|---|
-| 事实源 | 树（Entry + Branch） | append-only 日志 + surface | `ResponseItem` 数组（Arc COW） | 消息 DAG（`parentUuid`） |
-| 模型可见 == 记录？ | 是 | **否**（surface 可替换） | 是 | 是（但可用墓碑撤销） |
-| 顺序标识 | `seq`（单调）+ `parentId` | `seq`（连续 branded） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` + 文件行序 |
-| 转换成本 | 有（`convertToLlm`） | 有（`deriveEventMessage`） | **零**（直接 serde） | 中（`normalizeMessagesForAPI`） |
-
----
 
 ## 三、概念对齐表
 
-| 概念 | pi | deepseek-harness | codex | Claude-Code |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 消息联合类型 | `Message`（4 成员）`ai/types.ts:553` | `Message`（role map）`llm/message.ts:196` | `ResponseItem`（enum）`models.rs:1011` | `Message`（9 成员）`types/message.ts:124-134` |
 | 消息基类 | `AgentMessage` `agent/types.ts:370` | `MessageBase`（id + content + **source**） | 各 enum 变体自带字段 | `MessageBase`（uuid/parentUuid/…）`message.ts:6-17` |
@@ -408,7 +419,7 @@ normalizeMessagesForAPI()
 
 ### 5.1 消息单元设计
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 联合成员数 | 4（+ 声明合并） | role map（+ 声明合并） | enum（含 4 内容块） | **9** | 0/4 |
 | 身份载体 | entry `id`（存储层） | `MessageId`（消息自带） | 无（Vec 位置） | `uuid`（消息自带） | 2/4 自带 |
@@ -418,7 +429,7 @@ normalizeMessagesForAPI()
 
 ### 5.2 事件/记录体系
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 记录模型 | 树节点（消息即条目） | **事件日志** | item 数组 | 消息联合即记录 | 0/4 |
 | 类型扩展 | custom entry + projector | **声明合并 map** | serde enum + Extension | 宽松影子类型 + `[key:string]:unknown` | 0/4 |
@@ -427,7 +438,7 @@ normalizeMessagesForAPI()
 
 ### 5.3 Session 状态持有
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 核心持有 | 存储抽象 + 分支游标 | 日志句柄 + surface | `SessionState` + `ContextManager` | 消息数组 + transcript 落盘 | 0/4 |
 | 写并发控制 | `mutate` 互斥屏障 | append-only + 锁 | `Mutex<SessionState>` | 进程内队列 + 定时 drain | 0/4 |
@@ -437,7 +448,7 @@ normalizeMessagesForAPI()
 
 ### 5.4 分支与回放
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 分支模型 | **Branch 树**（fork 子树/整树） | seed 继承（`session/end-seed`） | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 | 0/4 |
 | 分支摘要 | **✓ `branch_summary`** | ✗ | ✗ | ✗ | 1/4 |
@@ -446,7 +457,7 @@ normalizeMessagesForAPI()
 
 ### 5.5 协议转换
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 转换成本 | 中（`convertToLlm` + adapter） | 中（`deriveEventMessage` 纯函数） | **零**（直接 serde） | 高（`normalizeMessagesForAPI` + `ensureToolResultPairing`） | 0/4 |
 | 系统提示更新 | system 消息 `sections`/`toolsAdded` 增量 | `system/message` + developer tool 块 | `reference_context_item` 基线 diff | `isMeta` 注入 + 重放 | 0/4 |
@@ -455,7 +466,7 @@ normalizeMessagesForAPI()
 
 ### 5.6 边界防护
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 未知类型 | 编译期 union | **`ignorable` 守卫（fail-closed）** | serde 失败即错 | 宽松类型（静默容忍） | 1/4 |
 | 序号完整性 | `seq` 单调 | **branded 连续 seq** | Vec 位置 | 文件行序 + uuid | 1/4 |
@@ -468,78 +479,76 @@ normalizeMessagesForAPI()
 
 ### 6.1 未知消息/事件类型
 
-- **pi**：编译期 union，无运行时概念。
-- **dsh**：`ignorable` 守卫（`types.ts:511`）——未知事件若无标记，**拒绝重建**。源码注释（`[注释]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」。
-- **codex**：serde tag 反序列化失败即错。
-- **Claude-Code**：宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 编译期 union，无运行时概念 | `ignorable` 守卫（`types.ts:511`）——未知事件若无标记，**拒绝重建**。源码注释（`[注释]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」 | serde tag 反序列化失败即错 | 宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传 |
 
-**设计理由**：dsh 的 fail-closed 与 CC 的 fail-open 是两种极端，取决于定位——dsh 要保证「恢复出来的会话与用户实际经历一致」，CC 要保证「旧版本能打开新版本写的会话」。
+> **设计理由**：dsh 的 fail-closed 与 CC 的 fail-open 是两种极端，取决于定位——dsh 要保证「恢复出来的会话与用户实际经历一致」，CC 要保证「旧版本能打开新版本写的会话」。
 
 ### 6.2 引用悬空
 
-| 项目 | 机制 | 依据 |
-|---|---|---|
-| pi | `parentId` 存在性校验；缺失时抛 `SessionInvariantError` | `session.ts` |
-| dsh | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `surface.ts:410` |
-| codex | `response_id`/`window_ids` 随元数据持久化 | `CompactedHistoryMetadata` |
-| Claude-Code | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 | `sessionStorage.ts:2088-2090` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 机制 | `parentId` 存在性校验；缺失时抛 `SessionInvariantError` | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `response_id`/`window_ids` 随元数据持久化 | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 |
+| 源码依据 | `session.ts` | `surface.ts:410` | `CompactedHistoryMetadata` | `sessionStorage.ts:2088-2090` |
 
-**设计理由**（`[注释]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
+> **设计理由**（`[注释]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
+
 
 ### 6.3 消息被撤销
 
-- **Claude-Code**：`TombstoneMessage` 广播 + 磁盘 `removeMessageByUuid` truncate（`:871-951`）；**>50MB 直接放弃**（不重写大文件）。
-- **dsh**：不用删除，用 `surfaceOp.replace` 把区间从「视图」中移出，日志保留。
-- **pi / codex**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | 不用删除，用 `surfaceOp.replace` 把区间从「视图」中移出，日志保留 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | `TombstoneMessage` 广播 + 磁盘 `removeMessageByUuid` truncate（`:871-951`）；**>50MB 直接放弃**（不重写大文件） |
 
-**设计理由**（`[推断]` CC 的 50MB 上限）：大文件整写代价过高，宁可保留被撤销的消息（多几条历史）也不阻塞用户。
+> **设计理由**（`[推断]` CC）：大文件整写代价过高，宁可保留被撤销的消息（多几条历史）也不阻塞用户。
 
 ### 6.4 tool_use / tool_result 配对
 
-| 项目 | 保证方式 |
-|---|---|
-| pi | 构造时保证（每条 toolCall 必生成结果，见 第 4 章「零逃逸」） |
-| dsh | 事件层校验：`tool/result` 必须引用 `tool/call` 的 seq |
-| codex | payload 类型校验 + `Fatal` |
-| Claude-Code | **`ensureToolResultPairing` 独立兜底**（`:5133`，7 路修复） |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 保证方式 | 构造时保证（每条 toolCall 必生成结果，见 第 4 章「零逃逸」） | 事件层校验：`tool/result` 必须引用 `tool/call` 的 seq | payload 类型校验 + `Fatal` | **`ensureToolResultPairing` 独立兜底**（`:5133`，7 路修复） |
 
-**设计理由**（`[推断]`）：CC 需要独立兜底，因为它的消息可能来自历史文件（可能被手工编辑、可能来自旧版本、可能因压缩留下残片）。pi/dsh 的配对在写入时就保证了。
+> **设计理由**（`[推断]`）：CC 需要独立兜底，因为它的消息可能来自历史文件（可能被手工编辑、可能来自旧版本、可能因压缩留下残片）。pi/dsh 的配对在写入时就保证了。
+
 
 ### 6.5 分支/继承边界的识别
 
-- **pi**：`parentId` 链（数据层）。
-- **dsh**：`session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放。
-- **codex**：`forked_from_ordinal_exclusive`（按序列位置截断）。
-- **Claude-Code**：`parentUuid` 分叉 + `logicalParentUuid`（压缩边界用）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `parentId` 链（数据层） | `session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
 
-**设计理由**（`[推断]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
+> **设计理由**（`[推断]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
 
 ### 6.6 上下文替换（压缩后）
 
-- **dsh**：`surfaceOp: { op: 'replace', startSeq, endSeq }` ——视图替换，日志保留。
-- **codex**：重写 `history` + `history_version` 自增；`review_history` 保留旧 transcript 供 guardian 审查。
-- **pi**：`CompactionEntry` 进树（`retainedTail` 自包含）。
-- **Claude-Code**：`compact_boundary` 系统消息 + `preservedSegment`（`headUuid`/`anchorUuid`/`tailUuid`）+ 加载时 `applyPreservedSegmentRelinks` 重连（`:1839`），并**物理裁剪** boundary 之前的未保留消息（`:1944-1955`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `CompactionEntry` 进树（`retainedTail` 自包含） | `surfaceOp: { op: 'replace', startSeq, endSeq }` ——视图替换，日志保留 | 重写 `history` + `history_version` 自增；`review_history` 保留旧 transcript 供 guardian 审查 | `compact_boundary` 系统消息 + `preservedSegment`（`headUuid`/`anchorUuid`/`tailUuid`）+ 加载时 `applyPreservedSegmentRelinks` 重连（`:1839`），并**物理裁剪** boundary 之前的未保留消息（`:1944-1955`） |
+
+> **设计理由**：压缩在本层的本质是让「模型看到的历史 ≠ 记录下来的历史」。四家的实现按**是否保留原日志**分成两档：dsh 只改 surface 投影（日志完整保留），pi 把 compaction 做成树上的 entry（保留结构但被压内容已销毁），codex 重写 history 并递增版本号，CC 用 boundary 消息 + `preservedSegment` 重连并物理裁剪。分档依据是**这个项目是否需要「回放一次真实的过去」**——dsh 需要（可审计），其余三家只需要「继续对话」。
 
 ### 6.7 resume 已压缩会话
 
-- **Claude-Code**：`findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`）。
-- **codex**：`InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章）。
-- **dsh**：`foldSurface` 折叠出不变量。
-- **pi**：`newestCompactionIndex` 检测已有更新的压缩 entry 即跳过（见 第 6 章）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `newestCompactionIndex` 检测已有更新的压缩 entry 即跳过（见 第 6 章） | `foldSurface` 折叠出不变量 | `InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章） | `findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`） |
+
+> **设计理由**：这里的分歧是「谁来负责不重复压缩」。pi 用 `newestCompactionIndex` 检测并跳过，codex 用 `InitialHistory::Resumed` 回填，dsh 直接折叠 surface 得出不变量，CC 的处理最完整——它不仅要「切对段」，还要**防止刚打开就再次触发自动压缩**。这个坑源于旧 token 计数在加载之后不再成立。
 
 ### 6.8 会话配置与历史不匹配
 
-- **dsh**：`agentPreset`/`delegationDepth` 随会话落盘——resume 时配置必然匹配。
-- **其余三家**：无此机制（配置来自当前启动参数，可能与历史不匹配）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 无此机制（配置来自当前启动参数，可能与历史不匹配） | `agentPreset`/`delegationDepth` 随会话落盘——resume 时配置必然匹配 | 无此机制（配置来自当前启动参数，可能与历史不匹配） | 无此机制（配置来自当前启动参数，可能与历史不匹配） |
+| 源码依据 | — | `core/session/src/types.ts:94`（`SessionHeader`） | — | — |
 
-**设计理由**（`[注释]` dsh）：模型面对的历史如果超出它当前的工具/prompt 能力，会产生「历史里有我无法执行的操作」的错位。这是多 agent / 多 preset 系统的真实风险。
-
+> **设计理由**（`[注释]` dsh）：模型面对的历史如果超出它当前的工具 / prompt 能力，就会产生「历史里有我无法执行的操作」的错位。这是多 agent / 多 preset 系统的真实风险。
 ---
 
 ## 七、设计建议
 
-### 7.1 共识（可直接采纳）
+### 7.1 共识（四家一致，可直接采纳）
 
 1. **每条消息携带稳定 `id`**，跨表示层（日志/UI/请求）身份不漂移。
 2. **顺序标识要么单调序号（dsh/pi），要么显式父指针（CC）**，二者至少要有一个。
@@ -548,7 +557,7 @@ normalizeMessagesForAPI()
 5. **前缀缓存友好**：排序稳定、增量更新、压缩时保留前缀（四家都做了）。
 6. **引用完整性检测**：悬空父指针、未配对的 tool_use 必须有检测/修复路径。
 
-### 7.2 推荐（按收益排序）
+### 7.2 推荐（多数做对，值得抄）
 
 1. **事实源与视图分离**（学 dsh）：日志 append-only，模型可见序列是「投影」。上限最高——支持压缩替换、回滚、多视图（模型视图 vs 用户 transcript 视图）。成本：需要 `foldSurface`/`deriveEventMessage` 全套。
 2. **给消息加 `source` 溯源字段**（学 dsh `llm/message.ts:136`）：压缩后仍能回答「这条是工具产的还是用户写的」。这是 第 6 章 checkpoint source 的前提。
@@ -559,14 +568,14 @@ normalizeMessagesForAPI()
 7. **只读共享用 COW**（学 codex `Arc<Vec>`）：多消费者（主循环、压缩、UI）零拷贝共享历史。
 8. **未知类型默认 fail-closed，除非数据自己声明可忽略**（学 dsh `ignorable`）。
 
-### 7.3 权衡
+### 7.3 权衡（各有代价，按场景选）
 
 1. **四种世界观怎么选**：框架/多消费者 → dsh 式事件溯源；轻量嵌入 → pi 式树；深度绑定单一 provider → codex 式原生 item；交互式产品 + 已有 provider 协议 → CC 式消息 DAG。
 2. **树（pi）vs 日志（dsh）**：树的独有价值是**并行探索**（branch_summary）；日志的独有价值是**可审计与可替换**。若产品不需要「离开主干探索」，树的分支能力就是冗余复杂度。
 3. **宽松类型（CC）vs 严格类型（dsh）**：宽松让旧版本能打开新版本的数据，代价是编译期保障丧失（CC 的 `[key: string]: unknown` 让大量字段无法被类型检查）。
 4. **序号 vs 父指针**：序号便于范围扫描与压缩区间表达（dsh/pi）；父指针天然支持分叉（CC）。**两者并存成本不高，建议都有**。
 
-### 7.4 反例
+### 7.4 反例（明确不该做的）
 
 1. **不要让「记录下来的历史」与「发给模型的历史」只靠隐式约定对齐**（对照 dsh 用事件显式表达替换）。一旦不一致，排查成本极高。
 2. **不要用「删除」处理流式中断的残留消息**（对照 CC 的墓碑）。append-only 存储 + 多消费者场景下，删除需要每个消费者各自实现，必然漏。

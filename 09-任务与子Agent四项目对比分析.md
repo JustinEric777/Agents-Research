@@ -6,6 +6,8 @@
 >
 > **前置依赖**：03（主循环，谁拥有调度权）、04（工具调用，委派入口本身是一个工具）、05（工具定义，子 Agent 工具如何被描述）、07（消息 / 会话模型，子 Agent 的上下文从哪来）、08（持久化，被委派者的会话如何落盘）。
 >
+> **跨层联动**：10 —— 见 2.3 与第 10 章 6.7。子 Agent 的权限不是新开一条判定链，而是**继承与收窄**：本层决定「子 Agent 有没有自己的会话与工具池」，第 10 章 6.7 决定「父的授权怎么传下去」，同一件事在两层各出现一次。另有一处向外的联动：**14** —— 见第 14 章 5.2，长跑的子 Agent 同时是 L9 的对象与 L14 的对象，两章结论互补而不重叠。
+>
 > **分析对象**：
 > - **pi** —— `packages/agent/src/harness/session/{types,session}.ts` + `harness/runtime/lane.ts`（Branch 游标与 lane 串行化）+ `packages/coding-agent/examples/extensions/subagent/index.ts`（子 Agent 是示例扩展，内核无此概念）
 > - **deepseek-harness** —— `packages/subagent/subagent/src/{index,types,child-agent,depth,continuation}.ts` + `subagent-{in-process-driver,fork-in-process,spawn-in-process,acp,claude-code,codex}/src/*`
@@ -18,15 +20,15 @@
 
 ## 一、核心结论速览
 
-1. **「子 Agent 是什么」没有共识，四家给出了四种本体**：pi 认为它是**另一个操作系统进程**（内核里甚至没有这个概念）；dsh 认为它是**一个可被「驱动」的会话**；codex 认为它是**线程图上的一个节点**；Claude-Code 认为它是**可创建、可观察、可停止的一等任务对象**。
+1. **「子 Agent 是什么」没有共识，四家给出了四种本体**：pi 认为它是**另一个操作系统进程**（内核里甚至没有这个概念）；dsh 认为它是**一个可被「驱动」的会话**；codex 认为它是**线程图上的一个节点**；CC 认为它是**可创建、可观察、可停止的一等任务对象**。
 
-2. **委派入口高度一致，返回契约高度不一致**：四家都是「给模型一个工具」，但工具返回的是**最终文本**（pi 示例、dsh 前台模式）、**agent 句柄**（codex 的 `agent_id`）、还是**task_id + 输出文件路径**（Claude-Code）——这决定了父 Agent 后续能否「再问一次」。
+2. **委派入口高度一致，返回契约高度不一致**：四家都是「给模型一个工具」，但工具返回的是**最终文本**（pi 示例、dsh 前台模式）、**agent 句柄**（codex 的 `agent_id`）、还是**task_id + 输出文件路径**（CC）——这决定了父 Agent 后续能否「再问一次」。
 
-3. **「默认不继承父上下文」是 3/4 家的共识**：pi 的示例用 `--no-session`、dsh 的 `inheritsParentContext=false`、Claude-Code 的普通子 Agent 只拿到 `prompt` 一个字符串。**唯一例外是 Claude-Code 的 fork agent**，它继承父的完整消息历史 + 渲染好的 system prompt + 精确工具数组。
+3. **「默认不继承父上下文」是 3/4 家的共识**：pi 的示例用 `--no-session`、dsh 的 `inheritsParentContext=false`、CC 的普通子 Agent 只拿到 `prompt` 一个字符串。**唯一例外是 CC 的 fork agent**，它继承父的完整消息历史 + 渲染好的 system prompt + 精确工具数组。
 
-4. **深度限制上四家都选了最保守的值**：dsh `maxDepth` 默认 **1**、codex 有 thread spawn 深度上限（超限返回模型可见错误）、Claude-Code 在非内部构建下**直接禁用子 Agent 的 AgentTool**。只有 pi 的示例扩展未设限——因为它压根不在内核里。
+4. **深度限制上四家都选了最保守的值**：dsh `maxDepth` 默认 **1**、codex 有 thread spawn 深度上限（超限返回模型可见错误）、CC 在非内部构建下**直接禁用子 Agent 的 AgentTool**。只有 pi 的示例扩展未设限——因为它压根不在内核里。
 
-5. **结果回灌分「同步」与「异步」两代，异步路径都刻意不唤醒空闲 Agent**：同步走 `tool_result`（pi / dsh 前台 / Claude-Code 同步）；异步走**入队消息**（Claude-Code 的 `<task-notification>`、codex 的 `notify_parent_of_terminal_turn`），且 codex 的消息板明确规定「通知准纳入与 turn 完成原子绑定，不启动新工作、不跨 turn 存活」。
+5. **结果回灌分「同步」与「异步」两代，异步路径都刻意不唤醒空闲 Agent**：同步走 `tool_result`（pi / dsh 前台 / CC 同步）；异步走**入队消息**（CC 的 `<task-notification>`、codex 的 `notify_parent_of_terminal_turn`），且 codex 的消息板明确规定「通知准纳入与 turn 完成原子绑定，不启动新工作、不跨 turn 存活」。
 
 ---
 
@@ -89,7 +91,7 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 **同一个概念，四家分别叫什么、有没有这个能力**。写「无」的格子本身就是结论。
 
-| 概念 | pi | deepseek-harness | codex | Claude-Code |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | **委派入口（模型侧工具）** | 扩展自定义（示例 `subagent`） | `subagent` | `spawn_agent`（V1 / V2 两代） | `Agent`（legacy 名 `Task`） |
 | **子 Agent 实体** | 独立 `pi` 进程 | `SubagentRun` + 独立 Session | Thread（线程图节点） | Task（`taskId` + 输出文件） |
@@ -130,7 +132,7 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 **图 9-2**：四种本体论。后面所有维度（上下文继承、深度限制、结果回灌、回收方式）都是从这一句话推导出来的。
 
-### 4.1 pi：两套正交机制，内核没有子 Agent
+### 4.1 pi —— 两套正交机制，内核没有子 Agent
 
 > **关键结论**：pi 有**两套互不相干**的机制——`Branch` 是「回到历史某点」的游标（同 session 内串行切换、不产生新实例、不隔离上下文），**不是子 Agent**；真正的子 Agent 由**扩展层 spawn 一个新进程**承担。
 
@@ -230,7 +232,7 @@ const proc = spawn(invocation.command, invocation.args, {
 
 ---
 
-### 4.2 deepseek-harness：驱动抽象 + 跨项目适配
+### 4.2 deepseek-harness —— 驱动抽象 + 跨项目适配
 
 dsh 是四家中**子 Agent 抽象最完整**的：把「子 Agent」抽象成**一个可被多种 driver 驱动的会话**。
 
@@ -288,11 +290,11 @@ export interface SubagentRun {
 
 fork 的 seed **只取到最后一个 `turn/end`**，避免把不完整的 turn 播进子 Agent（`packages/subagent/subagent-fork-in-process/src/index.ts:48-55`）。
 
-#### 4.2.4 跨项目驱动：把 Claude-Code 与 codex 当作子 Agent
+#### 4.2.4 跨项目驱动：把 CC 与 codex 当作子 Agent
 
 这是整个系列里最特别的一处——**dsh 能把本次研究的另外两个对象直接驱动为子 Agent**。
 
-**Claude-Code 后端**用官方 Agent SDK，接入方式是把 SDK 的 CLI 子进程「投影」到共享的 subprocess 拥有者：
+**CC 后端**用官方 Agent SDK，接入方式是把 SDK 的 CLI 子进程「投影」到共享的 subprocess 拥有者：
 
 ```ts
 // packages/subagent/subagent-claude-code/src/run.ts:370-375
@@ -365,7 +367,7 @@ cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagen
 
 ---
 
-### 4.3 codex：线程图 + 两代协议
+### 4.3 codex —— 线程图 + 两代协议
 
 > **关键结论**：codex 多 Agent 的实现主体在 **`core/src/agent/`（12,298 行）** 与 **`core/src/tools/handlers/multi_agents*.rs`（约 5,300 行）**；独立 crate 中有一部分并未接入主循环。
 
@@ -500,9 +502,9 @@ core 侧的适配器落成 `inject_if_running(...)`：找不到线程即 `Skippe
 
 ---
 
-### 4.4 Claude-Code：任务对象化 + 队友
+### 4.4 Claude-Code —— 任务对象化 + 队友
 
-Claude-Code 把子 Agent 做成**一等任务对象**：有 ID、有状态机、有输出文件、有 6 个专用管理工具。
+CC 把子 Agent 做成**一等任务对象**：有 ID、有状态机、有输出文件、有 6 个专用管理工具。
 
 #### 4.4.1 Task 的本体：接口极薄，状态在 AppState
 
@@ -671,7 +673,7 @@ promptMessages = [createUserMessage({ content: prompt })]
 - **后台化**：前台同步 agent 用 `Promise.race([nextMessage, backgroundSignal])`（`AgentTool.tsx:883-897`）；Ctrl+B 走 `backgroundAll`。
 - **并发上限**：工具批次并发 `CLAUDE_CODE_MAX_TOOL_USE_CONCURRENCY` 默认 **10**（`src/services/tools/toolOrchestration.ts:8-12`）；只读/并发安全工具批并发执行、否则串行（`:26-67`）。内置 batch skill 另外建议单次 `MAX_AGENTS = 30`。
 
-### 4.5 对等协作：拓扑、载体与共享任务板
+### 4.5 对等协作 —— 拓扑、载体与共享任务板
 
 前面四节都把注意力放在「父怎么把活交给子」。这一节换一个方向：**兄弟（平级）Agent 之间能不能直接说话**，如果能，靠什么承载、图长什么样、以及有没有一块「大家都能上去领活」的任务板。
 
@@ -748,7 +750,7 @@ CC 的队友机制最「土」，也因此最容易照着做：**消息存在文
 
 ### 5.1 委派入口与实体建模
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 模型侧入口 | 扩展自定义工具 | `subagent` | `spawn_agent` | `Agent` | 4/4 都是工具 |
 | 实体 ID | 无（仅进程） | `SessionId` | `ThreadId` / `AgentPath` | `taskId`（带类型前缀） | 3/4 有显式 ID |
@@ -758,7 +760,7 @@ CC 的队友机制最「土」，也因此最容易照着做：**消息存在文
 
 ### 5.2 上下文继承
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 默认继承 | 否（`--no-session`） | 否（spawn） | `fork_turns: none` | 否（仅 prompt） | **4/4 默认不继承** |
 | 可选继承 | 无 | 有（fork 后端） | 有（`all` / `N`） | 有（fork agent 全量） | 3/4 提供但非默认 |
@@ -768,7 +770,7 @@ CC 的队友机制最「土」，也因此最容易照着做：**消息存在文
 
 ### 5.3 驱动与进程模型
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 进程内 | 无 | spawn / fork | **是**（fork 线程） | `in_process_teammate` | 3/4 有 |
 | 进程外 | **是**（唯一的） | acp / dsh-sdk / claude-code / codex | 无 | `local_agent` 子进程 / `remote_agent` | 3/4 有 |
@@ -794,7 +796,7 @@ sequenceDiagram
 
 **图 9-4**：委派链路的时序。注意两处四家共识：深度检查放在「工具是否可见」而非「调用是否报错」，以及超时只加在父的等待侧。
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 父→子（增量指令） | 无 | `send_message` | `send_input` / `send_message` | SendMessage | 3/4 |
 | 子→父（结果） | 进程 stdout | `SubagentResult` | `notify_parent_of_terminal_turn` | tool_result / `<task-notification>` | 4/4 方式不同 |
@@ -806,7 +808,7 @@ sequenceDiagram
 
 ### 5.5 资源配额
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 递归深度 | 示例未设限 | `maxDepth` 默认 **1** | thread spawn depth 上限 | 非 ant 禁 AgentTool | **3/4 严格限制** |
 | 超限行为 | — | 启动前抛 `SubagentDepthError` | **连工具都不给** + 模型可见错误 | 工具不存在 | 3/3 都在**工具层**拦截 |
@@ -816,7 +818,7 @@ sequenceDiagram
 
 ### 5.6 持久化与恢复
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 子会话是否落盘 | 否（`--no-session`） | 是（独立 session 日志） | 是（SQLite agent graph） | 是（sidechain transcript） | 3/4 落盘，pi 不做 |
 | 与父的关联 | — | header `parentSession` + `origin:'subagent'` | 图中 parent→child 边 | `parentSessionId` | 3/4 有显式父子关联 |
@@ -825,7 +827,7 @@ sequenceDiagram
 
 ### 5.7 对等协作的载体与拓扑
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 拓扑 | 树，且兄弟不可引用 | 委派包=树；实验包=Lead + 扁平星形 | 树 + 兄弟可直达（绝对路径） | Lead + 扁平网 | 0/4 一致 |
 | 消息载体 | — | 持久化 journal（实验包） | SQLite 消息板 + 会话内内存邮箱 | 文件系统 JSON + 文件锁 | 0/4 一致 |
@@ -840,122 +842,136 @@ sequenceDiagram
 
 ## 六、异常与降级
 
-格式：**场景 → 四家做法 → 源码依据 → 设计理由**。
-
 ### 6.1 递归委派（子 Agent 再开子 Agent）
 
-- **pi**：无内核约束。示例扩展本身不支持嵌套（它 spawn 的是无 session 的进程）。
-- **dsh**：`delegationDepth + 1 > maxDepth` 即拒。**默认 1，也就是默认禁止嵌套**。
-- **codex**：`exceeds_thread_spawn_depth_limit` → 直接不给工具。
-- **Claude-Code**：非内部构建下，子 Agent 的工具池里**根本没有 `Agent` 工具**。
-- **依据**：`child-agent.ts:50-59`；`spec_plan.rs`（`collab_tools_enabled`）；`constants/tools.ts:40-41`。
-- **设计理由**：本层会**递归回卷**到完整运行时栈（2.3）。每多一层，token 成本、延迟、内存、失败面都是**乘性**增长，而边际收益通常递减。四家中有三家选了「默认只允许一层」，是经过权衡的保守选择。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 无内核约束。示例扩展本身不支持嵌套（它 spawn 的是无 session 的进程） | `delegationDepth + 1 > maxDepth` 即拒。**默认 1，也就是默认禁止嵌套** | `exceeds_thread_spawn_depth_limit` → 直接不给工具 | 非内部构建下，子 Agent 的工具池里**根本没有 `Agent` 工具** |
+| 源码依据 | — | `child-agent.ts:50-59` | `spec_plan.rs`（`collab_tools_enabled`） | `constants/tools.ts:40-41` |
+
+> **设计理由**：本层会**递归回卷**到完整运行时栈（2.3）。每多一层，token 成本、延迟、内存、失败面都是**乘性**增长，而边际收益通常递减。四家中有三家选了「默认只允许一层」，是经过权衡的保守选择。
+
 
 ### 6.2 深度超限的表现形式
 
-- **dsh**：启动前抛 `SubagentDepthError`（异常路径）。
-- **codex**：**工具根本不出现**在模型的可用工具列表里；若在边缘情况下触发，返回的是可执行的建议 `"Agent depth limit reached. Solve the task yourself."`。
-- **Claude-Code**：工具缺失（与 codex 同路）。
-- **依据**：`spec_plan.rs`；`multi_agents/spawn.rs:71-77`。
-- **设计理由**：**「不存在的工具」优于「会报错的工具」**。给模型一个它不该用的工具，就等于邀请它去试探；而缺失的工具会自然引导模型「自己解决」。codex 的错误文案甚至直接把替代策略写进去了。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | 启动前抛 `SubagentDepthError`（异常路径） | **工具根本不出现**在模型的可用工具列表里；若在边缘情况下触发，返回的是可执行的建议 `"Agent depth limit reached. Solve the task yourself."` | 工具缺失（与 codex 同路） |
+| 源码依据 | — | — | `spec_plan.rs`；`multi_agents/spawn.rs:71-77` | — |
+
+> **设计理由**：**「不存在的工具」优于「会报错的工具」**。给模型一个它不该用的工具，就等于邀请它去试探；而缺失的工具会自然引导模型「自己解决」。codex 的错误文案甚至直接把替代策略写进去了。
+
 
 ### 6.3 并发超限
 
-- **dsh**：`ActivationPool.reserve` 超限返回 `ACTIVATION_LIMIT_REACHED`（默认 8）。
-- **codex**：`AgentRegistry.total_count` CAS 递增 + `max_threads`；槽位由 `SpawnReservation::Drop` 自动归还。**注意：已完成的 agent 仍占用额度直到被 `close`**。
-- **Claude-Code**：工具批次并发默认 10；只读批并发、写入批串行。
-- **依据**：`continuation-activation.ts:45-56`；`registry.rs:89-108, 330-346`；`toolOrchestration.ts:8-12, 26-67`。
-- **设计理由**：codex「完成不等于释放」这一点值得注意——它把额度回收与**生命周期显式关闭**绑定，而不是与任务结束绑定。好处是父 Agent 可以在子任务完成后仍然向它追问（`send_input`）；代价是父必须记得 `close`，否则额度会被已完成的僵尸占满。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | `ActivationPool.reserve` 超限返回 `ACTIVATION_LIMIT_REACHED`（默认 8） | `AgentRegistry.total_count` CAS 递增 + `max_threads`；槽位由 `SpawnReservation::Drop` 自动归还。**注意：已完成的 agent 仍占用额度直到被 `close`** | 工具批次并发默认 10；只读批并发、写入批串行 |
+| 源码依据 | — | `continuation-activation.ts:45-56` | `registry.rs:89-108, 330-346` | `toolOrchestration.ts:8-12, 26-67` |
+
+> **设计理由**：codex「完成不等于释放」这一点值得注意——它把额度回收与**生命周期显式关闭**绑定，而不是与任务结束绑定。好处是父 Agent 可以在子任务完成后仍然向它追问（`send_input`）；代价是父必须记得 `close`，否则额度会被已完成的僵尸占满。
+
 
 ### 6.4 子 Agent 失败或崩溃
 
-- **pi**：子进程非零退出，示例里按 exit code 处理。
-- **dsh**：`result` **永不 reject**，统一转 `stopReason: 'error'` + ≤4096B 诊断文本。
-- **codex**：终态进 `Errored(String)`，经 `notify_parent_of_terminal_turn` 回传。
-- **Claude-Code**：异步走 `failAgentTask` + `enqueueAgentNotification(status:'failed')` 并附 error；同步则保留部分消息，**只有当整轮没有产生任何 assistant 消息时才 rethrow**。
-- **依据**：`types.ts:308-334`；`out-of-process.ts:192-219`；`agentToolUtils.ts:670-681`；`AgentTool.tsx:1223-1234`。
-- **设计理由**：两处设计很有代表性——① dsh 用「**用值表达失败而非异常**」让父 Agent 的代码路径统一；② Claude-Code 同步路径「**尽量保留部分产出**」，因为子 Agent 跑到一半的中间结果对父通常仍有价值，直接 rethrow 会让这些工作白费。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 子进程非零退出，示例里按 exit code 处理 | `result` **永不 reject**，统一转 `stopReason: 'error'` + ≤4096B 诊断文本 | 终态进 `Errored(String)`，经 `notify_parent_of_terminal_turn` 回传 | 异步走 `failAgentTask` + `enqueueAgentNotification(status:'failed')` 并附 error；同步则保留部分消息，**只有当整轮没有产生任何 assistant 消息时才 rethrow** |
+| 源码依据 | — | `types.ts:308-334`；`out-of-process.ts:192-219` | — | `agentToolUtils.ts:670-681`；`AgentTool.tsx:1223-1234` |
+
+> **设计理由**：两处设计很有代表性——① dsh 用「**用值表达失败而非异常**」让父 Agent 的代码路径统一；② CC 同步路径「**尽量保留部分产出**」，因为子 Agent 跑到一半的中间结果对父通常仍有价值，直接 rethrow 会让这些工作白费。
+
 
 ### 6.5 父 Agent 被取消
 
-- **dsh**：父取消 → 子收到 `agent.cancel({kind:'parent'})`，**子先于父释放**（保证子不会在父已死的情况下继续写）。
-- **codex**：`close` 会关闭目标 agent **及其全部 descendants**。
-- **Claude-Code**：`registerAsyncAgent(parentAbortController)` 用 `createChildAbortController` 让子随父 abort；**但后台 agent 故意不链接父 controller**——ESC 不会杀掉后台任务，必须显式 `TaskStop`。
-- **依据**：`continuation-activation.ts:808-830`；`agent/api.rs:74-75`；`LocalAgentTask.tsx:460-486`；`AgentTool.tsx:694-697`。
-- **设计理由**：这里有一个真实的取舍冲突——「级联取消」保证一致性，但用户按 ESC 的本意往往是「停下当前这轮对话」，不是「杀掉我刚派出去跑 10 分钟的后台任务」。Claude-Code 选择**按意图区分**（前台随父死、后台独立生存），代价是可能留下孤儿（由 6.6 的回收机制兜底）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | 父取消 → 子收到 `agent.cancel({kind:'parent'})`，**子先于父释放**（保证子不会在父已死的情况下继续写） | `close` 会关闭目标 agent **及其全部 descendants** | `registerAsyncAgent(parentAbortController)` 用 `createChildAbortController` 让子随父 abort；**但后台 agent 故意不链接父 controller**——ESC 不会杀掉后台任务，必须显式 `TaskStop` |
+| 源码依据 | — | `continuation-activation.ts:808-830` | `agent/api.rs:74-75` | `LocalAgentTask.tsx:460-486`；`AgentTool.tsx:694-697` |
+
+> **设计理由**：这里有一个真实的取舍冲突——「级联取消」保证一致性，但用户按 ESC 的本意往往是「停下当前这轮对话」，不是「杀掉我刚派出去跑 10 分钟的后台任务」。CC 选择**按意图区分**（前台随父死、后台独立生存），代价是可能留下孤儿（由 6.6 的回收机制兜底）。
+
 
 ### 6.6 孤儿回收
 
-- **dsh**：子优先 dispose + slot 归还；归档 session 会**取消其 running 后代**（`archive-admission.ts:30-39`）；`inbox.close` 与 `subprocessRunHandle.dispose` 都做**幂等记忆化**。
-- **codex**：`close` 递归关闭 descendants；V2 驱逐时保存 `evicted_environments` 以便恢复。
-- **Claude-Code**：四层防护——① `registerCleanup` 进程退出清理；② `killShellTasksForAgent` 杀掉 agent 遗留的 bash 并 `dequeueAllMatching`；③ `runAgent` 的 finally 清 todos/MCP/skills/perfetto；④ `evictTerminalTask` 仅在「终态 + 已通知」后 GC（保留/驱逐宽限 30s）。
-- **依据**：`continuation-activation.ts:841-867`；`killShellTasks.ts:53-76`；`runAgent.ts:816-859`；`framework.ts:125-144`。
-- **设计理由**：**子 Agent 会衍生出不属于它的资源**（bash 进程、MCP 连接、临时目录）。只回收「agent 对象」是不够的，必须追踪「它曾经创建了什么」。Claude-Code 的 `killShellTasksForAgent` 是四家中唯一显式处理「agent 遗留子进程」的实现。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | 子优先 dispose + slot 归还；归档 session 会**取消其 running 后代**（`archive-admission.ts:30-39`）；`inbox.close` 与 `subprocessRunHandle.dispose` 都做**幂等记忆化** | `close` 递归关闭 descendants；V2 驱逐时保存 `evicted_environments` 以便恢复 | 四层防护——① `registerCleanup` 进程退出清理；② `killShellTasksForAgent` 杀掉 agent 遗留的 bash 并 `dequeueAllMatching`；③ `runAgent` 的 finally 清 todos/MCP/skills/perfetto；④ `evictTerminalTask` 仅在「终态 + 已通知」后 GC（保留/驱逐宽限 30s） |
+| 源码依据 | — | `continuation-activation.ts:841-867` | — | `killShellTasks.ts:53-76`；`runAgent.ts:816-859`；`framework.ts:125-144` |
+
+> **设计理由**：**子 Agent 会衍生出不属于它的资源**（bash 进程、MCP 连接、临时目录）。只回收「agent 对象」是不够的，必须追踪「它曾经创建了什么」。CC 的 `killShellTasksForAgent` 是四家中唯一显式处理「agent 遗留子进程」的实现。
+
 
 ### 6.7 运行超时
 
-- **dsh**：**运行本身没有 wall-clock 超时**；只有 teardown/shutdown 有界（ACP EOF 6s、SIGTERM→KILL 3s、SDK shutdown 1s）。
-- **Claude-Code**：`TaskOutput` 的等待有超时（默认 30s / 上限 600s），但这只约束「父等多久」，**不杀子**。
-- **pi / codex**：未发现运行期超时机制。
-- **依据**：`acp/src/run.ts:83-86, 193-213`；`dsh-sdk/src/index.ts:90`；`TaskOutputTool.tsx:33`。
-- **设计理由**：**四家都不给子 Agent 设运行超时**，这不是遗漏。Agent 任务的时长分布极长尾（一次重构可能跑 20 分钟），硬超时会杀掉正在做正确工作的 Agent；而「父等待超时」是可恢复的（父可以先回去做别的，之后再来 `TaskOutput`）。**超时应设在「等待」上，不设在「执行」上。**
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | **/**：未发现运行期超时机制 | **运行本身没有 wall-clock 超时**；只有 teardown/shutdown 有界（ACP EOF 6s、SIGTERM→KILL 3s、SDK shutdown 1s） | **/**：未发现运行期超时机制 | `TaskOutput` 的等待有超时（默认 30s / 上限 600s），但这只约束「父等多久」，**不杀子** |
+| 源码依据 | — | `acp/src/run.ts:83-86, 193-213`；`dsh-sdk/src/index.ts:90` | — | `TaskOutputTool.tsx:33` |
+
+> **设计理由**：**四家都不给子 Agent 设运行超时**，这不是遗漏。Agent 任务的时长分布极长尾（一次重构可能跑 20 分钟），硬超时会杀掉正在做正确工作的 Agent；而「父等待超时」是可恢复的（父可以先回去做别的，之后再来 `TaskOutput`）。**超时应设在「等待」上，不设在「执行」上。**
+
 
 ### 6.8 平级 Agent 的嵌套限制
 
-- **Claude-Code**：`teammate` **不能再 spawn teammate**（roster 扁平），进程内 teammate 也禁止再开后台 agent。依据是显式 throw（`AgentTool.tsx:272-280, 361-363`）。
-- **codex**：消息板由单一 `SessionId` 限定成员，任何成员可改**他人**订阅（`api.rs:79-81`）。
-- **依据**：`AgentTool.tsx:272-280`；`agent-message-board/src/api.rs:24-34, 79-81`。
-- **设计理由**：平级 Agent 的组织若允许无限嵌套，会退化成一张**无界的通信图**（N 个 Agent 两两通信 = O(N²) 条通道）。Claude-Code 选择扁平的 team 结构，配合 `TEAMMATE_MESSAGES_UI_CAP = 50`，把复杂度钉死在可控范围。**注意配套的实测数据**：进程内 agent 在鲸鱼会话中「2 分钟起 292 个 agent 达 36.8GB RSS」——扁平化不是洁癖，是内存安全的必要约束。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | — | 消息板由单一 `SessionId` 限定成员，任何成员可改**他人**订阅（`api.rs:79-81`） | `teammate` **不能再 spawn teammate**（roster 扁平），进程内 teammate 也禁止再开后台 agent。依据是显式 throw（`AgentTool.tsx:272-280, 361-363`） |
+| 源码依据 | — | — | `agent-message-board/src/api.rs:24-34, 79-81` | `AgentTool.tsx:272-280` |
+
+> **设计理由**：平级 Agent 的组织若允许无限嵌套，会退化成一张**无界的通信图**（N 个 Agent 两两通信 = O(N²) 条通道）。CC 选择扁平的 team 结构，配合 `TEAMMATE_MESSAGES_UI_CAP = 50`，把复杂度钉死在可控范围。**注意配套的实测数据**：进程内 agent 在鲸鱼会话中「2 分钟起 292 个 agent 达 36.8GB RSS」——扁平化不是洁癖，是内存安全的必要约束。
+
 
 ### 6.9 消息/通知的投递语义
 
-- **codex**：通知准入与 turn 完成**原子绑定**；空闲 agent 被跳过；通知**不启动新工作、不跨 turn 存活**；发布与通知**解耦**（通知失败内容仍可读）。
-- **Claude-Code**：`<task-notification>` 仅在 `notified` 原子翻转后发送一次；终态任务的消息被 `isTerminalTaskStatus` 守卫丢弃。
-- **依据**：`host.rs:17-37`；`agent_message_board.rs:143-189`；`local.rs:166-175`；`LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84`。
-- **设计理由**：**「给 Agent 发消息」实质上是一张隐式的 turn 触发器**。若允许消息唤醒空闲 Agent，就产生了「谁来为这次唤醒付费、若唤醒风暴如何处理」的失控面。codex 的做法是把通知降格为**纯投递**——只在接收方本来就要跑下一轮时顺带送达，从根上消除了唤醒风暴与跨 turn 状态泄漏。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | — | — | 通知准入与 turn 完成**原子绑定**；空闲 agent 被跳过；通知**不启动新工作、不跨 turn 存活**；发布与通知**解耦**（通知失败内容仍可读） | `<task-notification>` 仅在 `notified` 原子翻转后发送一次；终态任务的消息被 `isTerminalTaskStatus` 守卫丢弃 |
+| 源码依据 | — | — | `host.rs:17-37`；`agent_message_board.rs:143-189`；`local.rs:166-175` | `LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84` |
+
+> **设计理由**：**「给 Agent 发消息」实质上是一张隐式的 turn 触发器**。若允许消息唤醒空闲 Agent，就产生了「谁来为这次唤醒付费、若唤醒风暴如何处理」的失控面。codex 的做法是把通知降格为**纯投递**——只在接收方本来就要跑下一轮时顺带送达，从根上消除了唤醒风暴与跨 turn 状态泄漏。
+
 
 ### 6.10 共享任务板的争用与重复认领
 
-- **deepseek-harness**：认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`experimental/agent-team/src/task-board.ts:119-124`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:133-142`）。
-- **Claude-Code**：认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`）。
-- **codex**：不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`）。
-- **pi**：不适用——无对等协作，跨会话范围被 `subtree` 断言限制在自身子树内（`harness/pico3/harness.ts:329-340`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 不适用——无对等协作，跨会话范围被 `subtree` 断言限制在自身子树内（`harness/pico3/harness.ts:329-340`） | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`experimental/agent-team/src/task-board.ts:119-124`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:133-142`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
-**设计理由**（`[推断]`，依据两家实现对照）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
-
+> **设计理由**（`[推断]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---
 
 ## 七、设计建议
 
-### 7.1 四家共识（可直接采纳）
+### 7.1 共识（四家一致，可直接采纳）
 
 1. **子 Agent 必须有一个显式 ID 与状态机** —— 无论是 `SessionId`、`ThreadId` 还是 `taskId`，父需要能「指名道姓」地引用它、查询它、停止它。pi 是唯一例外，代价是父无法再与子交互。
 2. **默认不继承父上下文** —— 4/4 家的默认值都是「不继承」。子 Agent 的价值来自**上下文隔离**；把父的全部历史灌进去，等于把父的 token 成本与注意力污染一并复制。
-3. **工具集必须收窄，且绝不可扩权** —— dsh 的 `maxDepth` 冻结、codex 的「只能关闭 feature」、Claude-Code 的三份白名单，三种实现三种语法，但**语义完全一致**：子 Agent 是父的能力子集，不是超集。
+3. **工具集必须收窄，且绝不可扩权** —— dsh 的 `maxDepth` 冻结、codex 的「只能关闭 feature」、CC 的三份白名单，三种实现三种语法，但**语义完全一致**：子 Agent 是父的能力子集，不是超集。
 4. **深度限制设在工具层，而不是运行期** —— 让不该委派的 Agent **看不到**委派工具，优于让它看到再报错。
-5. **输出落盘 + 增量读取** —— Claude-Code 的 `outputFile` + `outputOffset` 是解决「子 Agent 输出很长、父只想拿一段」的标准做法，也让父可以在子运行期间观察进度。
+5. **输出落盘 + 增量读取** —— CC 的 `outputFile` + `outputOffset` 是解决「子 Agent 输出很长、父只想拿一段」的标准做法，也让父可以在子运行期间观察进度。
 6. **取消要区分前台与后台** —— 前台随父中止，后台独立生存，是符合用户直觉的选择。
 
-### 7.2 推荐做法（有明确收益）
+### 7.2 推荐（多数做对，值得抄）
 
 1. **优先做「进程内 + 进程外」双驱动** —— dsh 的 `spawn` / `fork`（进程内，低成本、可共享内存）与 `acp` / `dsh-sdk`（进程外，强隔离）并存，让使用方按任务性质选择。只有进程内会带来内存风险（36.8GB 案例），只有进程外会带来启动开销。**`fork` 与 `spawn` 的差别值得单独设计**：fork 用「父日志已完成 turn 前缀」播种，是一个很优雅的折中（既有上下文，又不会把不完整的 turn 播进去）。
 2. **把「失败」表达为值而非异常** —— dsh 的 `result` 永不 reject、统一转 `stopReason:'error'` + 有界诊断文本，使父 Agent 的调用点只需一条路径。
-3. **保留部分产出** —— Claude-Code 同步路径「有 assistant 消息就不 rethrow」值得学：子 Agent 半途的产出通常有价值。
+3. **保留部分产出** —— CC 同步路径「有 assistant 消息就不 rethrow」值得学：子 Agent 半途的产出通常有价值。
 4. **通知投递与 turn 绑定，绝不用消息唤醒空闲 Agent** —— codex 的这条约束从根上避免唤醒风暴。
 5. **提供「可续子 Agent」** —— dsh 的 continuable + `send_message` 让父可以追问、修正、给增量指令；一次性子 Agent 只适合「分头搜索」这类无状态任务。
 6. **角色只做减法** —— codex 的 `explorer`（只读、鼓励并行多开）与 `worker`（强调写入所有权）是一个好的角色划分起点。
 7. **子 Agent 的资源要追踪「它创建了什么」** —— 不只是回收 agent 对象，还要回收它遗留的进程、连接、临时目录。
 8. **共享任务板用「版本号 + 显式冲突错误」，而不是阻塞锁**（学 dsh `task-board.ts:119`）：Agent 场景下重试廉价、等待昂贵；而且冲突错误本身就是一条可读信号，能直接进入模型的下一轮输入，让「谁拿到了这份工作」变成模型能看见的事实。CC 的文件锁方案在跨进程场景下更简单，但代价是排队。
 
-### 7.3 权衡（没有最优解，取决于场景）
+### 7.3 权衡（各有代价，按场景选）
 
-1. **继承 vs 隔离**：全量继承（Claude-Code 的 fork）能最大化 prompt cache 命中、让子 Agent「懂父的上下文」，但会显著提高成本与污染风险。**建议只在「需要接着父的思路继续做」的场景提供 fork 路径。**
-2. **同步 vs 异步回灌**：`tool_result` 让模型在同一个 turn 里直接看到结果（简单、可预测）；入队消息允许父先去做别的事（灵活、但需要额外机制保证不重复通知）。Claude-Code 两者都保留，说明**这取决于任务时长分布**。
+1. **继承 vs 隔离**：全量继承（CC 的 fork）能最大化 prompt cache 命中、让子 Agent「懂父的上下文」，但会显著提高成本与污染风险。**建议只在「需要接着父的思路继续做」的场景提供 fork 路径。**
+2. **同步 vs 异步回灌**：`tool_result` 让模型在同一个 turn 里直接看到结果（简单、可预测）；入队消息允许父先去做别的事（灵活、但需要额外机制保证不重复通知）。CC 两者都保留，说明**这取决于任务时长分布**。
 3. **进程内 vs 进程外**：进程内省启动开销、可共享状态，但有内存爆炸先例；进程外隔离彻底，但每次委派都要付出进程启动 + 协议握手成本。
-4. **平级协作要不要做**：codex 的消息板与 Claude-Code 的 teammate 都很复杂（3,259 / 数百行），且都需要额外的组织约束（扁平 roster、成员校验）。**如果任务是「主从委派」而非「多 Agent 协作」，不做平级通信是更划算的选择**——pi 就是这条路。
+4. **平级协作要不要做**：codex 的消息板与 CC 的 teammate 都很复杂（3,259 / 数百行），且都需要额外的组织约束（扁平 roster、成员校验）。**如果任务是「主从委派」而非「多 Agent 协作」，不做平级通信是更划算的选择**——pi 就是这条路。
 5. **对等协作的载体选型**：内存（最快，进程一死就丢）、文件系统（可读可查，需要锁，跨进程天然可用）、数据库（可检索可订阅，引入依赖与迁移成本）。codex 选 SQLite 是为了「频道 / 帖子 / 订阅 / 搜索」这套论坛语义；CC 选 JSON 文件是因为它的队友本来就可能是**不同终端里的不同进程**，文件是它们唯一共享的东西。**若目标只是「几个进程互相传话」，文件比数据库更划算；若要「历史可检索、可订阅」，数据库才值得。**
 
-### 7.4 反例（明确不该做什么）
+### 7.4 反例（明确不该做的）
 
 1. **不要给子 Agent 设「执行超时」** —— 四家都没做，也都不该做。Agent 任务时长是长尾分布；硬超时会杀掉正在正确工作的子 Agent，且**被杀掉的工作无法恢复**。要设就设在「父的等待」上。
 2. **不要允许无限制的递归委派** —— 本层会递归回卷完整运行时栈，深度每 +1，成本、延迟、内存、失败面都是乘性增长。默认 1 层是经过验证的保守值。

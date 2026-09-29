@@ -18,17 +18,17 @@
 
 ## 一、核心结论速览
 
-1. **骨架同源，差异在「谁是状态的主人」**：四家都是「外层续接循环 + 内层工具循环」，但 pi 把状态放在内存闭包里、dsh 放在 append-only 日志里、codex 放在 `ContextManager` + rollout 里、Claude-Code 放在显式传递的 `State` 对象里。
-2. **停止判定四家完全一致**：「本轮没有工具调用即完成」是唯一主出口；差异全在**次要出口的丰富度**——pi 约 3 个、dsh 4 个、codex 6 个、Claude-Code 11+ 个。
-3. **压缩与循环的耦合度呈阶梯**：pi 完全解耦（靠 `prepareNextTurn` 回调外挂）→ dsh 半解耦（`agent/pre-step` + `agent/request-error` 两路事件驱动）→ codex 深度耦合（`run_turn` 内直接调 pre/mid/post 三阶段压缩）→ Claude-Code 最耦合（每轮开头串起 snip → microcompact → contextCollapse → autocompact 四条流水线）。
-4. **只有 dsh 与 Claude-Code 把「这轮是被截断的」当作一等状态**：dsh 的 max-tokens **粘性**（`:331-336`）保证后续正常 step 不降级 turn 结果；Claude-Code 用 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`query.ts:164`）做恢复式续写。
-5. **防死循环四家各有招式，唯 Claude-Code 的阈值有生产数据背书**：`MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`）注释里记着「1,279 个会话连续失败 50+ 次、全站每天浪费约 25 万次 API 调用」——全系列唯一给出量化依据的熔断阈值。
+1. **骨架同源，差异在「谁是状态的主人」**：四家都是「外层续接循环 + 内层工具循环」，但 pi 把状态放在内存闭包里、dsh 放在 append-only 日志里、codex 放在 `ContextManager` + rollout 里、CC 放在显式传递的 `State` 对象里。
+2. **停止判定四家完全一致**：「本轮没有工具调用即完成」是唯一主出口；差异全在**次要出口的丰富度**——pi 约 3 个、dsh 4 个、codex 6 个、CC 11+ 个。
+3. **压缩与循环的耦合度呈阶梯**：pi 完全解耦（靠 `prepareNextTurn` 回调外挂）→ dsh 半解耦（`agent/pre-step` + `agent/request-error` 两路事件驱动）→ codex 深度耦合（`run_turn` 内直接调 pre/mid/post 三阶段压缩）→ CC 最耦合（每轮开头串起 snip → microcompact → contextCollapse → autocompact 四条流水线）。
+4. **只有 dsh 与 CC 把「这轮是被截断的」当作一等状态**：dsh 的 max-tokens **粘性**（`:331-336`）保证后续正常 step 不降级 turn 结果；CC 用 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`query.ts:164`）做恢复式续写。
+5. **防死循环四家各有招式，唯 CC 的阈值有生产数据背书**：`MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`）注释里记着「1,279 个会话连续失败 50+ 次、全站每天浪费约 25 万次 API 调用」——全系列唯一给出量化依据的熔断阈值。
 
 ---
 
 ## 二、本层职责与边界
 
-### 2.1 本层解决什么问题
+### 2.1 子职责拆解
 
 主循环只做四件事，但每件都有取舍：
 
@@ -39,7 +39,30 @@
 | **③ 接纳 steering** | 模型运行时用户插话怎么进循环？ | 循环条件 / 瀑布钩子 / pending_input drain / 队列 |
 | **④ 隔离边界** | 截断、超窗、错误、中断怎么处理？ | 保守失败 vs 自动补偿 vs 熔断 |
 
-### 2.2 层次定位
+四家对这些职责的**边界画在哪里**给出的是不同答案：
+
+| 边界定义 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 「一轮」的名字 | turn | turn / step | turn / sampling request | query 迭代 / turn |
+| 内层循环条件 | `hasMoreToolCalls \|\| pendingMessages.length>0` | `while(true)` + `turnEnds` | `loop{}` + `needs_follow_up` | `while(true)` + `next:State` |
+| 循环归属 | 顶层函数 `runLoop` | 类方法 `turn()`/`step()` | 自由函数 `run_turn` | 生成器 `queryLoop()` |
+| 压缩是否在循环内 | 否（回调外挂） | 否（事件驱动） | **是**（直接调） | **是**（流水线） |
+| 提示词重算的位置 | 循环外（`agent-session` 每轮差分） | **循环内**（`preStep`，每步投影） | **循环内**（每步记一次世界状态） | 循环外（`ask()` 内重建） |
+
+> 最后一行指向启动区第 2 章：本章每轮发出去的那份前缀由该层组装，四家的重算与提交时机见第 2 章 4.1.4、4.2.2、4.3.3、4.4.3。这一步落在循环内还是循环外，会反过来改变循环的形状——dsh 与 codex 把它做成了循环内的一个显式步骤（`preStep` / `record_step_world_state_if_changed`），因此前缀稳定性是循环自身的产物；pi 与 CC 放在循环之外，靠差分补丁消息与段级缓存**间接**维持，循环本身对此无感知。
+
+---
+
+### 2.2 本层不管什么
+
+- **不管提示词怎么组装**（那是 L2，见第 2 章）。本层只决定「每轮的重算是落在循环内还是循环外」；前缀由哪几节拼成、按什么顺序拼，归第 2 章。
+- **不管一个工具是什么**（那是 L5，见第 5 章）。本层决定「何时发起调用、何时停止」，工具的 schema、可见集合与投影方式归第 5 章。
+- **不管压缩算法本身**（那是 L6，见第 6 章）。本层只回答「压缩是循环内的一个显式步骤还是循环外的旁挂回调」——计量、选段、摘要与安装都不在这里（对照见 5.6）。
+- **不管消息与事件的数据模型**（那是 L7，见第 7 章）。本层消费那份模型；一条消息长什么样、事实源是树还是日志，归第 7 章。
+- **不管状态怎么跨进程存活**（那是 L8，见第 8 章）。本层只管内存里的状态载体（闭包 / 日志句柄 / `ContextManager` / `State` 对象），落盘与恢复归第 8 章。
+- **不管一次工具调用该不该放行**（那是 L10，见第 10 章）。本层把判定结果接进循环，判定链本身不在本章。
+
+### 2.3 层次定位
 
 ```text
 ┌──────────────────────────────────────┐
@@ -86,25 +109,12 @@
 
 **关键**：L3 是唯一同时触碰 L4/L6/L7/L8 的层次。压缩在哪一步被触发（L3 内 vs L3 外），直接决定了这个项目的可恢复性与复杂度。
 
-### 2.3 四家在本层的边界差异
-
-| 边界定义 | pi | dsh | codex | Claude-Code |
-|---|---|---|---|---|
-| 「一轮」的名字 | turn | turn / step | turn / sampling request | query 迭代 / turn |
-| 内层循环条件 | `hasMoreToolCalls \|\| pendingMessages.length>0` | `while(true)` + `turnEnds` | `loop{}` + `needs_follow_up` | `while(true)` + `next:State` |
-| 循环归属 | 顶层函数 `runLoop` | 类方法 `turn()`/`step()` | 自由函数 `run_turn` | 生成器 `queryLoop()` |
-| 压缩是否在循环内 | 否（回调外挂） | 否（事件驱动） | **是**（直接调） | **是**（流水线） |
-| 提示词重算的位置 | 循环外（`agent-session` 每轮差分） | **循环内**（`preStep`，每步投影） | **循环内**（每步记一次世界状态） | 循环外（`ask()` 内重建） |
-
-> 最后一行指向启动区第 2 章：本章每轮发出去的那份前缀由该层组装，四家的重算与提交时机见第 2 章 4.1.4、4.2.2、4.3.3、4.4.3。这一步落在循环内还是循环外，会反过来改变循环的形状——dsh 与 codex 把它做成了循环内的一个显式步骤（`preStep` / `record_step_world_state_if_changed`），因此前缀稳定性是循环自身的产物；pi 与 Claude-Code 放在循环之外，靠差分补丁消息与段级缓存**间接**维持，循环本身对此无感知。
-
----
 
 ## 三、概念对齐表
 
 **读法**：同一行是同一个概念，四列是它在各项目里的原名（`—` 表示无对应物）。
 
-| 概念 | pi | deepseek-harness | codex | Claude-Code |
+| 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 主循环入口 | `runLoop` `agent-loop.ts:162` | `kick()` `agent.ts:251` | `run_turn` `turn.rs:163` | `queryLoop` `query.ts:241` |
 | 外层续接循环 | `while(true)` `:178` | `while(await this.turn())` `:253` | `loop{}` `turn.rs:423` | `while(true)` `query.ts:307` |
@@ -140,7 +150,7 @@ flowchart TD
     G -- "否" --> A
 ```
 
-**图 3-2**：四家共用的主循环骨架。四家在此完全一致的主干是「无工具调用即完成」；差异全部落在右下的「次要出口」分支——出口数量从 3 个（pi）到 11+ 个（Claude-Code）。
+**图 3-2**：四家共用的主循环骨架。四家在此完全一致的主干是「无工具调用即完成」；差异全部落在右下的「次要出口」分支——出口数量从 3 个（pi）到 11+ 个（CC）。
 
 ### 4.1 pi —— 双层 while + 事件流
 
@@ -470,7 +480,7 @@ if (streamingFallbackOccured) {
 
 ### 5.1 循环骨架
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 外层驱动 | `while(true)` + 队列 | `while(await turn())` | `loop{}` | `while(true)` + next State | 4/4 双层 |
 | 停止信号来源 | 内存数组 | 日志事件 | 返回值 | 显式 State | 0/4（四种世界观） |
@@ -479,7 +489,7 @@ if (streamingFallbackOccured) {
 
 ### 5.2 状态载体与可恢复性
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 状态载体 | 内存 context | append-only 日志 | ContextManager + rollout | 显式 State + transcript | 0/4 |
 | 崩溃可恢复 | ✗ | ✓ 全量回放 | ✓ rollout 重建 | 部分（transcript 落盘） | 3/4 |
@@ -488,7 +498,7 @@ if (streamingFallbackOccured) {
 
 ### 5.3 steering 注入
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 注入点 | 内层循环条件 `:182` | `agent/pre-step` `:275` | `pending_input` drain `turn.rs:423` | 命令队列 `:223` | 4/4 都支持 |
 | 是否可拦截 | 否 | **可 reject/改写** | 否 | 否 | 1/4 |
@@ -496,7 +506,7 @@ if (streamingFallbackOccured) {
 
 ### 5.4 停止判定与出口枚举
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 主出口 | 无 toolCall | completed | `needs_follow_up=false` | `!needsFollowUp` | **4/4** |
 | 出口数量 | ~3 | 4 | ~6 | 11+ | 0/4 |
@@ -505,7 +515,7 @@ if (streamingFallbackOccured) {
 
 ### 5.5 重试与降级
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 模型调用重试 | 无（上层负责） | `request-error` 瀑布 | 采样本层 `loop{}` `turn.rs:1611` | `withRetry.ts:170`（默认 10 次） | 3/4 |
 | 限流/高负载降级 | 无 | 无 | 无 | **fallback model** `withRetry.ts:335-351` | 1/4 |
@@ -514,7 +524,7 @@ if (streamingFallbackOccured) {
 
 ### 5.6 压缩与循环的耦合度
 
-| 维度 | pi | dsh | codex | Claude-Code | 共识度 |
+| 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
 | 耦合方式 | 回调外挂 | 事件驱动 | **循环内直调** | **每轮固定流水线** | 0/4 |
 | 压缩触发点数量 | 2 | 2 | 3（pre/mid/post） | 4（snip/micro/collapse/auto） | 0/4 |
@@ -524,89 +534,80 @@ if (streamingFallbackOccured) {
 
 ## 六、异常与降级
 
-> 每条统一格式：**场景 → 四家做法 → 源码依据 → 设计理由**。理由若是源码注释原文，标 `[注释]`；若是反推，标 `[推断]`。
-
 ### 6.1 输出被 max-tokens 截断
 
-- **pi**：整批工具调用全体失败（`:263-269` → `:475`），要求模型重发。
-- **dsh**：turn 终态粘在 `max-tokens`（`:331-336`、`:512`），后续正常 step 不降级。
-- **codex**：转 mid-turn compact 后 continue（`:598-622`）。
-- **Claude-Code**：升档重试（8k→64k，`ESCALATED_MAX_TOKENS=64_000` `utils/context.ts:25`）或恢复式续写，上限 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`:164`，恢复循环 `:1223-1252`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 整批工具调用全体失败（`:263-269` → `:475`），要求模型重发 | turn 终态粘在 `max-tokens`（`:331-336`、`:512`），后续正常 step 不降级 | 转 mid-turn compact 后 continue（`:598-622`） | 升档重试（8k→64k，`ESCALATED_MAX_TOKENS=64_000` `utils/context.ts:25`）或恢复式续写，上限 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`:164`，恢复循环 `:1223-1252`） |
+| 源码依据 | `agent-loop.ts:263` | `agent.ts:331` | `turn.rs:598` | `query.ts:164/1195-1221` |
 
-**依据汇总**：pi `agent-loop.ts:263`、dsh `agent.ts:331`、codex `turn.rs:598`、CC `query.ts:164/1195-1221`。
-
-**设计理由**：截断意味着「参数可能不完整」。pi 选择最保守（一律重发），代价是浪费一次往返；dsh 着眼**信号保真**（让上层知道该续写）；codex 选择**自动补救**（压缩腾出空间重试）；CC 两者都做（先升档，再恢复计数）。四家没有共识，因为这是「安全 vs 效率」的经典取舍。
+> **设计理由**：截断意味着「参数可能不完整」。pi 选择最保守（一律重发），代价是浪费一次往返；dsh 着眼**信号保真**（让上层知道该续写）；codex 选择**自动补救**（压缩腾出空间重试）；CC 两者都做（先升档，再恢复计数）。四家没有共识，因为这是「安全 vs 效率」的经典取舍。
 
 ### 6.2 上下文窗口超限
 
-- **pi**：无内置（`[注释]` 靠 `prepareNextTurn` 外挂）。
-- **dsh**：无内置 token 预算（README 明示 「No built-in turn budget」），靠 `request-error` 瀑布。
-- **codex**：三阶段压缩 + `ContextWindowExceeded` 错误分类驱动重试（`:334`/`:737`/`:1659`）。
-- **Claude-Code**：阻塞上限**预判**（`:628-648`，`AUTOCOMPACT_BUFFER_TOKENS=13_000` `autoCompact.ts:62-65`）+ 事后 `prompt_too_long` 处理（`:1070-1183`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 无内置（`[注释]` 靠 `prepareNextTurn` 外挂） | 无内置 token 预算（README 明示 「No built-in turn budget」），靠 `request-error` 瀑布 | 三阶段压缩 + `ContextWindowExceeded` 错误分类驱动重试（`:334`/`:737`/`:1659`） | 阻塞上限**预判**（`:628-648`，`AUTOCOMPACT_BUFFER_TOKENS=13_000` `autoCompact.ts:62-65`）+ 事后 `prompt_too_long` 处理（`:1070-1183`） |
 
-**设计理由**：codex 与 CC 都做**事前预判**，因为它能避免一次注定失败的 API 调用；pi/dsh 把它留给上层，保持核心循环的最小化。`[推断]`：预判需要准确的 token 计量，而这依赖对 provider 计费口径的掌握——codex/CC 与 provider 关系更紧密。
+> **设计理由**：codex 与 CC 都做**事前预判**，因为它能避免一次注定失败的 API 调用；pi/dsh 把它留给上层，保持核心循环的最小化。`[推断]`：预判需要准确的 token 计量，而这依赖对 provider 计费口径的掌握——codex/CC 与 provider 关系更紧密。
 
 ### 6.3 API 错误与重试
 
-- **pi**：无（`:244` 遇 `stopReason === "error"` 直接 return）。
-- **dsh**：`agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`）。
-- **codex**：采样本层重试 `loop{}`（`turn.rs:1611`）+ 错误分类（`TurnAborted` 逐层返回）。
-- **Claude-Code**：`withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:1611`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
 
-**设计理由**（`[注释]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
+> **设计理由**（`[注释]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
 
 ### 6.4 用户中断 / 取消
 
-- **pi**：`AbortSignal` 层层传递，`:572/610/617/638/732/751` 六处检查；保留 partialMessage。
-- **dsh**：分类（user/parent/hook/disposed），写入 `turn/end`；保留已交付文本为 `interrupted: true`。
-- **codex**：`CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:243`）；已完成 lifecycle 不重写。
-- **Claude-Code**：5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | `AbortSignal` 层层传递，`:572/610/617/638/732/751` 六处检查；保留 partialMessage | 分类（user/parent/hook/disposed），写入 `turn/end`；保留已交付文本为 `interrupted: true` | `CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:243`）；已完成 lifecycle 不重写 | 5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对 |
 
-**设计理由**（`[注释]` 见 第 8 章）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
+> **设计理由**（`[注释]`）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
 
 ### 6.5 流中断（idle watchdog）与 fallback
 
-- **pi / dsh / codex**：无内建 watchdog。
-- **Claude-Code**：`claude.ts:2310-2334` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:712-741`）。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | `claude.ts:2310-2334` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:712-741`） |
 
-**设计理由**（`[注释]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
+> **设计理由**（`[注释]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
 
 ### 6.6 空转 / 无限循环防护
 
-| 项目 | 机制 | 锚点 |
-|---|---|---|
-| pi | 全批 terminate 才停 | `shouldTerminateToolBatch` `:685` |
-| dsh | `turnEnds && inbox.nextStep.length===0` | `agent.ts:312` |
-| codex | `guardian_budget_compacted` 每 step 限一次压缩 | `turn.rs:422/535/737-750` |
-| Claude-Code | `hasAttemptedReactiveCompact`（`:1157`/`:1292-1297`）+ `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`，检查 `:260-265`，计数 `:341-349`） | — |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 机制 | 全批 terminate 才停 | `turnEnds && inbox.nextStep.length===0` | `guardian_budget_compacted` 每 step 限一次压缩 | `hasAttemptedReactiveCompact`（`:1157`/`:1292-1297`）+ `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`，检查 `:260-265`，计数 `:341-349`） |
+| 源码依据 | `shouldTerminateToolBatch` `:685` | `agent.ts:312` | `turn.rs:422/535/737-750` | — |
 
-**设计理由**（`[注释]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
+> **设计理由**（`[注释]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
+
 
 ### 6.7 工具失败与兄弟失败
 
-- **pi**：prepare/execute 全 catch → 错误 toolResult，**零逃逸**（`:703`/`:773`/`:816`）。
-- **dsh**：调度器失败**不伪造结果**，抛第一个失败（`tool-calls.ts:219-236` 注释 `[注释]`：避免假结果造成死循环）。
-- **codex**：payload 类型级错误升级为 `Fatal`，其余 `RespondToModel`。
-- **Claude-Code**：四条错误→tool_result 路径（未知工具 `toolExecution.ts:369-411`、zod 失败 `:616-680`、validateInput `:687-733`、执行抛错 `:1691-1737`）；**Bash 出错会取消兄弟工具**（`StreamingToolExecutor.ts:354-364`），Read/WebFetch 不会。
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 做法 | prepare/execute 全 catch → 错误 toolResult，**零逃逸**（`:703`/`:773`/`:816`） | 调度器失败**不伪造结果**，抛第一个失败（`tool-calls.ts:219-236` 注释 `[注释]`：避免假结果造成死循环） | payload 类型级错误升级为 `Fatal`，其余 `RespondToModel` | 四条错误→tool_result 路径（未知工具 `toolExecution.ts:369-411`、zod 失败 `:616-680`、validateInput `:687-733`、执行抛错 `:1691-1737`）；**Bash 出错会取消兄弟工具**（`StreamingToolExecutor.ts:354-364`），Read/WebFetch 不会 |
 
-**设计理由**（`[注释]`）：CC 的「Bash 失败级联取消兄弟」反映了实际使用模式——shell 命令之间常有隐含依赖，一个失败后继续跑其余命令通常无意义且会产生误导性输出。
+> **设计理由**（`[注释]`）：CC 的「Bash 失败级联取消兄弟」反映了实际使用模式——shell 命令之间常有隐含依赖，一个失败后继续跑其余命令通常无意义且会产生误导性输出。
 
 ### 6.8 预算耗尽（turn / token / USD）
 
-| 项目 | 预算类型 | 锚点 |
-|---|---|---|
-| pi | 无 | — |
-| dsh | 无 | — |
-| codex | token（compact_token_budget.rs） | `run_compact_task_inner` |
-| Claude-Code | **turn + token + USD** 三种 | maxTurns `query.ts:1705-1712`；token `tokenBudget.ts:45`；USD `QueryEngine.ts:972-1002` |
+| 项 | pi | dsh | codex | CC |
+|---|---|---|---|---|
+| 预算类型 | 无 | 无 | token（compact_token_budget.rs） | **turn + token + USD** 三种 |
+| 源码依据 | — | — | `run_compact_task_inner` | maxTurns `query.ts:1705-1712`；token `tokenBudget.ts:45`；USD `QueryEngine.ts:972-1002` |
 
-**设计理由**（`[推断]`）：只有 CC 做 USD 预算，因为它作为商业产品必须给用户设成本上限；maxTurns 是防失控的兜底；token budget 反而是「**鼓励模型多干活**」的正向机制——这与另外三家「限制」的语义相反。
+> **设计理由**（`[推断]`）：只有 CC 做 USD 预算，因为它作为商业产品必须给用户设成本上限；maxTurns 是防失控的兜底；token budget 反而是「**鼓励模型多干活**」的正向机制——这与另外三家「限制」的语义相反。
+
 
 ---
 
 ## 七、设计建议
 
-### 7.1 共识（可直接采纳，无需权衡）
+### 7.1 共识（四家一致，可直接采纳）
 
 1. **双层循环结构**：外层管续接（follow-up / steering / hook 决定），内层管工具。四家全部采用。
 2. **「无工具调用即完成」作为主出口**，其余出口必须显式枚举并命名。
@@ -615,7 +616,7 @@ if (streamingFallbackOccured) {
 5. **工具失败物化为错误结果，不中断循环**（结构性失败除外）。
 6. **压缩必须有防重入/防死循环标志**——四家无一例外。
 
-### 7.2 推荐（按收益排序）
+### 7.2 推荐（多数做对，值得抄）
 
 1. **把状态做成可回放的**（学 dsh）：即使不落全量日志，至少让「每一轮的输入」可由外部重建。收益是崩溃恢复 + 回放测试 + 便于压缩审计。
 2. **截断信号要「粘」**（学 dsh `:331-336`）：一次 max-tokens 不应被后续正常 step 覆盖，否则上层失去续写信号。
@@ -624,14 +625,14 @@ if (streamingFallbackOccured) {
 5. **正反两向的 token 预算**（学 CC `tokenBudget.ts`）：既能「限制不失控」（maxTurns），也能「催促把活干完」（token budget + 收敛判据）。
 6. **API 错误路径跳过用户 hook**（学 CC `:1262-1265`）：避免 hook 放大故障形成死亡螺旋。
 
-### 7.3 权衡（取决于产品形态）
+### 7.3 权衡（各有代价，按场景选）
 
 1. **压缩放循环内还是循环外**：内（codex/CC）省控制流复杂度但耦合重；外（pi/dsh）核心干净但需要成熟的钩子体系。**选中型项目**：循环外挂 + 事件驱动（dsh 路线）。
 2. **循环体是函数还是生成器**：生成器（CC）天然支持中断和「逐轮让出」，但对调用方的流式处理能力有要求；函数（pi）最易嵌入。
 3. **状态显式传递 vs 隐式可变**：显式（CC 的 `next: State`）便于拆解测试，但每轮都要重建对象；可变（pi）高效但难以推理。
 4. **重试放在循环内还是循环外**：内（codex/CC）能结合上下文做智能降级（换模型）；外（pi/dsh）职责更清晰。
 
-### 7.4 反例（明确不该做什么）
+### 7.4 反例（明确不该做的）
 
 1. **不要把「模型没调工具」等同于「任务完成」**。四家都是这样实现的，但 CC 额外用 stop hooks + token budget 做二次确认（`:1267-1357`）——因为模型经常在活没干完时提前收尾。
 2. **不要在错误路径上跑用户可编程的 hook**（CC 反例见 `:1262-1265`）。hooks 是用户代码，可能比 API 更脆弱。
