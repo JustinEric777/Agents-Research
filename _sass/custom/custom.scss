@@ -1,0 +1,63 @@
+// ============================================================================
+// 在主题 SCSS 之后加载：追加规则。
+// ============================================================================
+
+// 连字会改变字符宽度，盒线图与源码摘录里必须关掉
+pre,
+code,
+kbd,
+samp,
+.highlight {
+  font-variant-ligatures: none;
+  font-feature-settings: "liga" 0, "calt" 0;
+  font-variant-east-asian: full-width;
+}
+
+// 盒线图与源码摘录常常超出正文宽度，允许块内横向滚动而不是撑破版面
+.main-content pre {
+  overflow-x: auto;
+  > code {
+    white-space: pre;
+    word-break: normal;
+    overflow-wrap: normal;
+  }
+}
+
+// ----------------------------------------------------------------- Mermaid
+// 主题内置支持对 .language-mermaid 直接调用 mermaid.run()，产出落在原 <pre> 内。
+// 这里剥掉代码块外观，只留图本身；渲染失败时仍会显示原始 mermaid 源码，可读。
+pre:has(> code.language-mermaid),
+pre > code.language-mermaid {
+  background: transparent;
+  border: 0;
+  padding: 0.25rem 0;
+  margin: 0;
+  white-space: normal;
+  overflow: visible;
+}
+
+pre:has(> code.language-mermaid) {
+  overflow-x: auto;
+}
+
+.main-content svg[id^="mermaid-"] {
+  max-width: 100%;
+  height: auto;
+}
+
+// ----------------------------------------------------------------- 表格
+// 四家横向对照表列多、格内文字长，窄屏上给横向滚动兜底
+.main-content table {
+  display: block;
+  width: 100%;
+  overflow-x: auto;
+}
+
+// ----------------------------------------------------------------- 搜索
+// 站点以中文为主，lunr 的分词天然不友好；这里让结果摘要按词断行即可，
+// 主要检索场景是英文标识符（AbortSignal、compact_boundary 之类），那部分是准的。
+.search-results-list-item {
+  .search-result-preview {
+    word-break: break-word;
+  }
+}

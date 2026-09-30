@@ -1,0 +1,14 @@
+// ============================================================================
+// 在主题 SCSS 之前加载：覆盖 just-the-docs 的变量。
+// ============================================================================
+
+// 文档里有 322 行盒线字符图（`├─ │ └─` 树形与方框）。这类图能否对齐，
+// 取决于「一个西文字符的宽度是否恰为中文的一半」——源码里的列宽是按
+// 中文 2 列 / 西文 1 列算的。因此等宽字体优先取 2:1 设计的 CJK 等宽字体，
+// 本机没有时再退回系统等宽（会有轻微错位，但不影响可读）。
+$mono-font-family:
+  "Sarasa Mono SC", "Sarasa Mono HC", "Sarasa Term SC",
+  "Noto Sans Mono CJK SC", "Source Han Mono SC", "UDEV Gothic",
+  "LXGW WenKai Mono", "M PLUS 1 Code",
+  "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas,
+  "Liberation Mono", "Courier New", monospace !default;

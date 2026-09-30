@@ -30,3 +30,16 @@ go.work.sum
 # Editor/IDE
 .idea/
 .vscode/
+
+# ---------------------------------------------------------------- Jekyll
+_site/
+.srcdoc/
+.jekyll-cache/
+.jekyll-metadata
+.bundle/
+vendor/
+
+# 不提交 Gemfile.lock：本地是 arm64-darwin、CI 是 x86_64-linux，
+# 提交本地生成的 lock 会让 CI 平台不匹配；Gemfile 里的 ~> 约束已足够稳定。
+Gemfile.lock
+
