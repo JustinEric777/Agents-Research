@@ -87,29 +87,16 @@ permalink: /ch/11/
 
 **图 11-1**：L11 的位置。它的特殊性在于「**反向约束**」——前八章都是本层向上提供能力，只有本层的事件词汇表**反过来框住了 L3 的形状**。因此这一层真正的设计问题是抽象问题：**归一化边界画在哪，以及词汇表留多宽**。
 
-```text
-四家的 Provider 层骨架（越靠上，抽象越厚）
+四家的 Provider 层骨架厚薄不同，行序即抽象厚度（越靠上，抽象越厚）：
 
-  pi      ai 整包：41 家 provider shard + 20 个 api 模块（去掉 helper 约 13 个真适配器）
-          └─ 归一在适配器内：对外只出 12 种 AssistantMessageEvent
-          └─ 元数据构建期生成（providers/*.models.ts 41 个 shard）
+| 项目 | 抽象策略 | 骨架结构 |
+|---|---|---|
+| pi | 厚适配层：以**广度**换通用性 | ai 整包：41 家 provider shard + 20 个 api 模块（去掉 helper 约 13 个真适配器）；归一在适配器内，对外只出 12 种 AssistantMessageEvent；元数据构建期生成（providers/*.models.ts 41 个 shard） |
+| dsh | 契约层：以**契约**换可替换性 | llm（StreamChunk 仅 7 种）+ 孪生适配器：llm-deepseek 自写（直连 fetch + 自实现 wire 映射）、llm-pi-ai 借用（包住 @earendil-works/pi-ai，含上游 patch）、llm-retry 无配置插件（策略由 adapter 拥有）、token-meter 从 durable 日志回放测量、不算钱 |
+| codex | 协议收敛：以**收敛**换简单性 | WireApi 只剩 Responses 一个变体；codex-api（SSE 唯一消化点）→ ResponseEvent（17 种）；model-provider-info（20 字段配置）/ models-manager（目录 + 缓存） |
+| CC | 不做抽象：换零转换损失 | 单一 provider 家族：claude.ts 直接 switch Anthropic 原生 part.type；utils/model 用「别名表 7 个 + 子串归并」代替模型目录 |
 
-  dsh     契约层：llm（StreamChunk 仅 7 种） + 孪生适配器
-          ├─ llm-deepseek      自写：直连 fetch + 自实现 wire 映射
-          ├─ llm-pi-ai         借用：包住 @earendil-works/pi-ai，含上游 patch
-          ├─ llm-retry         无配置插件，策略由 adapter 拥有
-          └─ token-meter       从 durable 日志回放测量，不算钱
-
-  codex   协议收敛：WireApi 只剩 Responses 一个变体
-          └─ codex-api（SSE 唯一消化点） → ResponseEvent（17 种）
-          └─ model-provider-info（20 字段配置）/ models-manager（目录+缓存）
-
-  CC      单一 provider 家族：不做归一
-          └─ claude.ts 直接 switch Anthropic 原生 part.type
-          └─ utils/model 用「别名表 7 个 + 子串归并」代替模型目录
-```
-
-**图 11-2**：四种骨架。pi 与 codex 是「厚适配层」的两个方向——pi 用**广度**（41 家）换通用性，codex 用**收敛**（1 种协议）换简单性；dsh 用**契约**（7 种事件、双实现验证）换可替换性；CC 用**不做抽象**换取零转换损失。
+**表 11-1**：四种骨架。pi 与 codex 是「厚适配层」的两个方向——pi 用**广度**（41 家）换通用性，codex 用**收敛**（1 种协议）换简单性；dsh 用**契约**（7 种事件、双实现验证）换可替换性；CC 用**不做抽象**换取零转换损失。
 ---
 
 ## 三、概念对齐表
@@ -218,7 +205,7 @@ flowchart TB
   J --> A
 ```
 
-**图 11-3**：pi 的一次生成请求全链路。注意 `applyAuth` 位于适配器**之前**且能改写 `baseUrl`——这让「同一模型走不同端点」成为纯配置行为。
+**图 11-2**：pi 的一次生成请求全链路。注意 `applyAuth` 位于适配器**之前**且能改写 `baseUrl`——这让「同一模型走不同端点」成为纯配置行为。
 
 关键行号：
 
@@ -469,7 +456,7 @@ listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream()
    StreamChunk（7 种）  ← 唯一出口；两者都表达不了的 = 词汇表的 bug
 ```
 
-**图 11-4**：孪生适配器的结构。这张图的价值在于**它把「契约是否合格」变成了一个可执行的判据**——不需要设计评审，跑两个实现即可。注意 `llm-pi-ai` 那一侧同时被 41 家 provider 的元数据能力（来自 pi）与 dsh 自己的凭据、附件、超时服务（来自 `peerDependencies`）夹在中间，这个夹层才是「借用别家 ai 层」真正的成本所在。
+**图 11-3**：孪生适配器的结构。这张图的价值在于**它把「契约是否合格」变成了一个可执行的判据**——不需要设计评审，跑两个实现即可。注意 `llm-pi-ai` 那一侧同时被 41 家 provider 的元数据能力（来自 pi）与 dsh 自己的凭据、附件、超时服务（来自 `peerDependencies`）夹在中间，这个夹层才是「借用别家 ai 层」真正的成本所在。
 
 它包住的是 pi-ai 的 `Models`/`Provider` 集合，并**补/改**了这些：
 
@@ -832,7 +819,7 @@ flowchart LR
   H --> A
 ```
 
-**图 11-5**：codex 的三级容错路径。三个细节值得注意：① **429 被挡在传输层之外**（`retry_429 = false`），因为它的等待时长由服务端文本给出，不容客户端再算一遍；② **退避抖动是双向的**（0.9~1.1），四家里唯一——单向抖动（0~25%）在大量客户端同时重试时仍有对齐风险；③ **重试耗尽不是终点而是降级点**：`force_http_fallback` 会永久切换到 HTTP 并重置预算，避免在一条走不通的通道上反复烧光重试配额。
+**图 11-4**：codex 的三级容错路径。三个细节值得注意：① **429 被挡在传输层之外**（`retry_429 = false`），因为它的等待时长由服务端文本给出，不容客户端再算一遍；② **退避抖动是双向的**（0.9~1.1），四家里唯一——单向抖动（0~25%）在大量客户端同时重试时仍有对齐风险；③ **重试耗尽不是终点而是降级点**：`force_http_fallback` 会永久切换到 HTTP 并重置预算，避免在一条走不通的通道上反复烧光重试配额。
 
 #### 4.3.6 模型目录：远端 + 缓存 + 最长前缀匹配
 

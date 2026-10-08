@@ -84,23 +84,16 @@ permalink: /ch/12/
 
 **图 12-1**：L12 的位置。它的特殊之处在于「反向性」——前九章都是 Agent 内部的机制，只有本层是**外部代码反向伸进运行时**。因此这一层真正的设计问题是权限问题：**给外部代码多大的权力，以及改完之后由谁兜底**。
 
-```text
-四家的扩展体系骨架（框越靠上，越接近"外部可写"）
+四家的扩展体系骨架（行序即层次，越靠上越接近「外部可写」）：
 
-  CC       六层并置：hooks(27 事件) · plugins · skills · commands · MCP · subagents
-           └─ hooks 是最强的一层：可阻断、可改写入参、可注入上下文
+| 项目 | 形态 | 结构 |
+|---|---|---|
+| CC | 六层并置 | hooks（27 事件）· plugins · skills · commands · MCP · subagents；hooks 是最强的一层，可阻断、可改写入参、可注入上下文 |
+| codex | 双通道 | plugins → hooks（进程外，12 事件，可阻断/改写）；extension-api（进程内，12 类 contributor trait） |
+| dsh | 一种单位 | Cordis 插件；语义全靠调度模式区分：emit / parallel / serial / bail / waterfall |
+| pi | 两层分工 | 内核 11 个回调 → 外壳 36 个事件 + 10 个 register*；内核不知道「扩展」这个概念，只暴露回调 |
 
-  codex    双通道：plugins ─┬─ hooks（进程外，12 事件，可阻断/改写）
-                           └─ extension-api（进程内，12 类 contributor trait）
-
-  dsh      一种单位：Cordis 插件
-           └─ 语义全靠调度模式区分：emit / parallel / serial / bail / waterfall
-
-  pi       两层分工：内核 11 个回调 → 外壳 36 个事件 + 10 个 register*
-           └─ 内核不知道"扩展"这个概念，只暴露回调
-```
-
-**图 12-2**：四种骨架。注意 dsh 的形态最「统一」——它没有为不同扩展能力设计不同机制，而是**把差异全部收敛到调度模式里**；codex 则相反，用两条物理隔离的通道处理两类需求。
+**表 12-1**：四种骨架。注意 dsh 的形态最「统一」——它没有为不同扩展能力设计不同机制，而是**把差异全部收敛到调度模式里**；codex 则相反，用两条物理隔离的通道处理两类需求。
 
 ---
 
@@ -561,7 +554,7 @@ sequenceDiagram
     Note over C: Blocked → RespondToModel 错误返回模型<br/>updated_input → with_updated_hook_input 替换入参
 ```
 
-**图 12-3**：codex 的 PreToolUse 链路。两个细节值得注意：**Sync handler 是并行的**（进 `FuturesUnordered`），但结果**按配置顺序合并**；而 `PreToolUse` 的输入改写却**按完成顺序取最后一个完成者**——报告顺序与裁决顺序故意不同：
+**图 12-2**：codex 的 PreToolUse 链路。两个细节值得注意：**Sync handler 是并行的**（进 `FuturesUnordered`），但结果**按配置顺序合并**；而 `PreToolUse` 的输入改写却**按完成顺序取最后一个完成者**——报告顺序与裁决顺序故意不同：
 
 ```rust
 // hooks/src/events/pre_tool_use.rs:149-153
@@ -716,7 +709,7 @@ flowchart TD
     B["builtinPlugins（{name}@builtin）"] --> P
 ```
 
-**图 12-4**：CC 六层的装配。plugin 是**分发容器**（能携带 commands / agents / hooks / skills / MCP / output-styles / LSP / settings），`builtinPlugins` 与用户 plugin 走同一 `LoadedPlugin` 抽象、在 `/plugin` UI 里可开关（`src/plugins/builtinPlugins.ts:57-102`）。
+**图 12-3**：CC 六层的装配。plugin 是**分发容器**（能携带 commands / agents / hooks / skills / MCP / output-styles / LSP / settings），`builtinPlugins` 与用户 plugin 走同一 `LoadedPlugin` 抽象、在 `/plugin` UI 里可开关（`src/plugins/builtinPlugins.ts:57-102`）。
 
 #### 4.4.5 异常与降级：信任校验是核心防线
 
