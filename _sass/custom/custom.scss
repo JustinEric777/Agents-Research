@@ -2,15 +2,22 @@
 // 在主题 SCSS 之后加载：追加规则。
 // ============================================================================
 
-// 连字会改变字符宽度，盒线图与源码摘录里必须关掉
+// ----------------------------------------------------------------- 等宽字体
+// 字体族在 `custom/setup.scss` 里覆盖 `$mono-font-family`（单一出处）。
+// 这里补两件主题没做的事：
+//   ① 覆盖面——主题只在 `code` 上设字体，`pre` / `kbd` / `samp` 未覆盖，
+//      而盒线图是裸 `<pre>`（无 `language-*` 标签）时也会出现；
+//   ② 禁用连字——`->`、`=>` 连字会改变字符数，直接破坏盒线图的列对齐。
+// 本文件编译在整份 CSS 的最末尾（实测 99% 处），同特异性下后者胜，无需 !important。
 pre,
 code,
 kbd,
 samp,
-.highlight {
+.highlight,
+.lineno {
+  font-family: $mono-font-family;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
-  font-variant-east-asian: full-width;
 }
 
 // 盒线图与源码摘录常常超出正文宽度，允许块内横向滚动而不是撑破版面

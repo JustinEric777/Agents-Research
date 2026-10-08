@@ -1,14 +1,22 @@
 // ============================================================================
 // 在主题 SCSS 之前加载：覆盖 just-the-docs 的变量。
 // ============================================================================
-
-// 文档里有 322 行盒线字符图（`├─ │ └─` 树形与方框）。这类图能否对齐，
-// 取决于「一个西文字符的宽度是否恰为中文的一半」——源码里的列宽是按
-// 中文 2 列 / 西文 1 列算的。因此等宽字体优先取 2:1 设计的 CJK 等宽字体，
-// 本机没有时再退回系统等宽（会有轻微错位，但不影响可读）。
+//
+// 导入顺序（v0.12.0）：support/support → custom/setup → color_schemes → modules。
+// 也就是说 `support/variables` 里那批 `!default` 变量**在上一行就已赋值完毕**，
+// 本文件若也写 `!default` 将完全无效——实测编译产物中仍是 "SFMono-Regular"。
+// 因此这里的赋值**一律不带 `!default`**。
+//
+// 为什么值得覆盖：文档里有 300 余行盒线字符图（`├─ │ └─`），列宽按
+// 「中文 2 列 / 西文 1 列」排。系统默认等宽的西文约 0.6em、中文 1.0em，
+// 比例 1.67:1 而非 2:1，含中文的行之后会累积偏移（纯西文的树形骨架不受影响）。
+// 这里优先取按 2:1 设计的 CJK 等宽字体（Sarasa / 更纱黑体、思源等宽等），
+// 本机没有则逐级退回，最终落到系统等宽——显示效果与 GitHub 一致，不会更差。
+//
+// 反例备忘：**不要**加 `font-variant-east-asian: full-width`。盒线字符属
+// East Asian Ambiguous 宽度，部分字体的 fwid 特性会把它放大到两列宽，反而撑坏对齐。
 $mono-font-family:
-  "Sarasa Mono SC", "Sarasa Mono HC", "Sarasa Term SC",
-  "Noto Sans Mono CJK SC", "Source Han Mono SC", "UDEV Gothic",
-  "LXGW WenKai Mono", "M PLUS 1 Code",
+  "Sarasa Mono SC", "Sarasa Term SC", "Noto Sans Mono CJK SC",
+  "Source Han Mono SC", "LXGW WenKai Mono", "M PLUS 1 Code",
   "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas,
-  "Liberation Mono", "Courier New", monospace !default;
+  "Liberation Mono", "Courier New", monospace;
