@@ -1,0 +1,47 @@
+{%- comment -%}
+  首屏之前把配色定下来。
+
+  主题的机制：head.html 先加载 assets/css/just-the-docs-default.css，
+  再由 assets/js/just-the-docs.js 里的 jtd.setTheme() 换这个 <link> 的 href
+  来切换配色（主题自带 just-the-docs-light.css / just-the-docs-dark.css 两份）。
+  本文件在做同一件事，但发生在**浏览器首帧之前**——否则深色用户每开一页
+  都会先闪一下白底。
+
+  约定（必须与 jtd.getTheme()/setTheme() 保持一致）：操作的都是
+  `document.querySelector('link[rel="stylesheet"]')`，即 head 里**第一个**
+  样式表。用别的选择器会让两边状态对不上。
+
+  优先顺序：localStorage 里用户显式选过的 > 系统 prefers-color-scheme。
+  系统偏好在运行中变化不再跟随（换配色要重画 mermaid 图，代价是整页刷新，
+  见 _includes/header_custom.html）。
+{%- endcomment -%}
+<script>
+  (function () {
+    var KEY = "jtd-theme";
+    var theme = null;
+
+    try {
+      theme = localStorage.getItem(KEY);
+    } catch (e) {
+      /* 隐私模式下 localStorage 不可写，忽略即可 */
+    }
+
+    if (theme !== "dark" && theme !== "light") {
+      theme =
+        window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+          ? "dark"
+          : "light";
+    }
+
+    // 供 CSS（图标、滚动条等）与其他脚本（mermaid）读取
+    document.documentElement.setAttribute("data-theme", theme);
+
+    var link = document.querySelector('link[rel="stylesheet"]');
+    if (link) {
+      link.setAttribute(
+        "href",
+        "{{ '/assets/css/just-the-docs-' | relative_url }}" + theme + ".css"
+      );
+    }
+  })();
+</script>

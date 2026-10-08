@@ -1,0 +1,98 @@
+{%- comment -%}
+  页头右侧的浅色 / 深色切换按钮。
+
+  放在 header_custom.html（主题 header 组件的插槽），位置与搜索框、右上角
+  仓库链接同排。移动端这一排在展开菜单后才可见——与搜索框的可见性一致，
+  这是主题既有设计。
+
+  配色样式表由 _includes/head_custom.html 的引导脚本负责，这里只负责：
+  点击时换 href、记住选择、同步 <html data-theme>（图标与 mermaid 靠它）。
+{%- endcomment -%}
+<button
+  id="theme-toggle"
+  class="btn-reset theme-toggle"
+  type="button"
+  aria-label="切换浅色 / 深色模式"
+  title="切换浅色 / 深色模式"
+>
+  <svg
+    class="icon-sun"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+  >
+    <circle cx="12" cy="12" r="4.2"></circle>
+    <path d="M12 2.6v2.3M12 19.1v2.3M4.3 4.3l1.6 1.6M18.1 18.1l1.6 1.6M2.6 12h2.3M19.1 12h2.3M4.3 19.7l1.6-1.6M18.1 5.9l1.6-1.6"></path>
+  </svg>
+  <svg
+    class="icon-moon"
+    viewBox="0 0 24 24"
+    aria-hidden="true"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <path d="M20.6 14.4A8.6 8.6 0 0 1 9.6 3.4a8.6 8.6 0 1 0 11 11z"></path>
+  </svg>
+</button>
+<script>
+  (function () {
+    var KEY = "jtd-theme";
+    var SCROLL_KEY = "jtd-restore-scroll";
+
+    function current() {
+      return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
+    }
+
+    jtd.onReady(function () {
+      // 切换配色时若刷新过页面（见下），把阅读位置还回去。
+      // html 上有 scroll-behavior: smooth，先临时关掉，免得整页滚动动画。
+      var y = null;
+      try {
+        y = sessionStorage.getItem(SCROLL_KEY);
+        sessionStorage.removeItem(SCROLL_KEY);
+      } catch (e) {
+        /* 忽略 */
+      }
+      if (y !== null && y !== "") {
+        var html = document.documentElement;
+        var smooth = html.style.scrollBehavior;
+        html.style.scrollBehavior = "auto";
+        window.scrollTo(0, parseInt(y, 10) || 0);
+        html.style.scrollBehavior = smooth;
+      }
+
+      var button = document.getElementById("theme-toggle");
+      if (!button) return;
+
+      jtd.addEvent(button, "click", function () {
+        var next = current() === "dark" ? "light" : "dark";
+
+        jtd.setTheme(next); // 换 <link href>，即换整份配色样式表
+        document.documentElement.setAttribute("data-theme", next);
+
+        try {
+          localStorage.setItem(KEY, next);
+        } catch (e) {
+          /* 忽略 */
+        }
+
+        // mermaid 在初始化时就把颜色写进了 SVG，CSS 换不掉它；
+        // 只有含图的页面需要刷一次（滚动位置已暂存）。
+        if (document.querySelector(".language-mermaid")) {
+          try {
+            sessionStorage.setItem(SCROLL_KEY, String(Math.round(window.scrollY)));
+          } catch (e) {
+            /* 忽略 */
+          }
+          location.reload();
+        }
+      });
+    });
+  })();
+</script>

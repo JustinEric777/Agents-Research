@@ -7,6 +7,12 @@
 // 本文件若也写 `!default` 将完全无效——实测编译产物中仍是 "SFMono-Regular"。
 // 因此这里的赋值**一律不带 `!default`**。
 //
+// 本文件只放变量（数值口径的单一出处）；由变量派生的具体规则都在 custom.scss。
+// 注意 `$color-scheme`、`$border-color` 等由 color_schemes/*.scss 赋值，比本文件晚，
+// 所以凡是要随浅色/深色分岔的颜色**不要**在这里定，放到 custom.scss 里用
+// `if($color-scheme == dark, …, …)` 写。
+
+// ----------------------------------------------------------------- 等宽字体
 // 为什么值得覆盖：文档里有 300 余行盒线字符图（`├─ │ └─`），列宽按
 // 「中文 2 列 / 西文 1 列」排。系统默认等宽的西文约 0.6em、中文 1.0em，
 // 比例 1.67:1 而非 2:1，含中文的行之后会累积偏移（纯西文的树形骨架不受影响）。
@@ -20,3 +26,14 @@ $mono-font-family:
   "Source Han Mono SC", "LXGW WenKai Mono", "M PLUS 1 Code",
   "SFMono-Regular", "SF Mono", Menlo, Monaco, Consolas,
   "Liberation Mono", "Courier New", monospace;
+
+// ------------------------------------------------------------- 字号与行距
+// 正文全是中文，主题默认的 $content-line-height: 1.6 对中文偏挤
+// （中文没有 x-height 撑开，行距要比西文大一档才好读）。
+$content-line-height: 1.75;
+
+// 标题行距：主题 1.25，中文标题（尤其带 `——` 长副标题的章名）容易压在一起。
+$body-heading-line-height: 1.35;
+
+// 圆角：主题 4px，在正文 1248–1440px 的宽度下偏方，视觉上收一档。
+$border-radius: 6px;

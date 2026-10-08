@@ -1,8 +1,112 @@
 // ============================================================================
 // 在主题 SCSS 之后加载：追加规则。
 // ============================================================================
+//
+// 三件必须记住的事：
+//
+// ① 本文件会被**编译两遍**——一遍进 just-the-docs-light.css / -default.css，
+//    一遍进 just-the-docs-dark.css（后者由 _includes/head_custom.html 的脚本
+//    按需切成当前样式表）。所以凡涉及颜色的值都要写成
+//    `if($color-scheme == dark, …, …)`：`$color-scheme` 由 color_schemes/*.scss
+//    在本文件之前赋值，两遍编译各自取到正确的值。
+//
+// ② 断点口径（媒体查询里的 rem 恒按 16px 解析，与主题 `$media-queries` 一致）：
+//      md = 50rem = 800px（侧栏常驻）
+//      lg = 66.5rem = 1064px（= $content-width + $nav-width）
+//    而主题 `$content-width: 50rem` 同时是**断点**和**正文列上限**（800px）——
+//    后者就是「大屏下正文只有 800px」的根因，见下面第一节。
+//
+// ③ 主题 DOM（`_layouts/default.html`）：
+//      header.side-bar
+//      div.main
+//        ├─ div.main-header      ← 搜索框 / 明暗按钮 / 右上角仓库链接
+//        └─ div.main-content-wrap ← 面包屑 + #main-content + footer
+//    `.main-header` 与 `.main-content-wrap` 是**兄弟**，所以两者必须用同一套
+//    宽度上限与居中规则，头部才会和正文左右对齐（这是「规整」的关键）。
 
-// ----------------------------------------------------------------- 等宽字体
+// ---------------------------------------------------------------- 设计令牌
+// 正文列上限：87.5rem = 1400px。
+// 取值依据：① 本系列 §5 的横向对比表最多 10 列，主题给每个单元格
+// `min-width: 7.5rem`（=120px），10 列需 1210px 左右，6 列需 730px；② 主流技术
+// 文档站的正文列集中在 1100–1400px（GitHub 文件视图约 1012px、Stripe 约 1080px）。
+// 低于此值表格频繁横向滚动，高于此值中文一行超过 85 字、阅读反而变累。
+//
+// 这一条同时决定了「自适应」的边界：侧栏 18rem + 本上限 87.5rem = 105.5rem
+// （1688px）。**视口 ≤ 1688px 时上限不生效，正文列直接铺满侧栏右侧的全部空间**
+// （常见的 1440 / 1512 / 1600 宽屏幕都落在这一档）；只有更宽的屏幕才会居中收口。
+// 想整体调宽/调窄，只改这一个变量即可。
+$content-max: 87.5rem;
+
+$nav-w-md: 15.5rem; // md 侧栏宽（沿用主题 $nav-width-md）
+$nav-w-lg: 18rem;   // lg 侧栏宽：容得下「第 11 章 · 模型调用与 Provider」不折行
+
+// 颜色令牌：随 color_scheme 取值，供下面各处复用
+$c-hairline:     if($color-scheme == dark, rgba($white, 0.14), rgba($grey-dk-300, 0.11));
+$c-surface:      if($color-scheme == dark, rgba($white, 0.035), rgba($grey-dk-300, 0.022));
+$c-code-border:  if($color-scheme == dark, rgba($white, 0.16), rgba($grey-dk-300, 0.13));
+$c-scroll-thumb: if($color-scheme == dark, rgba($white, 0.20), rgba($grey-dk-300, 0.22));
+$c-table-head:   if($color-scheme == dark, rgba($white, 0.045), $grey-lt-000);
+$c-card-shadow:  if($color-scheme == dark, none, 0 1px 2px rgba($grey-dk-300, 0.06));
+
+// ============================================================================
+// 一、自适应布局
+// ============================================================================
+// 主题的实现（_sass/layout.scss）：lg 断点把**侧栏**撑成
+// `calc((100% - 侧栏 - 正文) / 2 + 侧栏)`，靠侧栏变宽把「侧栏 + 正文」整组推到
+// 视口中间。副作用有两个：超大屏上左侧变成一大块纯背景色的空板；正文列本身
+// 仍锁死在 `.main { max-width: $content-width }`（800px）。
+//
+// 改成常规做法：侧栏钉死一个宽度，`.main` 不再设上限，正文列自己在剩余空间里
+// 流式居中。三者（`max-width` + 左右 auto 外边距）是标准居中写法，不需要 vw
+// 计算，小视口下 max-width 自动失效、列宽等于容器宽。
+@include mq(md) {
+  .side-bar {
+    width: $nav-w-md;
+    min-width: 0;
+    border-right-color: $c-hairline; // 主题用的 $border-color 在白底上几乎看不见
+  }
+
+  // 主题只给 `.side-bar + .main` 写规则，这里保持一致，避免误伤无侧栏的页面
+  .side-bar + .main {
+    max-width: none;
+    margin-left: $nav-w-md;
+  }
+
+  // 正文列与页头用同一套宽度上限 + 居中，两者左右边界因此严格对齐
+  .main-content-wrap,
+  .main-header {
+    max-width: $content-max;
+    margin-right: auto;
+    margin-left: auto;
+  }
+
+  // 正文左右留白沿用主题的 $gutter-spacing（2rem）——**不要改**：
+  //   左：标题的 `#` 锚点 `.anchor-heading` 绝对定位在 left: -1.5rem，需要 2rem 才不越界；
+  //   右：右上角仓库链接的右侧留白 = .aux-nav 的 1rem + .site-button 的 1rem = 2rem，
+  //       与正文右边界恰好对齐。
+}
+
+@include mq(lg) {
+  .side-bar {
+    width: $nav-w-lg;
+  }
+
+  .side-bar + .main {
+    margin-left: $nav-w-lg;
+  }
+
+  // 主题在这里把栏内三块收窄到 $nav-width，配合 align-items: flex-end 靠右贴正文；
+  // 侧栏既然定了宽，就让它们铺满，导航文字能多出 1.5rem 余量。
+  .site-nav,
+  .site-header,
+  .site-footer {
+    width: 100%;
+  }
+}
+
+// ============================================================================
+// 二、等宽字体
+// ============================================================================
 // 字体族在 `custom/setup.scss` 里覆盖 `$mono-font-family`（单一出处）。
 // 这里补两件主题没做的事：
 //   ① 覆盖面——主题只在 `code` 上设字体，`pre` / `kbd` / `samp` 未覆盖，
@@ -20,51 +124,250 @@ samp,
   font-feature-settings: "liga" 0, "calt" 0;
 }
 
-// 盒线图与源码摘录常常超出正文宽度，允许块内横向滚动而不是撑破版面
-.main-content pre {
-  overflow-x: auto;
-  > code {
-    white-space: pre;
-    word-break: normal;
-    overflow-wrap: normal;
+.main-content {
+  // 行内代码：主题 0.75em（16px 正文里只有 12px），中文文档里偏小
+  code {
+    font-size: 0.875em;
+  }
+
+  // 块内代码：12px → 13px。盒线图会因此宽 8%，但源码摘录占了 900 多个块，
+  // 可读性更值。
+  pre code {
+    font-size: 0.8125rem;
   }
 }
 
-// ----------------------------------------------------------------- Mermaid
-// 主题内置支持对 .language-mermaid 直接调用 mermaid.run()，产出落在原 <pre> 内。
-// 这里剥掉代码块外观，只留图本身；渲染失败时仍会显示原始 mermaid 源码，可读。
-pre:has(> code.language-mermaid),
-pre > code.language-mermaid {
-  background: transparent;
-  border: 0;
-  padding: 0.25rem 0;
-  margin: 0;
-  white-space: normal;
-  overflow: visible;
+// ============================================================================
+// 三、代码块与横向滚动
+// ============================================================================
+// 主题给代码块画的是 `1px solid $body-text-color`——浅色下是深灰、深色下是
+// 浅灰，两种模式都过重。换成低对比度描边并把内边距放宽一档。
+div.highlighter-rouge > .highlight,
+figure.highlight > pre {
+  padding: 0.875rem 1rem;
+  border-color: $c-code-border;
 }
 
-pre:has(> code.language-mermaid) {
+// 盒线图与源码摘录常常超出正文宽度：块内横向滚动，而不是撑破版面。
+// 只给「没被 rouge 包起来的裸 pre」（mermaid 就是这种）加滚动——代码围栏的
+// 滚动容器是外层 div.highlight，再给内层 pre 加一层会出现双滚动条。
+.main-content pre:not(.highlight) {
   overflow-x: auto;
 }
 
+// 滚动条：系统默认样式在深色模式下是白的，与页面冲突；统一成细的弱对比条
+div.highlight,
+figure.highlight > pre,
+.main-content pre,
+.table-wrapper {
+  scrollbar-width: thin;
+  scrollbar-color: $c-scroll-thumb transparent;
+
+  &::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+
+  &::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  &::-webkit-scrollbar-thumb {
+    background-color: $c-scroll-thumb;
+    border-radius: 4px;
+  }
+}
+
+// ============================================================================
+// 四、Mermaid
+// ============================================================================
+// 主题内置支持对 .language-mermaid 直接调用 mermaid.run()，产出落在原
+// `<pre><code class="language-mermaid">` 里。剥掉代码块外观、留白居中；
+// 渲染失败时仍会显示原始 mermaid 源码，可读。
+pre:has(> code.language-mermaid),
+pre > code.language-mermaid {
+  padding: 0.5rem 0;
+  margin: 0;
+  text-align: center;
+  white-space: normal;
+  background: transparent;
+  border: 0;
+}
+
+// 图本身：宽不超正文列，高按比例（useMaxWidth 已让 mermaid 输出 100% 宽）
+.main-content .language-mermaid svg,
 .main-content svg[id^="mermaid-"] {
   max-width: 100%;
   height: auto;
 }
 
-// ----------------------------------------------------------------- 表格
-// 四家横向对照表列多、格内文字长，窄屏上给横向滚动兜底
+// ============================================================================
+// 五、表格
+// ============================================================================
+// 主题已经把每个 <table> 包进 .table-wrapper（overflow-x: auto + 圆角 + 阴影），
+// 早期版本我们又给 table 自己加了 `display:block; overflow-x:auto`——那会让
+// table 变成第二层滚动容器，并破坏列宽计算（10 列的对比表尤其明显）。这里恢复
+// 主题的包裹结构，只把观感调规整。
 .main-content table {
-  display: block;
+  display: table;
   width: 100%;
-  overflow-x: auto;
+  overflow: visible;
 }
 
-// ----------------------------------------------------------------- 搜索
+.table-wrapper {
+  border: 1px solid $c-hairline;
+  box-shadow: $c-card-shadow;
+}
+
+.main-content {
+  th,
+  td {
+    // 单元格里几乎都是多行长文，默认的 baseline 对齐会让首行错位
+    vertical-align: top;
+    border-color: $c-hairline;
+  }
+
+  thead th {
+    font-weight: 600;
+    white-space: nowrap;
+    background-color: $c-table-head;
+  }
+
+  // 隔行浅底：五、六列的横向对比表一行常占四五屏行高，靠底色才追得住行
+  tbody tr:nth-child(even) td {
+    background-color: $c-surface;
+  }
+}
+
+// ============================================================================
+// 六、引用块（提示卡）
+// ============================================================================
+// 全文 200 余处 `> **设计理由**：…`、章首的 `> **本层定位** / **前置依赖** / …`
+// 是正文之外的第二信息层，值得一个统一克制的卡片外观，而不是默认那条灰竖线。
+.main-content blockquote {
+  padding: 0.75rem 1rem;
+  margin: 1.25rem 0;
+  background-color: $c-surface;
+  border-left: 3px solid rgba($link-color, 0.7);
+  border-radius: 0 $border-radius $border-radius 0;
+
+  // 卡片化的引用块内部段距收紧，避免占掉正文的节奏
+  > p {
+    margin-top: 0.6em;
+    margin-bottom: 0.6em;
+
+    &:first-child {
+      margin-top: 0;
+    }
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+  }
+}
+
+// ============================================================================
+// 七、标题与分隔线
+// ============================================================================
+.main-content {
+  // 章题（每篇正文唯一的 h1）上面紧接着面包屑，主题的 1.5em（36px 章节名
+  // → 54px）过空，收一档。`:first-of-type` 要显式写：主题对它有一条更高
+  // 特异性的 `margin-top: 0.5em`，不写这一笔就被它压回去。
+  h1,
+  h1:first-of-type {
+    margin-top: 0.5rem;
+    // 主题给 300；中文标题在 2rem 以上用 300 偏虚，400 更稳
+    font-weight: 400;
+  }
+
+  h2 {
+    margin-top: 2.25rem;
+    margin-bottom: 0.75rem;
+    font-weight: 600;
+  }
+
+  h3 {
+    margin-top: 1.75rem;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+  }
+
+  // 主题把 h4 设成 0.6875rem + 全大写 + 0.1em 字距（正文里用了 438 次！）。
+  // 大写对中文无效，字距会把每个汉字撑开 1.6px，字号又比正文还小——中文下
+  // 只剩「又小又散」。这里还原成与正文同号的加粗小标题（fs-2 带 !important，
+  // 必须同用 !important + 更高特异性才能覆盖）。
+  h4 {
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 1rem !important;
+    font-weight: 600;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  // 锚点跳转时标题不要贴着视口顶端
+  :is(h1, h2, h3, h4, h5, h6) {
+    scroll-margin-top: 1.25rem;
+  }
+}
+
+// `---` 在每个小节前出现一次，是全文的**分节线**；主题用的 $border-color 在
+// 白底上几乎看不见（#eeebee），分节感因此消失。换成弱对比但看得见的线。
+.main-content hr {
+  height: 1px;
+  margin: 2rem 0;
+  background-color: $c-hairline;
+  border: 0;
+}
+
+// ============================================================================
+// 八、搜索
+// ============================================================================
 // 站点以中文为主，lunr 的分词天然不友好；这里让结果摘要按词断行即可，
 // 主要检索场景是英文标识符（AbortSignal、compact_boundary 之类），那部分是准的。
 .search-results-list-item {
   .search-result-preview {
     word-break: break-word;
+  }
+}
+
+// ============================================================================
+// 九、明暗切换按钮（DOM 见 _includes/header_custom.html）
+// ============================================================================
+// 直接作为 .main-header 的 flex 子项：搜索框 flex-grow 吃掉全部剩余空间，
+// 按钮与右上角仓库链接被推到右端。内边距对齐 .site-button，两者看起来同族。
+.theme-toggle {
+  display: flex;
+  height: 100%;
+  padding: 0 1rem;
+  align-items: center;
+  color: $body-text-color;
+
+  &:hover,
+  &:focus {
+    color: $link-color;
+  }
+
+  svg {
+    display: block;
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  // 图标由 <html data-theme> 决定显示哪一个；无 JS 时退回太阳（浅色）
+  .icon-moon {
+    display: none;
+  }
+}
+
+// 注：`:root { color-scheme }` 主题已在 _sass/base.scss 里按 $color-scheme
+// 写好了（浅色表 → light，深色表 → dark），无需重复。
+html[data-theme="dark"] .theme-toggle {
+  .icon-sun {
+    display: none;
+  }
+
+  .icon-moon {
+    display: block;
   }
 }
