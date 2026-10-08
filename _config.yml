@@ -32,6 +32,8 @@ mermaid:
   version: "11"
 
 # ============================================================ 侧栏与搜索
+# 结果按「二级标题」切块——本系列的检索场景主要是英文标识符
+# （`AbortSignal`、`compact_boundary` 之类），按小节切块命中率最高。
 search_enabled: true
 search:
   heading_level: 2
@@ -40,12 +42,17 @@ search:
   preview_words_after: 10
   rel_url: true
   button: false
-heading_anchors: 2
-nav_sort: case_insensitive
-nav_fold: false          # 三区父节点默认展开，读者一眼看到全貌
 
-# 目录层级：章节条目在侧栏里不做缩写
-nav_external_links_new_tab: true
+# 为标题生成锚点，便于深链到某一小节（主题仅支持布尔值）
+heading_anchors: true
+
+# 侧栏排序：忽略大小写
+nav_sort: case_insensitive
+
+# 三区（启动区 / 内核区 / 外围区）是 `has_children` 父节点。折叠与展开完全由
+# 主题负责：CSS 默认隐藏 `> .nav-list`，主题 JS 再把当前页所在分区置为 active
+# 从而展开并高亮。**没有顶层开关，也不需要**——注意 `nav_fold` 是**集合级**
+# （collection）选项，对本站这种普通页面不生效，别写在顶层。
 
 # ============================================================ 页脚与链接
 back_to_top: true
