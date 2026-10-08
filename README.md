@@ -1,7 +1,7 @@
 # Agents-Research
 
 <p align="center" class="online-reading">
-  <a href="https://justineric777.github.io/Agents-Research/"><strong>在线阅读：justineric777.github.io/Agents-Research</strong></a>
+  <a href="https://justineric777.github.io/Agents-Research/"><strong>在线阅读：Agents-Research</strong></a>
 </p>
 
 四个开源 Agent 项目的**代码级横向对比研究**。按 Agent 运行时的架构层次逐层深入，每层产出一篇对比分析，每篇沿同一条**七问链**推进——先界定范围，再逐维对比，最后落到可执行的设计结论（见第四节）。
