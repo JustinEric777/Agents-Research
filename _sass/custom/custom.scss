@@ -25,17 +25,28 @@
 //    宽度上限与居中规则，头部才会和正文左右对齐（这是「规整」的关键）。
 
 // ---------------------------------------------------------------- 设计令牌
-// 正文列上限：87.5rem = 1400px。
-// 取值依据：① 本系列 §5 的横向对比表最多 10 列，主题给每个单元格
-// `min-width: 7.5rem`（=120px），10 列需 1210px 左右，6 列需 730px；② 主流技术
-// 文档站的正文列集中在 1100–1400px（GitHub 文件视图约 1012px、Stripe 约 1080px）。
-// 低于此值表格频繁横向滚动，高于此值中文一行超过 85 字、阅读反而变累。
+// 版面分两档宽度（2026-10-08 改版，对齐 VitePress 类文档站的阅读规格）：
 //
-// 这一条同时决定了「自适应」的边界：侧栏 19rem + 本上限 87.5rem = 106.5rem
-// （1704px）。**视口 ≤ 1704px 时上限不生效，正文列直接铺满侧栏右侧的全部空间**
-// （常见的 1440 / 1512 / 1600 宽屏幕都落在这一档）；只有更宽的屏幕才会居中收口。
-// 想整体调宽/调窄，只改这一个变量即可。
-$content-max: 87.5rem;
+//   $prose-max   —— **文字列**。一段正文的舒适行宽。
+//   $content-max —— **内容列 / 展品列**。表格、源码摘录、图的宽度上限。
+//
+// 为什么分两档：本系列是「密集正文 + 421 张表 + 大量源码摘录」。只用一条宽列
+// （改版前 1400px）在宽屏上一行超过 80 个汉字，回扫时容易串行；只用一条窄列
+// （如参照站的 688px）又会让表格频繁横向滚动。各管各的，是这类文档站的通行做法。
+//
+// $prose-max = 48rem = 768px ≈ 48 汉字/行。参照站（VitePress）是 688px ≈ 43 字；
+// 本站略宽，因为正文里英文标识符、文件路径、行内代码占比高，过窄会频繁折行。
+//
+// $content-max = 72rem = 1152px。**旧值 87.5rem 的取值依据已失效**：那里写的
+// 「横向对比表最多 10 列」是预估；实测全系列 421 张表**最多 7 列**（仅 2 张）、
+// 多数为 3–6 列，主题每格 `min-width: 7.5rem`(120px) ⇒ 6 列只需约 730px。
+// 1152px 仍给源码摘录（Rust/TS 常见 90 列以上）留足了横向空间。
+//
+// 这一条同时决定「自适应」的边界：侧栏 19rem + 内容列 72rem = 91rem（1456px）。
+// **视口 ≤ 1456px 时上限不生效，正文列直接铺满侧栏右侧的全部空间**；更宽才居中收口。
+// 想整体调宽/调窄，只改这两个变量即可。
+$prose-max: 48rem;
+$content-max: 72rem;
 
 $nav-w-md: 15.5rem; // md 侧栏宽（沿用主题 $nav-width-md）
 $nav-w-lg: 19rem;   // lg 侧栏宽：导航字号提到 15px 后仍不折行。
@@ -47,16 +58,18 @@ $nav-w-lg: 19rem;   // lg 侧栏宽：导航字号提到 15px 后仍不折行。
 // ---- 本页大纲（右栏，见第十一节）
 $toc-w: 13rem;  // 208px：容得下「四、逐项目实现」「6.3 触发两个入口」这类条目
 $toc-gap: 2rem; // 正文列与大纲之间的间距
-$wrap-max: $content-max + $toc-w + $toc-gap; // 102.5rem = 1640px
+$wrap-max: $content-max + $toc-w + $toc-gap; // 87rem = 1392px
 $toc-min: 105rem; // 1680px：视口够宽才把大纲放成常驻栏；否则退化成右侧抽屉。
-// 选 1680 而不是「等到正文列达到上限」（106.5rem）才出现：1680/1728/1800/1920
-// 这几档常见外接屏都能看到大纲，而 1680px 下正文列仍有 1072px（中文一行约 67 字），
-// 代价可接受。
+// 门槛**有意高于 $wrap-max**：1680px 时可用宽度是 1680 − 侧栏 19rem = 1376px，
+// 仍小于 1392px，所以这一档下正文列不会被上限截断，只是被大纲栏挤掉 240px
+// （内容列 1136px，仍容得下 6 列表格）；要更宽才会看到整组居中收口。
 
 // 颜色令牌：随 color_scheme 取值，供下面各处复用。
 // 整站走**石墨灰阶**（无彩色）：所有交互色都在灰阶里取，靠明度与字重分层。
-// 深色一档按 dark-premium 的画布 #0b0c0e 定，白度压到 0.10–0.16。
-$c-hairline:     if($color-scheme == dark, rgba($white, 0.10), rgba($grey-dk-300, 0.11));
+// 深色一档按 dark-premium 的画布 #0b0c0e 定，白度压到 0.12–0.16。
+// 0.10 → 0.12（2026-10-08）：`hr` 是全文的分节线、侧栏与顶栏的边界也走这一档，
+// 参照站的 `--vp-c-divider`(#2e2e32) 在 #1b1b1f 上比我们原来的稍显眼，抬一档对齐。
+$c-hairline:     if($color-scheme == dark, rgba($white, 0.12), rgba($grey-dk-300, 0.11));
 $c-surface:      if($color-scheme == dark, rgba($white, 0.035), rgba($grey-dk-300, 0.022));
 $c-code-border:  if($color-scheme == dark, rgba($white, 0.11), rgba($grey-dk-300, 0.13));
 $c-scroll-thumb: if($color-scheme == dark, rgba($white, 0.16), rgba($grey-dk-300, 0.22));
@@ -72,6 +85,15 @@ $c-toc-link-on:   if($color-scheme == dark, #eef0f4, $grey-dk-300); // 大纲当
 $c-nav-link:      if($color-scheme == dark, #ccd2da, $grey-dk-200);
 $c-nav-link-on:   if($color-scheme == dark, #ffffff, $grey-dk-300); // 悬停 / 当前页
 $c-nav-expander:  if($color-scheme == dark, #8b93a0, $grey-dk-000); // 折叠箭头
+// 正文链接（详见第七节）。这是全站唯一「靠颜色区分的交互件」——去彩之后链接色
+// 与正文色只差一档明度，必须同时把下划线抬到可见，否则链接认不出来。
+$c-prose-link:      if($color-scheme == dark, #e3e9f2, #1f242b);
+$c-prose-link-line: if($color-scheme == dark, rgba(227, 233, 242, 0.38), rgba($grey-dk-300, 0.3));
+$c-prose-link-on:   if($color-scheme == dark, #ffffff, #000000);
+// 当前页的「实底 + 左竖条」。参照站的 .VPSidebarItem 用左侧 2px 指示条标当前项；
+// 这里同样处理，底色只给一点点明度差（够看出是一整条即可，不要变成色块）。
+$c-nav-on-bg:     if($color-scheme == dark, rgba($white, 0.055), rgba($grey-dk-300, 0.05));
+$c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
 
 // ============================================================================
 // 一、自适应布局
@@ -117,6 +139,21 @@ $c-nav-expander:  if($color-scheme == dark, #8b93a0, $grey-dk-000); // 折叠箭
     z-index: 20; // 高于正文与常驻大纲(auto)，低于窄屏抽屉 .page-toc(30)
     background-color: $body-background-color; // 必须不透明，否则正文会从底下透出来
     border-bottom: 1px solid $c-hairline;
+  }
+
+  // ---- 阅读测度：只收「文字类」块级元素，展品类保持内容列全宽 ----------
+  // `#main-content` 的直属结构是 `div#main-content.main-content > main`（TOC 脚本
+  // 取的就是 `#main-content > main`），渲染后的 Markdown 是 `<main>` 的直属子元素。
+  // 实测这些子元素只有两类：
+  //   文字类——p / ul / ol / blockquote / h1–h6 / hr；
+  //   展品类——div.table-wrapper（表格，主题已包好 overflow-x:auto）、
+  //           div.language-*（源码摘录）、mermaid 容器。
+  // 只收前者：表格与源码在宽屏上需要更宽的版面，硬压到 768px 会让它们频繁横滚。
+  // 两个宽度都居中（下方 margin auto），所以展品比文字宽出的那一截是**左右对称**的。
+  #main-content > main > :is(p, ul, ol, dl, blockquote, h1, h2, h3, h4, h5, h6, hr) {
+    max-width: $prose-max;
+    margin-right: auto;
+    margin-left: auto;
   }
 
   // 正文左右留白沿用主题的 $gutter-spacing（2rem）——**不要改**：
@@ -320,41 +357,55 @@ pre > code.language-mermaid {
 }
 
 // ============================================================================
-// 七、标题与分隔线
+// 七、标题 · 分隔线与正文链接
 // ============================================================================
 .main-content {
-  // 章题（每篇正文唯一的 h1）上面紧接着面包屑，主题的 1.5em（36px 章节名
-  // → 54px）过空，收一档。`:first-of-type` 要显式写：主题对它有一条更高
-  // 特异性的 `margin-top: 0.5em`，不写这一笔就被它压回去。
+  // 标题阶梯按参照站（VitePress）的比例定：32 / 24 / 20 / 18px，行高 1.25–1.4，
+  // 负字距。负字距对中文同样成立——汉字在 20px 以上时默认字距偏松，收
+  // 0.01–0.02em 后整段更像一个标题块。
+  // 字号一律带 `!important`：主题对 h1–h4 都写了 `font-size: … !important`
+  // （h1 2.25rem / h2 1.5rem / h3 1.125rem / h4 0.75rem），不带就压不住。
   h1,
   h1:first-of-type {
+    // 章题（每篇正文唯一的 h1）上面紧接着面包屑，主题的 1.5em 过空，收一档。
+    // `:first-of-type` 要显式写：主题对它有一条更高特异性的 `margin-top: 0.5em`，
+    // 不写这一笔就被它压回去。
     margin-top: 0.5rem;
-    // 主题给 300；中文标题在 2rem 以上用 300 偏虚，400 更稳
+    font-size: 2rem !important; // 主题 2.25rem(36px) → 32px
+    line-height: 1.25;
+    letter-spacing: -0.02em;
+    // 主题给 300；中文标题在这个字号上用 300 偏虚，400 更稳
     font-weight: 400;
   }
 
   h2 {
     margin-top: 2.25rem;
-    margin-bottom: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 1.5rem !important; // 24px（与主题同值，显式写以固定整条阶梯）
+    line-height: 1.33;
+    letter-spacing: -0.02em;
     font-weight: 600;
   }
 
   h3 {
     margin-top: 1.75rem;
     margin-bottom: 0.5rem;
+    font-size: 1.25rem !important; // 主题 1.125rem(18px) → 20px
+    line-height: 1.4;
+    letter-spacing: -0.01em;
     font-weight: 600;
   }
 
   // 主题把 h4 设成 0.6875rem + 全大写 + 0.1em 字距（正文里用了 438 次！）。
   // 大写对中文无效，字距会把每个汉字撑开 1.6px，字号又比正文还小——中文下
-  // 只剩「又小又散」。这里还原成与正文同号的加粗小标题（fs-2 带 !important，
-  // 必须同用 !important + 更高特异性才能覆盖）。
+  // 只剩「又小又散」。这里按阶梯还原成 1.125rem(18px) 的加粗小标题。
   h4 {
     margin-top: 1.5rem;
     margin-bottom: 0.5rem;
-    font-size: 1rem !important;
+    font-size: 1.125rem !important;
+    line-height: 1.33;
     font-weight: 600;
-    letter-spacing: 0;
+    letter-spacing: -0.01em;
     text-transform: none;
   }
 
@@ -370,13 +421,38 @@ pre > code.language-mermaid {
   }
 }
 
-// `---` 在每个小节前出现一次，是全文的**分节线**；主题用的 $border-color 在
-// 白底上几乎看不见（#eeebee），分节感因此消失。换成弱对比但看得见的线。
+// `---` 在每个小节前出现一次（144 个 h2 里有 132 个紧跟在一条 `---` 之后），
+// 是全文的**分节线**；主题用的 $border-color 在白底上几乎看不见（#eeebee），
+// 分节感因此消失。参照站的分节线是 h2 自带的 `border-top`——我们这里 `---`
+// 已经承担了这个角色，所以**不给 h2 再加 border-top**（会变成双线），
+// 只把这条线的可见度与上下留白抬一档。
 .main-content hr {
   height: 1px;
-  margin: 2rem 0;
+  margin: 2.25rem 0;
   background-color: $c-hairline;
   border: 0;
+}
+
+// ---- 正文链接：默认态就要「看得出是链接」 ----------------------------------
+// 主题给 `a:not([class])` 的 `text-decoration-color` 是 `$border-color`——
+// 白底上 #eeebee、近黑画布上 #23262c，**两头都几乎看不见**；再叠加整站去彩后
+// 链接色与正文色只差一档明度（深色 #ccd2da 对正文 #c2c8d1），结果就是「链接
+// 不像链接，鼠标不悬停根本认不出」。参照站的做法是链接用品牌色 + 常显下划线；
+// 我们不用彩色，改成「文字提亮一档 + 下划线抬到可见」，悬停时下划线转实。
+//
+// 用 `.main-content-wrap` 而不是 `.main-content`：面包屑（`.breadcrumb-nav`）与
+// 页脚是 `#main-content` 的**兄弟**，它们里的链接同样需要能认出来。
+// 带 class 的链接（侧栏 `.nav-list-link`、大纲 `.toc-link`、页头按钮）不受影响。
+.main-content-wrap a:not([class]) {
+  color: $c-prose-link;
+  text-decoration-color: $c-prose-link-line;
+  text-underline-offset: 2px;
+
+  &:hover,
+  &:focus {
+    color: $c-prose-link-on;
+    text-decoration-color: currentColor;
+  }
 }
 
 // ============================================================================
@@ -451,6 +527,7 @@ html[data-theme="dark"] .theme-toggle {
 
 // 字重：主题只在 `.active` 上给 600，其余全是 400。中文笔画密，同一字号下
 // 400 显得发飘。整链提到 500，父节点（三区）与当前页 600，层级靠字重就分得开。
+// 对齐参照站：它的侧栏是 level-0 700 / level-1 600 / 更深 500 的三档。
 .nav-list .nav-list-link {
   font-weight: 500;
 }
@@ -468,13 +545,46 @@ html[data-theme="dark"] .theme-toggle {
   color: $c-nav-link;
 }
 
+// 当前页 / 悬停：整条换成**规整实底 + 左侧 2px 竖条**（对齐参照站的
+// `.VPSidebarItem .indicator`）。
+// 主题给的是 `background-image: linear-gradient(-90deg, $feedback-color → 透明)`
+// ——在近黑侧栏上读作一团「右亮左断」的糊掉光斑，和「选中」这件事没有对应关系，
+// 这正是「目录选中颜色看着别扭」的根因。
+// ⚠ 必须显式写 `background-image: none`：主题设置的是 image，不是 color，
+//   只改 background-color 压不住它。
 .nav-list .nav-list-item .nav-list-link:hover,
 .nav-list .nav-list-item .nav-list-link.active {
   color: $c-nav-link-on;
+  background-image: none;
+  background-color: $c-nav-on-bg;
+  box-shadow: inset 2px 0 0 0 $c-nav-on-bar;
 }
 
 .nav-list .nav-list-item .nav-list-expander {
   color: $c-nav-expander;
+
+  // 折叠箭头自己那层渐隐底一并去掉，否则 hover 时又冒出一块光斑
+  &:hover {
+    background-image: none;
+  }
+}
+
+// 深层条目的缩进导引线（对齐参照站的 `.items { border-left: 1px solid divider }`）。
+// 用伪元素画在主题的 0.75rem 缩进槽里，**不占布局宽度**——侧栏最宽的一条
+// （第 13 章 · MCP 与外部能力接入）实测 200px、可用 228px，余量本就不多，
+// 不能用 padding 换这条线。
+.nav-list .nav-list-item > .nav-list {
+  position: relative;
+
+  &::before {
+    position: absolute;
+    top: 0.375rem;
+    bottom: 0.375rem;
+    left: 0.375rem; // 0.75rem 缩进槽的中点
+    width: 1px;
+    background-color: $c-hairline;
+    content: "";
+  }
 }
 
 // 「默认展开」不在 CSS 里做：`.nav-list-item > .nav-list { display: none }` 是主题的
@@ -506,7 +616,9 @@ html[data-theme="dark"] .theme-toggle {
   max-width: 84vw;
   padding: 1.5rem 1rem;
   overflow-y: auto;
-  font-size: 0.8125rem;
+  // 参照站的 outline-link 是 14px / 行高 32px；这里同样用 0.875rem，
+  // 行高交给下面 .toc-link 的 padding + line-height 凑出同等行距。
+  font-size: 0.875rem;
   line-height: 1.5;
   background-color: $sidebar-color;
   border-left: 1px solid $c-hairline;
@@ -525,16 +637,16 @@ html.toc-open .page-toc {
 
 .page-toc-head {
   display: flex;
-  margin-bottom: 0.625rem;
+  margin-bottom: 0.75rem;
   align-items: center;
   justify-content: space-between;
 }
 
 .page-toc-title {
   margin: 0;
-  font-size: 0.6875rem;
+  font-size: 0.8125rem;
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.02em;
   color: $grey-dk-000;
 }
 
@@ -566,10 +678,13 @@ html.toc-open .page-toc {
 
   > .toc-link {
     display: block;
-    padding: 0.3rem 0.5rem;
+    // 行距：0.35rem padding × 2 + 14px × 1.75 ≈ 36px，与参照站的
+    // `line-height: 32px` 同一量级——比原来的 ~22px 松一档，扫读时不容易串行。
+    padding: 0.35rem 0.5rem;
     // 主题给 `a:not([class])` 加了下划线；这里的链接带 class，天然不受影响，
     // 但仍显式给一条可见的悬停反馈 + 单行省略（标题可能很长）。
     overflow: hidden;
+    line-height: 1.75;
     color: $c-toc-link;
     white-space: nowrap;
     text-overflow: ellipsis;

@@ -21,6 +21,17 @@
        当前小节。样式见 _sass/custom/custom.scss 第十一节。
        完全用 JS 生成：不引入插件（GitHub Pages 的插件白名单里没有 TOC 类插件），
        也就不需要改任何一篇正文。
+
+    ③ 「第 N 章」/「L N」自动可点
+       全系列有 353 处「第 N 章」+ 239 处正文里的「L N」跨章引用，源码里都是纯文本，
+       读站点时点不动。这里渲染后把它们变成指向 /ch/NN/ 的链接。
+       **不改任何一篇正文**——仓库里读 Markdown 时仍是干净的纯文本，不会看到
+       一长串重复的绝对 URL（那是 600 处，会把正文淹掉）。
+       两条规则：
+         · 「第 N 章」——正文与表格里都链；
+         · 「L N」——**只在正文里链**，表格里跳过（那里它是「层码」列标签，
+           相邻的「主题」列本身就是入口，再链一次是一行两个同目标链接）。
+       跳过代码块、行内代码、标题、已有链接内部。
 {%- endcomment -%}
 {%- if site.footer_content -%}
   <p class="text-small mb-0">{{ site.footer_content }}</p>
@@ -45,9 +56,113 @@
     }
 
     ready(function () {
+      linkChapterRefs(); // 先补链接，再生成大纲（大纲取标题文本，顺序无先后依赖，这里只为稳定）
       expandNav();
       buildPageToc();
     });
+
+    // ---------------------------------------------------------------- ③ 跨章引用自动可点
+    // 章号即层码：第 N 章 = LN，所以两种引用都指向 /ch/NN/。
+    var CHAPTER_BASE = "{{ '/ch/' | relative_url }}";
+    var CHAPTER_MIN = 1;
+    var CHAPTER_MAX = 17;
+    var RE_CHAPTER = /第\s*(\d{1,2})\s*章/g; // 「第 N 章」
+    var RE_LAYER = /(?<![A-Za-z0-9])L\s?(\d{1,2})(?![A-Za-z0-9])/g; // 「L N」
+
+    function chapterHref(n) {
+      return CHAPTER_BASE + (n < 10 ? "0" + n : String(n)) + "/";
+    }
+
+    function linkChapterRefs() {
+      var main = document.querySelector("#main-content > main");
+      // IE 时代没有 TreeWalker；缺了就直接不做事（正文照旧，只是不可点，不报错）
+      if (!main || !document.createTreeWalker || !window.NodeFilter) return;
+
+      var SKIP = {
+        A: 1, CODE: 1, PRE: 1, SCRIPT: 1, STYLE: 1, BUTTON: 1, TEXTAREA: 1,
+        H1: 1, H2: 1, H3: 1, H4: 1, H5: 1, H6: 1
+      };
+      var FILTER = window.NodeFilter;
+      var nodes = [];
+
+      var walker = document.createTreeWalker(main, FILTER.SHOW_TEXT, {
+        acceptNode: function (node) {
+          for (var p = node.parentNode; p && p !== main; p = p.parentNode) {
+            var tag = p.tagName ? p.tagName.toUpperCase() : "";
+            if (SKIP[tag]) return FILTER.FILTER_REJECT;
+            if (p.classList && p.classList.contains("anchor-heading")) return FILTER.FILTER_REJECT;
+          }
+          RE_CHAPTER.lastIndex = 0;
+          if (RE_CHAPTER.test(node.nodeValue)) return FILTER.FILTER_ACCEPT;
+          RE_LAYER.lastIndex = 0;
+          return RE_LAYER.test(node.nodeValue) ? FILTER.FILTER_ACCEPT : FILTER.FILTER_REJECT;
+        }
+      });
+
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+
+      for (var i = 0; i < nodes.length; i++) {
+        var textNode = nodes[i];
+        var text = textNode.nodeValue;
+
+        // 表格里的「L N」是「层码」列标签，相邻的「主题」列已经是链接，这里跳过
+        var inTable = false;
+        for (var q = textNode.parentNode; q && q !== main; q = q.parentNode) {
+          var up = q.tagName ? q.tagName.toUpperCase() : "";
+          if (up === "TABLE" || up === "TD" || up === "TH") {
+            inTable = true;
+            break;
+          }
+        }
+
+        var found = collectRefs(text, inTable);
+        if (!found.length) continue;
+
+        var frag = document.createDocumentFragment();
+        var last = 0;
+        var hits = 0;
+
+        for (var k = 0; k < found.length; k++) {
+          var hit = found[k];
+          if (hit.start < last) continue; // 与上一处重叠（「L1–L2」这类）时只保留前一个
+          if (hit.start > last) frag.appendChild(document.createTextNode(text.slice(last, hit.start)));
+          var a = document.createElement("a");
+          a.setAttribute("href", chapterHref(hit.n));
+          a.textContent = text.slice(hit.start, hit.end);
+          frag.appendChild(a);
+          last = hit.end;
+          hits++;
+        }
+
+        if (!hits) continue;
+        if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
+        textNode.parentNode.replaceChild(frag, textNode);
+      }
+    }
+
+    // 扫一段文本，返回 [{start, end, n}]（按起点排序）。
+    // 两个正则各扫一遍再合并：分开扫才不会让 `第 6 章 … L11` 这种同段文本互相吃掉。
+    function collectRefs(text, inTable) {
+      var out = [];
+
+      function scan(re) {
+        re.lastIndex = 0;
+        var m;
+        while ((m = re.exec(text))) {
+          var n = parseInt(m[1], 10);
+          if (n < CHAPTER_MIN || n > CHAPTER_MAX) continue;
+          out.push({ start: m.index, end: m.index + m[0].length, n: n });
+        }
+      }
+
+      scan(RE_CHAPTER);
+      if (!inTable) scan(RE_LAYER);
+
+      out.sort(function (a, b) {
+        return a.start - b.start;
+      });
+      return out;
+    }
 
     // ---------------------------------------------------------------- ① 侧栏全展开
     function expandNav() {
