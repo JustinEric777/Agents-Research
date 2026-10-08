@@ -20,16 +20,26 @@
 // `{% include css/just-the-docs.scss.liquid color_scheme="dark-premium" %}` 引入，
 // 顺序是 support → custom/setup → color_schemes/light → **本文件** → modules。
 // 因此：
-//   · `@import "./dark"` 先取到主题的 $color-scheme: dark 与 pygments 高亮；
+//   · 开头先把主题的暗色方案整份取过来（$color-scheme: dark + pygments 高亮）；
 //   · 下面的赋值一律**不带 `!default`**（带了就等于没赋值），且必然早于 modules，
 //     所以主题规则拿到的是这里的值。
+//
+// ⚠⚠ `@import "color_schemes/dark"` 的路径**必须是 load path 相对形式**，不能写成
+//   `@import "./dark"` 或 `@import "dark"`。原因：主题的 _sass/color_schemes/ 里只有
+//   dark.scss 与 light.scss，而 dart-sass 对相对导入的回落是「loadPath + 该相对路径」，
+//   不是「按本文件所在目录拼接」——写成 `./dark` 会去找 _sass/dark.scss，写成
+//   `color_schemes/dark` 才会命中主题的 _sass/color_schemes/dark.scss。
+//   （主题自己的 dark.scss 末行 `@import "./vendor/accessible-pygments/github-dark"`
+//   能生效，正是因为 _sass/vendor/accessible-pygments/ 真实存在，同一个回落在起作用。
+//   本地编译器手边放了 dark.scss 的同级副本时，这个坑不会暴露——CI 才报
+//   `Can't find stylesheet to import`。）
 //
 // ⚠ 名称**不能**叫 `dark`：主题自带的 assets/css/just-the-docs-dark.scss 与主题 JS
 //   的 `jtd.setTheme('dark')` 都写死指向 `just-the-docs-dark.css`，用同名会互相盖住。
 //   正因如此，本站的配色切换不调用 jtd.setTheme，而是自己写 <link href>
 //   （见 _includes/header_custom.html）。
 
-@import "./dark";
+@import "color_schemes/dark";
 
 // ---- 画布与层次
 $body-background-color: #191c22; // 画布
