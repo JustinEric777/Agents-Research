@@ -1,13 +1,32 @@
 {%- comment -%}
-  页头右侧的浅色 / 深色切换按钮。
+  页头右侧的两个工具按钮（主题组件 header.html 的插槽，位置在搜索框与
+  右上角「GitHub 仓库」之间）：
 
-  放在 header_custom.html（主题 header 组件的插槽），位置与搜索框、右上角
-  仓库链接同排。移动端这一排在展开菜单后才可见——与搜索框的可见性一致，
-  这是主题既有设计。
+    1. 浅色 / 深色切换
+    2. 本页大纲开关
 
-  配色样式表由 _includes/head_custom.html 的引导脚本负责，这里只负责：
-  点击时换 href、记住选择、同步 <html data-theme>（图标与 mermaid 靠它）。
+  移动端这一排在展开菜单后才可见——与搜索框的可见性一致，这是主题既有设计。
+
+  配色：首帧由 _includes/head_custom.html 的引导脚本定下（样式表路径表放在
+  window.jtdAssets，本文件复用，避免两处各写一份路径）。**不用 jtd.setTheme()**，
+  它把文件名写死成 just-the-docs-<theme>.css，与本站的自定义深色方案不符。
+
+  本页大纲：状态类是 <html> 上的 toc-open / toc-closed（见 head_custom.html 与
+  custom.scss 第十一节）。宽窄两套 localStorage 键，互不影响。真正的目录内容由
+  _includes/footer_custom.html 生成。
 {%- endcomment -%}
+<button
+  id="toc-toggle"
+  class="btn-reset toc-toggle"
+  type="button"
+  aria-label="本页大纲"
+  aria-expanded="true"
+  title="本页大纲"
+>
+  <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <path d="M4 6.5h9M4 12h16M4 17.5h12"></path>
+  </svg>
+</button>
 <button
   id="theme-toggle"
   class="btn-reset theme-toggle"
@@ -44,12 +63,54 @@
   (function () {
     var KEY = "jtd-theme";
     var SCROLL_KEY = "jtd-restore-scroll";
+    var TOC_WIDE_KEY = "jtd-toc-wide";
+    var TOC_NARROW_KEY = "jtd-toc-narrow";
+    var ASSETS = window.jtdAssets || {};
+    var WIDE = window.matchMedia(window.jtdTocMedia || "(min-width: 105rem)");
 
     function current() {
       return document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "light";
     }
 
-    jtd.onReady(function () {
+    // 当前视口下大纲是否可见（两个方向的状态类不同，见 head_custom.html）
+    function tocVisible() {
+      var html = document.documentElement;
+      return WIDE.matches
+        ? !html.classList.contains("toc-closed")
+        : html.classList.contains("toc-open");
+    }
+
+    function setToc(visible) {
+      var html = document.documentElement;
+      var state = visible ? "open" : "closed";
+
+      html.classList.toggle("toc-open", visible && !WIDE.matches);
+      html.classList.toggle("toc-closed", !visible && WIDE.matches);
+
+      var button = document.getElementById("toc-toggle");
+      if (button) button.setAttribute("aria-expanded", String(visible));
+
+      try {
+        localStorage.setItem(WIDE.matches ? TOC_WIDE_KEY : TOC_NARROW_KEY, state);
+      } catch (e) {
+        /* 忽略 */
+      }
+    }
+
+    // jtd 是主题的全局对象。这里不直接依赖它：主题 JS 万一没加载，
+    // 按钮也应该还能用（回落到 DOMContentLoaded + addEventListener）。
+    function on(node, type, handler) {
+      if (window.jtd && jtd.addEvent) jtd.addEvent(node, type, handler);
+      else node.addEventListener(type, handler, false);
+    }
+
+    function ready(fn) {
+      if (window.jtd && jtd.onReady) jtd.onReady(fn);
+      else if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fn);
+      else fn();
+    }
+
+    ready(function () {
       // 切换配色时若刷新过页面（见下），把阅读位置还回去。
       // html 上有 scroll-behavior: smooth，先临时关掉，免得整页滚动动画。
       var y = null;
@@ -67,13 +128,23 @@
         html.style.scrollBehavior = smooth;
       }
 
+      var tocButton = document.getElementById("toc-toggle");
+      if (tocButton) {
+        tocButton.setAttribute("aria-expanded", String(tocVisible()));
+        on(tocButton, "click", function () {
+          setToc(!tocVisible());
+        });
+      }
+
       var button = document.getElementById("theme-toggle");
       if (!button) return;
 
-      jtd.addEvent(button, "click", function () {
+      on(button, "click", function () {
         var next = current() === "dark" ? "light" : "dark";
+        var link = document.querySelector('link[rel="stylesheet"]');
 
-        jtd.setTheme(next); // 换 <link href>，即换整份配色样式表
+        // 换 <link href>，即换整份配色样式表（浅色用主题自带，深色用自定义方案）
+        if (link && ASSETS[next]) link.setAttribute("href", ASSETS[next]);
         document.documentElement.setAttribute("data-theme", next);
 
         try {

@@ -1,0 +1,55 @@
+// ============================================================================
+// 深色配色（自定义）：中性石墨画布 + 单一紫罗兰强调色。
+// ============================================================================
+//
+// 为什么不用主题自带的 `dark`：
+//   ① 画布 #27262b 与侧栏 #27262b **同色**——两个区域没有层次，整页像一块色板；
+//   ② 代码块 #0d1117 是**蓝黑**，与画布的**紫灰**不是一个色系，内嵌的代码栅格
+//      在页面里「跳」出来；
+//   ③ 链接是 lighten(#2c84fa, 10%) 的亮蓝，与紫灰中性色不搭；标题 #f5f6fa 与正文
+//      #e6e1e8 只差一档，层级几乎看不出来。
+//
+// 这里的取舍：
+//   · 画布取中性石墨（不带紫调），侧栏**比画布深一档**——与浅色方案「侧栏 #f5f6fa
+//     比正文白深」的方向保持一致，两种模式切换时空间关系不变；
+//   · 代码块**比画布亮一档**，读作「内嵌面板」，不再另起色系；
+//   · 强调色沿用紫罗兰族（浅色方案链接是 #7253ed），深色下提亮到 #a996ff，
+//     两种模式的品牌色是同一支。
+//
+// 加载位置：本文件由 assets/css/just-the-docs-dark-premium.scss 通过
+// `{% include css/just-the-docs.scss.liquid color_scheme="dark-premium" %}` 引入，
+// 顺序是 support → custom/setup → color_schemes/light → **本文件** → modules。
+// 因此：
+//   · `@import "./dark"` 先取到主题的 $color-scheme: dark 与 pygments 高亮；
+//   · 下面的赋值一律**不带 `!default`**（带了就等于没赋值），且必然早于 modules，
+//     所以主题规则拿到的是这里的值。
+//
+// ⚠ 名称**不能**叫 `dark`：主题自带的 assets/css/just-the-docs-dark.scss 与主题 JS
+//   的 `jtd.setTheme('dark')` 都写死指向 `just-the-docs-dark.css`，用同名会互相盖住。
+//   正因如此，本站的配色切换不调用 jtd.setTheme，而是自己写 <link href>
+//   （见 _includes/header_custom.html）。
+
+@import "./dark";
+
+// ---- 画布与层次
+$body-background-color: #191c22; // 画布
+$sidebar-color: #14161b; // 侧栏：比画布深一档
+$feedback-color: #232730; // 悬停/选中反馈（比画布亮一档）
+$border-color: #2b2f38; // 发丝线（行内代码描边、侧栏内分隔、表头底线）
+
+// ---- 文字层级（标题 / 正文 / 次要，三档拉开）
+$body-heading-color: #f2f4f8;
+$body-text-color: #c9cfda;
+$nav-child-link-color: #a9b1be;
+
+// ---- 强调色
+$link-color: #a996ff;
+$btn-primary-color: #8b73ff;
+$base-button-color: #23262e;
+
+// ---- 面板：代码块、表格、搜索框统一比画布亮一档
+$code-background-color: #20242c;
+$code-linenumber-color: #c9cfda;
+$table-background-color: #1e2129;
+$search-background-color: #1e2129;
+$search-result-preview-color: #8b93a1;

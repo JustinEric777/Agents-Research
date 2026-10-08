@@ -1,0 +1,23 @@
+---
+---
+{%- comment -%}
+  深色样式表的入口。
+
+  主题的 assets/css/just-the-docs-{default,light,dark}.scss 都只是同一件事：
+  调 _includes/css/just-the-docs.scss.liquid（主题文件），把配色方案名传进去。
+  这里照做，但传 "dark-premium" —— 于是：
+    · @import "./color_schemes/light"  → 主题的浅色（!default，会被下面盖掉）
+    · @import "./color_schemes/dark-premium" → 本仓库 _sass/color_schemes/dark-premium.scss
+  产出 /assets/css/just-the-docs-dark-premium.css，由 _includes/head_custom.html
+  与 _includes/header_custom.html 在切到深色时挂到 <link href> 上。
+
+  用新文件名（而不是覆盖主题的 just-the-docs-dark.scss）是有意的：站点文件与主题
+  文件同名时的优先级不在本站的验证范围内，新名字则完全没有歧义。
+
+  已知无关差异：同一个 liquid 还会把 color_scheme 传给 callouts.scss.liquid，那里用
+  `include.color_scheme == "dark"` 判断是否反转 callout 配色。传进来的是
+  "dark-premium"，判 false。本站 _config.yml 没有定义 site.callouts，该分支不产出
+  任何规则，因此无影响；将来若启用 callouts，需要把这里改成传 "dark" 并同时覆盖
+  主题的 assets/css/just-the-docs-dark.scss。
+{%- endcomment -%}
+{% include css/just-the-docs.scss.liquid color_scheme="dark-premium" %}

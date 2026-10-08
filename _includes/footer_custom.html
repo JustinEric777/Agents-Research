@@ -1,0 +1,242 @@
+{%- comment -%}
+  页脚脚本。
+
+  ⚠ 本文件**覆盖了主题的 _includes/footer_custom.html**。主题那一份只做一件事：
+  渲染 site.footer_content（本站是 MIT License 那一行）。覆盖时必须保留这段，
+  否则页脚会空掉——下面的前三行就是它。
+
+  追加的两段脚本（都挂在 jtd.onReady 上；主题的 activateNav 在同一批回调里更早
+  注册，所以此处运行时它的高亮已经加好了）：
+
+    ① 侧栏默认全展开
+       给每个「含子列表」的 .nav-list-item 补 .active。这正是折叠按钮点击时做的事
+       （见 assets/js/just-the-docs.js 的 initNav：click → parentNode 切 active），
+       所以展开之后按钮依然可用、箭头方向也和状态一致；而直接改 CSS
+       （`.nav-list-item > .nav-list { display: none }` 是主题的折叠机制）会让按钮失效。
+
+    ② 生成「本页大纲」
+       从 #main-content > main 里取 h2/h3（kramdown 的 auto_ids 对中文标题是有效的，
+       实测生成 `一核心结论速览` / `21-子职责拆解` 这类 id，且不重复），生成右栏。
+       宽屏（≥105rem）是正文右侧的常驻栏，窄屏是右上角按钮唤出的抽屉；滚动时高亮
+       当前小节。样式见 _sass/custom/custom.scss 第十一节。
+       完全用 JS 生成：不引入插件（GitHub Pages 的插件白名单里没有 TOC 类插件），
+       也就不需要改任何一篇正文。
+{%- endcomment -%}
+{%- if site.footer_content -%}
+  <p class="text-small mb-0">{{ site.footer_content }}</p>
+{%- endif -%}
+<script>
+  (function () {
+    function ready(fn) {
+      if (window.jtd && jtd.onReady) {
+        jtd.onReady(fn);
+      } else if (document.readyState === "loading") {
+        document.addEventListener("DOMContentLoaded", fn);
+      } else {
+        fn();
+      }
+    }
+
+    // jtd.addEvent 是主题的绑定助手；主题 JS 万一没加载，回落到原生绑定，
+    // 免得下面第一处调用就抛错、把整块大纲带走。
+    function on(node, type, handler) {
+      if (window.jtd && jtd.addEvent) jtd.addEvent(node, type, handler);
+      else node.addEventListener(type, handler, false);
+    }
+
+    ready(function () {
+      expandNav();
+      buildPageToc();
+    });
+
+    // ---------------------------------------------------------------- ① 侧栏全展开
+    function expandNav() {
+      var items = document.querySelectorAll(".site-nav .nav-list-item");
+
+      for (var i = 0; i < items.length; i++) {
+        var item = items[i];
+        var list = null;
+        var button = null;
+
+        // 不用 :scope —— 逐个子元素判类型，任何浏览器都成立
+        for (var child = item.firstElementChild; child; child = child.nextElementSibling) {
+          if (!child.classList) continue;
+          if (child.classList.contains("nav-list")) list = child;
+          if (child.classList.contains("nav-list-expander")) button = child;
+        }
+
+        if (!list) continue;
+
+        item.classList.add("active");
+        if (button) button.setAttribute("aria-expanded", "true");
+      }
+    }
+
+    // ---------------------------------------------------------------- ② 本页大纲
+    function buildPageToc() {
+      var main = document.querySelector("#main-content > main");
+      if (!main) return;
+
+      var wrap = document.querySelector(".main-content-wrap");
+      if (!wrap) return;
+
+      var headings = [];
+      var found = main.querySelectorAll("h2, h3");
+
+      for (var i = 0; i < found.length; i++) {
+        if (found[i].id) headings.push(found[i]);
+      }
+
+      // 标题太少就不值得占一栏（也避免短页面上出现一排孤零零的锚点）
+      if (headings.length < 3) {
+        var onlyButton = document.getElementById("toc-toggle");
+        if (onlyButton) onlyButton.hidden = true;
+        return;
+      }
+
+      var aside = document.createElement("aside");
+      aside.className = "page-toc";
+      aside.setAttribute("aria-label", "本页大纲");
+
+      var head = document.createElement("div");
+      head.className = "page-toc-head";
+
+      var title = document.createElement("p");
+      title.className = "page-toc-title";
+      title.textContent = "本页大纲";
+      head.appendChild(title);
+
+      // 抽屉形态（窄屏）里必须有本地关闭入口：抽屉盖住了页头，右上角的按钮够不着
+      var close = document.createElement("button");
+      close.type = "button";
+      close.className = "btn-reset page-toc-close";
+      close.setAttribute("aria-label", "收起本页大纲");
+      close.textContent = "\u00d7"; // ×
+      head.appendChild(close);
+
+      aside.appendChild(head);
+
+      var list = document.createElement("ul");
+      list.className = "page-toc-list";
+
+      var links = [];
+
+      for (var j = 0; j < headings.length; j++) {
+        var heading = headings[j];
+        // 标题里的 .anchor-heading 只包了一个 svg，没有文字，textContent 即标题本身
+        var text = (heading.textContent || "").replace(/\s+/g, " ").trim();
+
+        var li = document.createElement("li");
+        li.className = "page-toc-item toc-level-" + heading.tagName.charAt(1);
+
+        var link = document.createElement("a");
+        link.className = "toc-link";
+        link.setAttribute("href", "#" + heading.id);
+        link.setAttribute("title", text);
+        link.textContent = text;
+
+        li.appendChild(link);
+        list.appendChild(li);
+        links.push(link);
+      }
+
+      aside.appendChild(list);
+      wrap.appendChild(aside);
+
+      var WIDE = window.matchMedia(window.jtdTocMedia || "(min-width: 105rem)");
+
+      function closeDrawer() {
+        var html = document.documentElement;
+        html.classList.remove("toc-open");
+        html.classList.add("toc-closed");
+        try {
+          localStorage.setItem("jtd-toc-narrow", "closed");
+        } catch (e) {
+          /* 忽略 */
+        }
+        var button = document.getElementById("toc-toggle");
+        if (button) button.setAttribute("aria-expanded", "false");
+      }
+
+      // 抽屉形态下点一条就收起（宽屏常驻，不需要收起）
+      on(aside, "click", function (event) {
+        var target = event.target;
+        if (target && target.classList && target.classList.contains("page-toc-close")) {
+          closeDrawer();
+          return;
+        }
+        while (target && target !== aside && !(target.classList && target.classList.contains("toc-link"))) {
+          target = target.parentNode;
+        }
+        if (target && target !== aside && !WIDE.matches) closeDrawer();
+      });
+
+      // 点抽屉外面也收起（没有蒙层，靠这一条兜住「想关掉却点不到」）
+      on(document, "click", function (event) {
+        if (WIDE.matches) return;
+        if (!document.documentElement.classList.contains("toc-open")) return;
+
+        var target = event.target;
+        if (aside.contains(target)) return;
+
+        var button = document.getElementById("toc-toggle");
+        if (button && button.contains(target)) return; // 交给按钮自己的切换逻辑
+
+        closeDrawer();
+      });
+
+      on(document, "keydown", function (event) {
+        if ((event.key === "Escape" || event.keyCode === 27) && document.documentElement.classList.contains("toc-open")) {
+          closeDrawer();
+        }
+      });
+
+      // 滚动高亮：取「最后一个已经越过视口上方 100px 线的标题」。
+      // 不用 IntersectionObserver —— 一页 30 来个标题，直接测量更简单也更准
+      // （mermaid 渲染、图片加载会改文档高度，缓存偏移量反而会错位）。
+      var ticking = false;
+
+      function update() {
+        ticking = false;
+
+        var scrollY = window.pageYOffset || document.documentElement.scrollTop;
+        var line = scrollY + 100; // 判定线：视口顶端往下 100px
+        var current = -1;
+
+        // 标题按文档顺序排列，一旦有一个越过判定线就停 —— 不用逐个测到底
+        for (var k = 0; k < headings.length; k++) {
+          if (headings[k].getBoundingClientRect().top + scrollY <= line) {
+            current = k;
+          } else {
+            break;
+          }
+        }
+
+        for (var m = 0; m < links.length; m++) {
+          links[m].classList.toggle("current", m === current);
+        }
+
+        // 面板自身要滚动时，把当前项带进可视范围（面板不溢出就不做任何事）
+        if (current >= 0 && aside.scrollHeight > aside.clientHeight + 8) {
+          var rect = links[current].getBoundingClientRect();
+          var box = aside.getBoundingClientRect();
+          if (rect.top < box.top + 8) {
+            aside.scrollTop += rect.top - box.top - 8;
+          } else if (rect.bottom > box.bottom - 8) {
+            aside.scrollTop += rect.bottom - box.bottom + 8;
+          }
+        }
+      }
+
+      function schedule() {
+        if (ticking) return;
+        ticking = true;
+        window.requestAnimationFrame(update);
+      }
+
+      on(window, "scroll", schedule);
+      on(window, "resize", schedule);
+      update();
+    }
+  })();
+</script>

@@ -16,8 +16,10 @@
     fontFamily: '"PingFang SC", "Microsoft YaHei", "Noto Sans CJK SC", system-ui, sans-serif',
     themeVariables: {
       fontSize: "14px",
-      // 深色主题自带的 #333 底色与页面 #27262b 差一点，抹平；浅色页面本身是白底
-      background: dark ? "#27262b" : "#ffffff"
+      // 深色主题自带的 #333 底色与页面画布差一截，抹平成同一值（浅色页面本身是白底）。
+      // ⚠ 这里的颜色要跟着 _sass/color_schemes/dark-premium.scss 的
+      //   $body-background-color 走，两处必须同值，否则图会比页面亮一块。
+      background: dark ? "#191c22" : "#ffffff"
     },
     flowchart: { htmlLabels: true, curve: "basis", useMaxWidth: true },
     sequence: { useMaxWidth: true },
