@@ -54,16 +54,24 @@ $toc-min: 105rem; // 1680px：视口够宽才把大纲放成常驻栏；否则�
 // 代价可接受。
 
 // 颜色令牌：随 color_scheme 取值，供下面各处复用。
-// 深色一档按 _sass/color_schemes/dark-premium.scss 的画布 #191c22 调过——
-// 白度的百分比不再是 0.14/0.16 那种「亮灰线」，而是压到 0.10/0.13。
+// 整站走**石墨灰阶**（无彩色）：所有交互色都在灰阶里取，靠明度与字重分层。
+// 深色一档按 dark-premium 的画布 #0b0c0e 定，白度压到 0.10–0.16。
 $c-hairline:     if($color-scheme == dark, rgba($white, 0.10), rgba($grey-dk-300, 0.11));
-$c-surface:      if($color-scheme == dark, rgba($white, 0.03), rgba($grey-dk-300, 0.022));
-$c-code-border:  if($color-scheme == dark, rgba($white, 0.13), rgba($grey-dk-300, 0.13));
-$c-scroll-thumb: if($color-scheme == dark, rgba($white, 0.18), rgba($grey-dk-300, 0.22));
-$c-table-head:   if($color-scheme == dark, rgba($white, 0.04), $grey-lt-000);
+$c-surface:      if($color-scheme == dark, rgba($white, 0.035), rgba($grey-dk-300, 0.022));
+$c-code-border:  if($color-scheme == dark, rgba($white, 0.11), rgba($grey-dk-300, 0.13));
+$c-scroll-thumb: if($color-scheme == dark, rgba($white, 0.16), rgba($grey-dk-300, 0.22));
+$c-table-head:   if($color-scheme == dark, rgba($white, 0.045), $grey-lt-000);
+$c-row-hover:    if($color-scheme == dark, rgba($white, 0.03), rgba($grey-dk-300, 0.04));
 $c-card-shadow:  if($color-scheme == dark, none, 0 1px 2px rgba($grey-dk-300, 0.06));
-$c-toc-link:      if($color-scheme == dark, #a3abba, $grey-dk-100);
-$c-toc-link-weak: if($color-scheme == dark, #858d9b, $grey-dk-000);
+
+// 交互色（全部灰阶，四档明度）：侧栏导航 > 正文链接 > 大纲一级 > 大纲二级。
+// 此前这几处共用 `$link-color` 的紫罗兰，是「目录与大纲看着别扭」的直接原因。
+$c-toc-link:      if($color-scheme == dark, #a7aeba, $grey-dk-100);
+$c-toc-link-weak: if($color-scheme == dark, #868e9a, $grey-dk-000);
+$c-toc-link-on:   if($color-scheme == dark, #eef0f4, $grey-dk-300); // 大纲当前项
+$c-nav-link:      if($color-scheme == dark, #ccd2da, $grey-dk-200);
+$c-nav-link-on:   if($color-scheme == dark, #ffffff, $grey-dk-300); // 悬停 / 当前页
+$c-nav-expander:  if($color-scheme == dark, #8b93a0, $grey-dk-000); // 折叠箭头
 
 // ============================================================================
 // 一、自适应布局
@@ -95,6 +103,20 @@ $c-toc-link-weak: if($color-scheme == dark, #858d9b, $grey-dk-000);
     max-width: $content-max;
     margin-right: auto;
     margin-left: auto;
+  }
+
+  // 顶栏吸顶：搜索框与两个开关同在 `.main-header` 里（DOM 见本文件开头第 ③ 条），
+  // 滚动时固定在视口顶部，长文里随时能搜索 / 切主题 / 收大纲，不必回顶。
+  // 包含块是 `.main`（position: relative 且高度撑满整页），所以 sticky 的有效范围
+  // 覆盖整篇文章，不是只到下一个兄弟区块为止。
+  // 只在 ≥md 生效——主题在窄屏把 `.main-header` 设为 `display: none`（窄屏的搜索与
+  // 开关在侧栏抽屉里），那条路径不受影响。
+  .main-header {
+    position: sticky;
+    top: 0;
+    z-index: 20; // 高于正文与常驻大纲(auto)，低于窄屏抽屉 .page-toc(30)
+    background-color: $body-background-color; // 必须不透明，否则正文会从底下透出来
+    border-bottom: 1px solid $c-hairline;
   }
 
   // 正文左右留白沿用主题的 $gutter-spacing（2rem）——**不要改**：
@@ -254,6 +276,20 @@ pre > code.language-mermaid {
   tbody tr:nth-child(even) td {
     background-color: $c-surface;
   }
+
+  // 首列是「维度名」（项 / 触发类型 / 边界单位 / 文件…），横向对比时先看它定位到哪一维，
+  // 所以比其余格略重一档。这里**不加 nowrap**——附录索引表的首列是长路径，禁折行会
+  // 反而撑出横向滚动。
+  th:first-child,
+  td:first-child {
+    font-weight: 500;
+  }
+
+  // 行悬停：与隔行底色同特异性、位置在后，因此悬停时覆盖斑马纹。
+  // 一行能占四五屏行高，没有悬停高亮时「读到哪一行」全靠数格子。
+  tbody tr:hover td {
+    background-color: $c-row-hover;
+  }
 }
 
 // ============================================================================
@@ -322,9 +358,15 @@ pre > code.language-mermaid {
     text-transform: none;
   }
 
-  // 锚点跳转时标题不要贴着视口顶端
+  // 锚点跳转时标题不要贴着视口顶端。
+  // ≥md 顶栏吸顶会占掉 $header-height(3.75rem)，跳转目标必须再让开这一段，
+  // 否则从侧栏大纲点过去的标题会被顶栏盖住——这是吸顶的必然代价，必须一起改。
   :is(h1, h2, h3, h4, h5, h6) {
     scroll-margin-top: 1.25rem;
+
+    @include mq(md) {
+      scroll-margin-top: $header-height + 1rem;
+    }
   }
 }
 
@@ -415,6 +457,24 @@ html[data-theme="dark"] .theme-toggle {
 
 .site-nav > .nav-list > .nav-list-item > .nav-list-link {
   font-weight: 600;
+}
+
+// 颜色：主题让一级导航继承 `a`（即 `$link-color`）、折叠箭头显式用它，
+// 于是整条侧栏被强调色染了一层。这里改走灰阶令牌。
+// 特异性说明：一级导航（本规则，3 个类）压得住继承来的 `a`；**深层条目不受影响**
+// ——主题给它们的是 5 个类的选择器（`.nav-list .nav-list-item > .nav-list …`），
+// 仍取 `$nav-child-link-color`，于是「越深越淡」的层级关系保留。
+.nav-list .nav-list-item .nav-list-link {
+  color: $c-nav-link;
+}
+
+.nav-list .nav-list-item .nav-list-link:hover,
+.nav-list .nav-list-item .nav-list-link.active {
+  color: $c-nav-link-on;
+}
+
+.nav-list .nav-list-item .nav-list-expander {
+  color: $c-nav-expander;
 }
 
 // 「默认展开」不在 CSS 里做：`.nav-list-item > .nav-list { display: none }` 是主题的
@@ -522,9 +582,10 @@ html.toc-open .page-toc {
     }
 
     &.current {
-      color: $link-color;
+      // 当前小节靠「明度 + 左侧 2px 竖条」标记，不用强调色——与整站去彩一致。
+      color: $c-toc-link-on;
       background-color: $c-surface;
-      border-left-color: $link-color;
+      border-left-color: $c-toc-link-on;
     }
   }
 
@@ -563,14 +624,15 @@ html.toc-open .page-toc {
 
   .page-toc {
     position: sticky;
-    top: 1.5rem;
+    // 让开吸顶的顶栏（$header-height）再加一段呼吸距离，否则大綱会贴到顶栏下沿。
+    top: calc(#{$header-height} + 1rem);
     z-index: auto;
     grid-row: 2;
     grid-column: 2;
     align-self: start;
     width: auto;
     max-width: none;
-    max-height: calc(100vh - 3rem);
+    max-height: calc(100vh - #{$header-height} - 2rem);
     padding: 0;
     background-color: transparent;
     border-left: 0;

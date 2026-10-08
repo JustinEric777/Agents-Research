@@ -37,3 +37,19 @@ $body-heading-line-height: 1.35;
 
 // 圆角：主题 4px，在正文 1248–1440px 的宽度下偏方，视觉上收一档。
 $border-radius: 6px;
+
+// ------------------------------------------------------------- 链接主色（去彩）
+// 主题浅色方案的 `$link-color` 默认是 `$purple-000`（#7253ed）、`$btn-primary-color`
+// 默认是 `$purple-100`（#5e41d0）——**这就是站上紫色的来源**，而且它的影响面远大于
+// 「链接」二字：侧栏一级导航（继承 `a`）、折叠箭头（`.nav-list-expander` 显式用它）、
+// 导航的悬停/当前项（`darken($link-color, 5%)`）、搜索聚焦图标、引用块左边线
+// （custom.scss 里的 `rgba($link-color, 0.7)`）全都跟着它走。
+//
+// 这里换成中性深板岩，整站去彩。**必须放在 setup 而不是加一条 `a { color }` 规则**：
+// 主题在编译期用它派生出上面那些颜色（`darken()` / `rgba()`），只覆盖 `a` 元素本身
+// 管不到派生值，悬停时仍会冒出紫色。
+//
+// 深色不受影响：`_sass/color_schemes/dark-premium.scss` 会在本文件之后重新赋值
+// （不带 `!default`），主题自带的 dark.scss 同样是无条件赋值。
+$link-color: #3c4149;
+$btn-primary-color: #3c4149;

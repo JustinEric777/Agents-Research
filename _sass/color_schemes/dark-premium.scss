@@ -1,20 +1,24 @@
 // ============================================================================
-// 深色配色（自定义）：中性石墨画布 + 单一紫罗兰强调色。
+// 深色配色（自定义）：石墨灰阶——近黑画布 + 无彩色交互层。
 // ============================================================================
 //
 // 为什么不用主题自带的 `dark`：
 //   ① 画布 #27262b 与侧栏 #27262b **同色**——两个区域没有层次，整页像一块色板；
 //   ② 代码块 #0d1117 是**蓝黑**，与画布的**紫灰**不是一个色系，内嵌的代码栅格
 //      在页面里「跳」出来；
-//   ③ 链接是 lighten(#2c84fa, 10%) 的亮蓝，与紫灰中性色不搭；标题 #f5f6fa 与正文
-//      #e6e1e8 只差一档，层级几乎看不出来。
+//   ③ 链接是 lighten(#2c84fa, 10%) 的亮蓝；标题 #f5f6fa 与正文 #e6e1e8 只差一档，
+//      层级几乎看不出来。
 //
-// 这里的取舍：
-//   · 画布取中性石墨（不带紫调），侧栏**比画布深一档**——与浅色方案「侧栏 #f5f6fa
-//     比正文白深」的方向保持一致，两种模式切换时空间关系不变；
-//   · 代码块**比画布亮一档**，读作「内嵌面板」，不再另起色系；
-//   · 强调色沿用紫罗兰族（浅色方案链接是 #7253ed），深色下提亮到 #a996ff，
-//     两种模式的品牌色是同一支。
+// 本方案的取舍（**石墨灰阶**）：
+//   · 画布压到近黑 #0b0c0e（冷调、非纯黑——纯黑 #000 在 LCD 上是「关灯」而不是
+//     「深色」，边缘会发死）；侧栏 #101114 **比画布抬一档**，读作一块浮起的面板，
+//     两者之间由 1px 发丝线（rgba(white,.10)）分界；
+//   · 代码块 / 搜索框 / 表格面板比画布亮一档，读作「内嵌面板」，不再另起色系；
+//   · **整套界面无彩色**：链接、导航、大纲、折叠箭头全部在灰阶里取，靠明度与字重
+//     分层，不再有强调色。这也是此前紫罗兰方案被否掉的原因——目录与大纲是长期
+//     停留区，一处彩色就会把整页的调子带偏；
+//   · 明度阶梯（暗→亮）：画布 .00 → 侧栏 .04 → 面板 .07 → 发丝线 .10 →
+//     正文 .76 → 标题 .94。正文与标题之间留了足够距离，长文里层级才立得住。
 //
 // 加载位置：本文件由 assets/css/just-the-docs-dark-premium.scss 通过
 // `{% include css/just-the-docs.scss.liquid color_scheme="dark-premium" %}` 引入，
@@ -38,28 +42,33 @@
 //   的 `jtd.setTheme('dark')` 都写死指向 `just-the-docs-dark.css`，用同名会互相盖住。
 //   正因如此，本站的配色切换不调用 jtd.setTheme，而是自己写 <link href>
 //   （见 _includes/header_custom.html）。
+//
+// ⚠ 改动本文件的画布色后，`_includes/mermaid_config.js` 里的
+//   `themeVariables.background` 与流程图各节点的底色要同步（mermaid 在初始化时
+//   就把颜色写进了生成的 SVG，CSS 换不掉它）。
 
 @import "color_schemes/dark";
 
-// ---- 画布与层次
-$body-background-color: #191c22; // 画布
-$sidebar-color: #14161b; // 侧栏：比画布深一档
-$feedback-color: #232730; // 悬停/选中反馈（比画布亮一档）
-$border-color: #2b2f38; // 发丝线（行内代码描边、侧栏内分隔、表头底线）
+// ---- 画布与层次（暗 → 亮：画布 .00 → 侧栏 .04 → 面板 .07）
+$body-background-color: #0b0c0e; // 画布：近黑冷调
+$sidebar-color: #101114; // 侧栏：比画布抬一档，读作浮起的面板
+$feedback-color: #171a1f; // 悬停 / 选中反馈（比侧栏再亮一档）
+$border-color: #23262c; // 发丝线（侧栏内分隔、表头底线、引用块边）
 
-// ---- 文字层级（标题 / 正文 / 次要，三档拉开）
-$body-heading-color: #f2f4f8;
-$body-text-color: #c9cfda;
-$nav-child-link-color: #a9b1be;
+// ---- 文字层级（正文 .76 → 标题 .94，四档拉开）
+$body-heading-color: #eff1f5;
+$body-text-color: #c2c8d1;
+$nav-child-link-color: #99a1ad;
 
-// ---- 强调色
-$link-color: #a996ff;
-$btn-primary-color: #8b73ff;
-$base-button-color: #23262e;
+// ---- 交互层：整站去彩，全部在灰阶里取
+// 正文链接与目录/大纲同族，靠下划线（主题 `a:not([class])`）表意，不靠颜色。
+$link-color: #ccd2da;
+$btn-primary-color: #3a4048; // 深色下要容得下白字（主题 btn-color 用 $white 作前景）
+$base-button-color: #191c21;
 
 // ---- 面板：代码块、表格、搜索框统一比画布亮一档
-$code-background-color: #20242c;
-$code-linenumber-color: #c9cfda;
-$table-background-color: #1e2129;
-$search-background-color: #1e2129;
-$search-result-preview-color: #8b93a1;
+$code-background-color: #14171c;
+$code-linenumber-color: #c2c8d1; // 行号在深色下必须跟着文字走（主题给的是亮白）
+$table-background-color: #0e1013;
+$search-background-color: #14171c;
+$search-result-preview-color: #8c94a1;
