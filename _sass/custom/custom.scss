@@ -82,9 +82,22 @@ $c-card-shadow:  if($color-scheme == dark, none, 0 1px 2px rgba($grey-dk-300, 0.
 $c-toc-link:      if($color-scheme == dark, #a7aeba, $grey-dk-100);
 $c-toc-link-weak: if($color-scheme == dark, #868e9a, $grey-dk-000);
 $c-toc-link-on:   if($color-scheme == dark, #eef0f4, $grey-dk-300); // 大纲当前项
-$c-nav-link:      if($color-scheme == dark, #ccd2da, $grey-dk-200);
+// 导航分两档，对齐参照站 `.VPSidebarItem`：level-0（三区 / 首页 / 总览）
+// 字重 700 + 最亮文字色，level-1 以下（各章）字重 500 + 收暗一档的 `$nav-child-link-color`。
+// 原先这里只给到 #ccd2da，与下面各章只差一档，「区」这个层级几乎看不出。
+$c-nav-link:      if($color-scheme == dark, #e4e8ee, $grey-dk-300);
 $c-nav-link-on:   if($color-scheme == dark, #ffffff, $grey-dk-300); // 悬停 / 当前页
 $c-nav-expander:  if($color-scheme == dark, #8b93a0, $grey-dk-000); // 折叠箭头
+
+// 正文里「文件 / 目录引用」形态的行内代码（`codex-rs/core/src/session/mod.rs`）。
+// 这类代码是全文的取证锚点，密度极高（实测 5180 处），但此前与 `McpClient`、`init()`
+// 这类标识符同色，扫读时挑不出来。参照站给**全部**行内代码上强调色
+// （`.vp-doc :not(pre,h1..h6)>code{color:var(--vp-code-color)}`，`--vp-code-color`
+// 即 `--vp-c-brand-1`）；整站去彩之后只剩这一处强调色有意义，故只给「引用」上蓝，
+// 标识符与字符串保持中性——否则 8900 处标识符一起变色，蓝就失去了指示作用。
+// ⚠ 判断「像不像路径」是内容语义，CSS 做不到 → 由 footer_custom.html 的
+//   `markCodeRefs()` 给命中的 <code> 加 `.code-ref` 类，这里只管上色。
+$c-code-ref:      if($color-scheme == dark, #93bdf5, #1d5dbe);
 // 正文链接（详见第七节）。这是全站唯一「靠颜色区分的交互件」——去彩之后链接色
 // 与正文色只差一档明度，必须同时把下划线抬到可见，否则链接认不出来。
 $c-prose-link:      if($color-scheme == dark, #e3e9f2, #1f242b);
@@ -139,6 +152,10 @@ $c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
     z-index: 20; // 高于正文与常驻大纲(auto)，低于窄屏抽屉 .page-toc(30)
     background-color: $body-background-color; // 必须不透明，否则正文会从底下透出来
     border-bottom: 1px solid $c-hairline;
+    // 与 `.main-content-wrap` 的 2rem 内边距对齐：否则搜索框贴在本栏的**外边缘**
+    // （实测 1800px 下 356px），而正文、面包屑都在内边缘（388px），差 32px。
+    padding-right: 2rem;
+    padding-left: 2rem;
   }
 
   // ---- 阅读测度：只收「文字类」块级元素，展品类保持内容列全宽 ----------
@@ -148,12 +165,19 @@ $c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
   //   文字类——p / ul / ol / blockquote / h1–h6 / hr；
   //   展品类——div.table-wrapper（表格，主题已包好 overflow-x:auto）、
   //           div.language-*（源码摘录）、mermaid 容器。
-  // 只收前者：表格与源码在宽屏上需要更宽的版面，硬压到 768px 会让它们频繁横滚。
-  // 两个宽度都居中（下方 margin auto），所以展品比文字宽出的那一截是**左右对称**的。
+  // 只收前者：表格与源码在宽屏上需要更宽的版面，硬压到 768px 会让它们频繁横滚
+  // （实测把列宽从 1088 收到 768，5 篇样本里 144 张表中 59 张开始横滚；
+  //   而 191 个代码块在 768 就已经全部不横滚，所以宽列其实是**为表格留的**）。
+  //
+  // 收窄之后**靠左**（margin-right: auto），不收左——这是「左右边界对齐」的关键：
+  // 1800px 下旧写法把文字列居中，文字左边界落在 548px，而面包屑、表格、代码块
+  // 都在 388px，同一页出现两条左边界，抬头第一眼就是「没对齐」。
+  // 靠左之后全篇只有一个左边界（列的内边缘），展品右伸出去的那一截交给右侧留白，
+  // 不再同时向左右两侧溢出，也就不存在「文字比展品缩进」的观感。
   #main-content > main > :is(p, ul, ol, dl, blockquote, h1, h2, h3, h4, h5, h6, hr) {
     max-width: $prose-max;
     margin-right: auto;
-    margin-left: auto;
+    margin-left: 0;
   }
 
   // 正文左右留白沿用主题的 $gutter-spacing（2rem）——**不要改**：
@@ -211,6 +235,16 @@ samp,
   pre code {
     font-size: 0.8125rem;
   }
+}
+
+// 「文件 / 目录引用」形态的行内代码染蓝（令牌见上 `$c-code-ref` 处的说明）。
+// 类由 footer_custom.html 的 `markCodeRefs()` 打——CSS 认不出内容语义。
+// 只挑「父元素不是 pre」的：块内代码有自己的语法高亮，整体染蓝会把它抹平。
+// 查过主题源码：行内代码唯一那条规则是 `:not(pre, figure) > code`
+// （只设 padding / background / border，**根本不设 color**，字色靠继承）；
+// 也就是说全站没有第二条 `color` 在与它争，染蓝必然生效。
+.main-content :not(pre) > code.code-ref {
+  color: $c-code-ref;
 }
 
 // ============================================================================
@@ -526,14 +560,18 @@ html[data-theme="dark"] .theme-toggle {
 }
 
 // 字重：主题只在 `.active` 上给 600，其余全是 400。中文笔画密，同一字号下
-// 400 显得发飘。整链提到 500，父节点（三区）与当前页 600，层级靠字重就分得开。
-// 对齐参照站：它的侧栏是 level-0 700 / level-1 600 / 更深 500 的三档。
+// 400 显得发飘。整链提到 500，分组层 700——**与参照站逐档对齐**：
+//   `.VPSidebarItem.level-0 .text { font-weight: 700 }`（区 / 首页 / 总览）
+//   `.VPSidebarItem.level-1…5 .text { font-weight: 500 }`（各章，**同色同重**）
+// 注意参照站的 1–5 级是**同一个** `--vp-c-text-2`，并不「越深越淡」；我们只有
+// 两级（区 → 章），所以「区更亮更重、章更暗更轻」正好是它 level-0 与 level-1
+// 的关系，不必再往下细分。
 .nav-list .nav-list-link {
   font-weight: 500;
 }
 
 .site-nav > .nav-list > .nav-list-item > .nav-list-link {
-  font-weight: 600;
+  font-weight: 700;
 }
 
 // 颜色：主题让一级导航继承 `a`（即 `$link-color`）、折叠箭头显式用它，
@@ -642,12 +680,16 @@ html.toc-open .page-toc {
   justify-content: space-between;
 }
 
+// 参照站 `.outline-title { font-size: 14px; font-weight: 600; line-height: 32px }`
+// ——13px 是我们自己压的，与正文的 16px 差得太多，标题看着像脚注。
 .page-toc-title {
   margin: 0;
-  font-size: 0.8125rem;
+  font-size: 0.875rem;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: $grey-dk-000;
+  // 参照站的 outline-title 不设 color，继承正文 `--vp-c-text-1`——即**最亮**的一档，
+  // 比下面各条目亮。原来取 `$grey-dk-000`(#959396)，那是个暖灰、且与条目同档。
+  color: $body-heading-color;
 }
 
 // 关闭按钮只在抽屉形态出现。宽屏常驻栏没有「关掉」的语义——那边用页头按钮收起，
@@ -667,47 +709,75 @@ html.toc-open .page-toc {
   }
 }
 
+// 对齐参照站 `.VPDocAsideOutline .content`：**一条连续的 1px 细轨 + 16px 内边距**，
+// 当前项不是自己长一根竖条，而是把一根 2px 的滑块压在这条细轨上。
+// 旧写法给每个条目各挂一个 `border-left: 2px transparent`，只有当前项那一段点亮
+// ——竖条因此是断的，且条目一换就跳一段距离；压在通轨上之后竖条位置是连续的。
 .page-toc-list {
-  padding: 0;
+  padding: 0 0 0 1rem;
   margin: 0;
   list-style: none;
+  border-left: 1px solid $c-hairline;
 }
 
 .page-toc-item {
   margin: 0;
 
+  // h3 比 h2 再缩进一档、色阶降一档，层级一眼可见。
+  // 缩进 13px 对齐参照站 `.outline-link.nested { padding-left: 13px }`；
+  // **「嵌套层降一档色」是我们有意保留的一处偏离**——参照站嵌套层不改色
+  // （h2/h3/h4 全用 `--vp-c-text-2`，只靠缩进分层），但一页 30+ 条的长大纲
+  // 会因此失去层级线索。保留后靠「缩进 + 明度」双重区分。
+  //
+  // ⚠ 必须写在下面 `> .toc-link` **之前**：`&.toc-level-3 > .toc-link` 与
+  //   `.page-toc-item > .toc-link:hover`、`.page-toc-item > .toc-link.current`
+  //   特异性同为 (0,3,0)，同级时**后来者胜**。放前面，悬停与当前项的「提亮」
+  //   才压得过这一档「降色」；放后面会让 h3 的当前项比普通 h3 还暗（已实测踩到）。
+  &.toc-level-3 > .toc-link {
+    padding-left: 0.8125rem;
+    color: $c-toc-link-weak;
+  }
+
   > .toc-link {
+    position: relative; // `.current::before` 的定位基准
     display: block;
-    // 行距：0.35rem padding × 2 + 14px × 1.75 ≈ 36px，与参照站的
-    // `line-height: 32px` 同一量级——比原来的 ~22px 松一档，扫读时不容易串行。
-    padding: 0.35rem 0.5rem;
-    // 主题给 `a:not([class])` 加了下划线；这里的链接带 class，天然不受影响，
-    // 但仍显式给一条可见的悬停反馈 + 单行省略（标题可能很长）。
+    // 行距：0.25rem padding × 2 + 14px × 1.75 = 32.5px ≈ 参照站的 32px。
+    // 比原来的 0.35rem 收一档，条目更紧凑，一屏能多看两三条。
+    padding: 0.25rem 0.5rem;
+    // 主题给 `a:not([class])` 加了下划线；这里的链接带 class，天然不受影响。
     overflow: hidden;
     line-height: 1.75;
     color: $c-toc-link;
     white-space: nowrap;
     text-overflow: ellipsis;
-    border-left: 2px solid transparent;
     border-radius: 0 $border-radius $border-radius 0;
 
+    // 悬停与当前项都只提「明度」——参照站也是
+    // `.outline-link:hover, .outline-link.active { color: var(--vp-c-text-1) }`，
+    // 两者同色，都不加底色。
     &:hover {
-      color: $body-heading-color;
-      background-color: $c-surface;
+      color: $c-toc-link-on;
     }
 
     &.current {
-      // 当前小节靠「明度 + 左侧 2px 竖条」标记，不用强调色——与整站去彩一致。
       color: $c-toc-link-on;
-      background-color: $c-surface;
-      border-left-color: $c-toc-link-on;
-    }
-  }
 
-  // h3 比 h2 再缩进一档、色阶降一档，层级一眼可见
-  &.toc-level-3 > .toc-link {
-    padding-left: 1.125rem;
-    color: $c-toc-link-weak;
+      // 参照站 `.outline-marker`：`left: -1px; width: 2px; height: 18px;
+      // border-radius: 2px; background-color: brand-1`。
+      // 滑块的左边缘落在细轨上 → 链接左边缘再退 1rem（列表的 padding-left）。
+      // 整站去彩，滑块取当前项文字色（最亮的一档），与参照站的品牌色同地位。
+      &::before {
+        position: absolute;
+        top: 50%;
+        left: -1rem;
+        width: 2px;
+        height: 1.125rem;
+        background-color: $c-toc-link-on;
+        border-radius: 2px;
+        content: "";
+        transform: translateY(-50%);
+      }
+    }
   }
 }
 

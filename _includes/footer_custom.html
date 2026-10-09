@@ -32,6 +32,18 @@
          · 「L N」——**只在正文里链**，表格里跳过（那里它是「层码」列标签，
            相邻的「主题」列本身就是入口，再链一次是一行两个同目标链接）。
        跳过代码块、行内代码、标题、已有链接内部。
+
+    ④ 「文件 / 目录引用」形态的行内代码染蓝
+       正文里 14513 处行内代码中有 5469 处是 `codex-rs/core/src/session/mod.rs`
+       这类**取证用的文件引用**（首版只认出 5173 处，漏了 296 处）。
+       它们此前与 `McpClient`、`init()` 这类标识符同色，扫读时挑不出来。
+       这里给命中的 <code> 打 .code-ref，由 CSS 上色
+       （见 _sass/custom/custom.scss 的 `$c-code-ref`）。
+       **判断「像不像路径」是内容语义，CSS 做不到，所以只能用 JS。**
+       只染「引用」，标识符 / 字符串 / 代码片段保持中性——8900 处标识符一起变蓝
+       的话，蓝就不再指示任何东西（参照站给全部行内代码上色，是因为它的正文里
+       行内代码密度远低于本站）。六条形态、两处后缀细节与「扩展名白名单即唯一
+       防线」的说明见 `markCodeRefs()` 上方注释。
 {%- endcomment -%}
 {%- if site.footer_content -%}
   <p class="text-small mb-0">{{ site.footer_content }}</p>
@@ -57,6 +69,7 @@
 
     ready(function () {
       linkChapterRefs(); // 先补链接，再生成大纲（大纲取标题文本，顺序无先后依赖，这里只为稳定）
+      markCodeRefs();
       expandNav();
       buildPageToc();
     });
@@ -162,6 +175,71 @@
         return a.start - b.start;
       });
       return out;
+    }
+
+    // ---------------------------------------------------------------- ④ 文件引用染蓝
+    // 「像不像文件 / 目录路径」只能看内容，CSS 判不了 → 在这里打类，CSS 只负责上色。
+    // 六条形态 + 两处后缀细节（其余一律不染）：
+    //   a) 带目录的路径 + 已知扩展名：codex-rs/core/src/session/mod.rs、~/.codex/sessions/**/*.jsonl
+    //   b) 单文件名 + 已知扩展名（含 `*.ts`）：README.md、CHANGELOG.md
+    //   c) `./` `../` 开头的引用（没有扩展名也算，本身就以路径形态出现）：../codex
+    //   d) 点文件 / 点目录：.env、.mcp.json、.gitignore
+    //   e) 花括号展开（**必须紧跟在 `/` 之后**，这一条把 `{}`、`loop{}`、
+    //      `HookScope{Thread,Turn}` 这类**代码片段**全挡在外面）：
+    //      src/hooks/{useCancelRequest,useExitOnCtrlCD,useVimInput}.ts
+    //   f) 以 `/` 结尾的目录引用：codex-rs/core/src/agent/、managed-settings.d/
+    // 后缀 LINE 收「一次给多处行号」——这是本系列的引用习惯，形态很多：
+    //   :180、:179-183、:164/1195-1221、:345, 1184-1194、:129/156/253/461/215
+    // 路径段允许 `<占位符>`（`agents/<name>.toml`、`<cwd>/.pi/extensions/`）——
+    //   这是文档里指代「运行期才知道的目录」的固定写法。
+    //
+    // **扩展名白名单是唯一防线**：`pi.job` / `AppState.tasks` / `JSON.parse` /
+    // `process.env` 这类「点号成员访问」与单文件名同形，只能靠「扩展名不在表里」
+    // 把它们挡下。实测全仓 136 种成员访问被白名单一条不漏地挡住。
+    // 刻意**不**收 `@anthropic-ai/claude-agent-sdk`、`agent/pre-step`、
+    // `chatgpt.com/backend-api` 这类包名 / 协议方法名 / 域名——它们不是文件，
+    // 染蓝只会稀释「这里是取证点」的信号。
+    // 加扩展名或改任一条形态前，务必先量语料分布（见 skill §8）。
+    var CODE_EXT =
+      "rs|ts|tsx|mts|cts|js|jsx|mjs|cjs|json|jsonc|jsonl|ndjson|toml|ya?ml|md|mdx" +
+      "|py|go|java|kt|rb|php|sh|bash|zsh|ps1|bat|sql|scss|sass|less|css|html?|vue|svelte" +
+      "|lock|txt|cfg|conf|ini|env|proto|gql|graphql|xml|svg|patch|diff|log|sock" +
+      "|c|h|hh|hpp|cc|cpp|d\\.ts";
+    // 行号后缀：`:` 起头，数字之间允许 `-`（区间）/ `/`（并列）/ `,`（并列），可带空格
+    var LINE = "(?::\\d+(?:\\s*[-,/]\\s*\\d+)*)?";
+    var SEG = "[\\w.@+~*<>-]"; // 路径段允许的字符：含 `*` 通配与 `<占位符>`
+    var RE_CODE_REF = new RegExp(
+      "^(?:" +
+        "(?:" + SEG + "+\\/)+" + SEG + "+\\.(?:" + CODE_EXT + ")" + LINE + // a
+        "|[\\w*][\\w.@+~<*-]*\\.(?:" + CODE_EXT + ")" + LINE +             // b
+        "|\\.{1,2}\\/[\\w.@+~*<>/-]+" +                                    // c
+        "|\\.[A-Za-z][\\w.-]*" +                                           // d
+        "|[\\w.@+~*<>/-]+\\/\\{[^}]*\\}[\\w.@+~*<>/-]*" +                  // e
+        // f：以 `/` 结尾的目录。负向先行断言挡掉光秃秃的 `~/` `./` `../`
+        //    （那是「家目录」的散文说法，不是一个具体目录引用）。
+        "|(?!(?:~|\\.{1,2})\\/$)[~\\w.@+<>-][\\w.@+~*<>/-]*\\/" +
+      ")$",
+      "i"
+    );
+
+    function markCodeRefs() {
+      var main = document.querySelector("#main-content > main");
+      if (!main || !main.querySelectorAll) return;
+
+      var codes = main.querySelectorAll("code");
+      for (var i = 0; i < codes.length; i++) {
+        var code = codes[i];
+        var parent = code.parentNode;
+        if (!parent || !parent.tagName) continue;
+        // 块内代码（<pre> 里）有自己的语法高亮，整体染蓝会把它抹平
+        if (parent.tagName === "PRE") continue;
+        // 标题里的行内代码不上色——对齐参照站 `:not(pre,h1,…,h6)>code`
+        if (/^H[1-6]$/.test(parent.tagName)) continue;
+
+        var text = (code.textContent || "").replace(/^\s+|\s+$/g, "");
+        if (!text || text.length > 160) continue;
+        if (RE_CODE_REF.test(text)) code.classList.add("code-ref");
+      }
     }
 
     // ---------------------------------------------------------------- ① 侧栏全展开
