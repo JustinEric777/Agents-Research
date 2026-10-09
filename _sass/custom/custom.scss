@@ -42,8 +42,9 @@
 // 多数为 3–6 列，主题每格 `min-width: 7.5rem`(120px) ⇒ 6 列只需约 730px。
 // 1152px 仍给源码摘录（Rust/TS 常见 90 列以上）留足了横向空间。
 //
-// 这一条同时决定「自适应」的边界：侧栏 19rem + 内容列 72rem = 91rem（1456px）。
-// **视口 ≤ 1456px 时上限不生效，正文列直接铺满侧栏右侧的全部空间**；更宽才居中收口。
+// $content-max 同时决定「自适应」的档位：侧栏 19rem + 内容列 72rem = 91rem（1456px），
+// 即下面的 $shell-drawer。**视口 ≤ 1456px 时上限不生效，正文列铺满侧栏右侧的全部空间**；
+// 更宽则两侧各留等量白边（**左右边界对称**，见 $shell-drawer / shell-inset()）。
 // 想整体调宽/调窄，只改这两个变量即可。
 $prose-max: 48rem;
 $content-max: 72rem;
@@ -63,6 +64,31 @@ $toc-min: 105rem; // 1680px：视口够宽才把大纲放成常驻栏；否则�
 // 门槛**有意高于 $wrap-max**：1680px 时可用宽度是 1680 − 侧栏 19rem = 1376px，
 // 仍小于 1392px，所以这一档下正文列不会被上限截断，只是被大纲栏挤掉 240px
 // （内容列 1136px，仍容得下 6 列表格）；要更宽才会看到整组居中收口。
+
+// ---- 整站左右边界：把「侧栏 + 内容列」当成一个外壳，宽屏整体居中 ----------
+// 参照站的做法（它的编译产物）：≥1440px 时
+//   .VPSidebar  { padding-left: max(32px, calc((100% - (1440px - 64px)) / 2)) }
+//   .VPNavBar .content { padding-left: calc((100vw - 1440px) / 2 + 272px) }
+// 即**先把外壳封顶，再把整个外壳居中**，所以侧栏文字不会死贴视口左缘。
+// 已在真实页面上验证过它的取值：导航标题左沿在 1512 / 1920 / 2560 下分别是
+// 68 / 272 / 592px，正是 `max(32px, (V − 1376px) / 2)`。
+//
+// 本站改前**没有**这一层：侧栏 `left: 0` 钉死，正文列在剩余空间里自己 `margin: auto`
+// 居中 → 左侧墨迹固定 32px，右侧随视口变宽一路涨到 60 / 144 / 464px。
+//
+// 下面两个常量是外壳宽度（侧栏 + 内容列），**不能合并成一个**：大纲常驻时内容列要多
+// 吃 15rem（$toc-w + $toc-gap），外壳随之变宽。若统一用宽的那个，抽屉档（1456–1680px）
+// 里正文列会白白宽出 240px，而它跨过 $toc-min 又会被大纲栏挤回 1152px —— 一次列宽跳变。
+$gutter: 2rem; // 与内容列左右内边距一致：左右边界的**最小**留白就是它。
+$shell-drawer: $nav-w-lg + $content-max; // 91rem  = 1456px（大纲为抽屉时）
+$shell-wide:   $nav-w-lg + $wrap-max;    // 106rem = 1696px（大纲常驻时）
+
+// 让位量：外壳比视口窄时两侧各留 (V − 外壳) / 2，否则 0。
+// 用 50% 而不是 50vw——固定定位元素与普通流的百分比都按**不含滚动条**的宽度解析，
+// 而 vw 含滚动条；混用会让左右边界差出半个滚动条宽（Windows / Linux 上约 7–8px）。
+@function shell-inset($shell) {
+  @return unquote("max(0px, calc(50% - #{$shell * 0.5}))");
+}
 
 // 颜色令牌：随 color_scheme 取值，供下面各处复用。
 // 整站走**石墨灰阶**（无彩色）：所有交互色都在灰阶里取，靠明度与字重分层。
@@ -86,8 +112,19 @@ $c-toc-link-on:   if($color-scheme == dark, #eef0f4, $grey-dk-300); // 大纲当
 // 字重 700 + 最亮文字色，level-1 以下（各章）字重 500 + 收暗一档的 `$nav-child-link-color`。
 // 原先这里只给到 #ccd2da，与下面各章只差一档，「区」这个层级几乎看不出。
 $c-nav-link:      if($color-scheme == dark, #e4e8ee, $grey-dk-300);
-$c-nav-link-on:   if($color-scheme == dark, #ffffff, $grey-dk-300); // 悬停 / 当前页
 $c-nav-expander:  if($color-scheme == dark, #8b93a0, $grey-dk-000); // 折叠箭头
+
+// ---- 强调色：全站唯一的有彩色，只承担一个语义「你正在这里」----
+// 参照站把 `--vp-c-brand-1`（= VitePress 默认 indigo，浅色 #3451b2 / 深色 #a8b1ff）
+// 恰好只用在**三处**，逐条取自它的编译产物：
+//   `.VPSidebarItem.is-active > .item .link > .text { color: brand-1 }`   侧栏当前页文字
+//   `.VPSidebarItem.is-active > .item > .indicator { background: brand-1 }` 当前项左指示条
+//   `.outline-marker { background-color: brand-1 }`                       大纲的滑块
+// 注意它**不给**大纲文字上色（那是 `--vp-c-text-1`，最亮的一档），只给滑块——
+// 一个页面里同时有「当前章」和「当前节」两个层级，若都给文字上色，蓝字就同时指两件事。
+// 本站此前用「最亮的白」代替：近黑侧栏上纯白与普通条目只差一档，看不出「当前」在哪。
+// 这与早前「整站去紫」不冲突——那次去的是**到处都在用**的紫罗兰，这里是一个点色。
+$c-accent:        if($color-scheme == dark, #a8b1ff, #3451b2);
 
 // 正文里「文件 / 目录引用」形态的行内代码（`codex-rs/core/src/session/mod.rs`）。
 // 这类代码是全文的取证锚点，密度极高（实测 5180 处），但此前与 `McpClient`、`init()`
@@ -103,10 +140,11 @@ $c-code-ref:      if($color-scheme == dark, #93bdf5, #1d5dbe);
 $c-prose-link:      if($color-scheme == dark, #e3e9f2, #1f242b);
 $c-prose-link-line: if($color-scheme == dark, rgba(227, 233, 242, 0.38), rgba($grey-dk-300, 0.3));
 $c-prose-link-on:   if($color-scheme == dark, #ffffff, #000000);
-// 当前页的「实底 + 左竖条」。参照站的 .VPSidebarItem 用左侧 2px 指示条标当前项；
-// 这里同样处理，底色只给一点点明度差（够看出是一整条即可，不要变成色块）。
+// 「当前页」的实底。**底色仍走中性灰阶、不上强调色**——参照站的当前项根本没有底色
+// （只靠 `brand-1` 文字 + `brand-1` 指示条），我们保留这一层是因为本站侧栏默认全展开、
+// 19 章同时可见，一整条淡底比只靠文字颜色更容易「一眼找到我在哪」。
+// 指示条与文字色走上面的 `$c-accent`，不在令牌层重复定义。
 $c-nav-on-bg:     if($color-scheme == dark, rgba($white, 0.055), rgba($grey-dk-300, 0.05));
-$c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
 
 // ============================================================================
 // 一、自适应布局
@@ -116,20 +154,31 @@ $c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
 // 视口中间。副作用有两个：超大屏上左侧变成一大块纯背景色的空板；正文列本身
 // 仍锁死在 `.main { max-width: $content-width }`（800px）。
 //
-// 改成常规做法：侧栏钉死一个宽度，`.main` 不再设上限，正文列自己在剩余空间里
-// 流式居中。三者（`max-width` + 左右 auto 外边距）是标准居中写法，不需要 vw
-// 计算，小视口下 max-width 自动失效、列宽等于容器宽。
+// 改成常规做法：侧栏宽度固定，`.main` 不再设上限，正文列在剩余空间里流式居中。
+// **左右边界**另有一层（见上面 `$shell-*` / `shell-inset()`）：宽屏下把侧栏面板整体
+// 内移，使「侧栏墨迹的左沿」与「正文墨迹的右沿」到视口边缘的距离相等。
+// 面板内移靠 `align-items: flex-end`（主题在 md 上给的）把栏内三块顶到右缘，
+// 所以下面的宽度算的是**面板**宽（= 栏内宽度 + 让位量），栏内三块单独定宽。
 @include mq(md) {
   .side-bar {
-    width: $nav-w-md;
+    width: calc(#{$nav-w-md} + #{shell-inset($shell-drawer)});
     min-width: 0;
     border-right-color: $c-hairline; // 主题用的 $border-color 在白底上几乎看不见
+  }
+
+  .site-nav,
+  .site-header,
+  .site-footer {
+    width: $nav-w-md;
   }
 
   // 主题只给 `.side-bar + .main` 写规则，这里保持一致，避免误伤无侧栏的页面
   .side-bar + .main {
     max-width: none;
-    margin-left: $nav-w-md;
+    margin-left: calc(#{$nav-w-md} + #{shell-inset($shell-drawer)});
+    // 右侧的让位量与左侧**必须同值**：正文列被收窄到 max-width 后由 `margin: auto`
+    // 居中，两侧留白因此相等；少了这一条，右边就只剩 `margin: auto` 分剩下的零头。
+    padding-right: shell-inset($shell-drawer);
   }
 
   // 正文列与页头用同一套宽度上限 + 居中，两者左右边界因此严格对齐
@@ -188,19 +237,21 @@ $c-nav-on-bar:    if($color-scheme == dark, #e9ebef, $grey-dk-300);
 
 @include mq(lg) {
   .side-bar {
-    width: $nav-w-lg;
+    width: calc(#{$nav-w-lg} + #{shell-inset($shell-drawer)});
   }
 
   .side-bar + .main {
-    margin-left: $nav-w-lg;
+    margin-left: calc(#{$nav-w-lg} + #{shell-inset($shell-drawer)});
   }
 
   // 主题在这里把栏内三块收窄到 $nav-width，配合 align-items: flex-end 靠右贴正文；
-  // 侧栏既然定了宽，就让它们铺满，导航文字能多出 1.5rem 余量。
+  // 这里保持这个配合——面板比栏内宽出让位量，靠 flex-end 把三块顶到右缘，
+  // 于是导航文字的左沿 = 让位量 + 32px（`.nav-list-link` 自己的左内边距），
+  // 与正文右沿到视口边缘的距离（让位量 + 32px）相等。
   .site-nav,
   .site-header,
   .site-footer {
-    width: 100%;
+    width: $nav-w-lg;
   }
 }
 
@@ -577,25 +628,41 @@ html[data-theme="dark"] .theme-toggle {
 // 颜色：主题让一级导航继承 `a`（即 `$link-color`）、折叠箭头显式用它，
 // 于是整条侧栏被强调色染了一层。这里改走灰阶令牌。
 // 特异性说明：一级导航（本规则，3 个类）压得住继承来的 `a`；**深层条目不受影响**
-// ——主题给它们的是 5 个类的选择器（`.nav-list .nav-list-item > .nav-list …`），
+// ——主题给它们的是 4 个类的选择器（`.nav-list .nav-list-item > .nav-list …`），
 // 仍取 `$nav-child-link-color`，于是「越深越淡」的层级关系保留。
+// （代价：任何想让深层条目变色的规则都必须凑满同样多的类，见下面 `.active` 那段。）
 .nav-list .nav-list-item .nav-list-link {
   color: $c-nav-link;
 }
 
 // 当前页 / 悬停：整条换成**规整实底 + 左侧 2px 竖条**（对齐参照站的
-// `.VPSidebarItem .indicator`）。
+// `.VPSidebarItem .indicator`），文字转 `$c-accent`。
 // 主题给的是 `background-image: linear-gradient(-90deg, $feedback-color → 透明)`
 // ——在近黑侧栏上读作一团「右亮左断」的糊掉光斑，和「选中」这件事没有对应关系，
 // 这正是「目录选中颜色看着别扭」的根因。
 // ⚠ 必须显式写 `background-image: none`：主题设置的是 image，不是 color，
 //   只改 background-color 压不住它。
+//
+// ⚠⚠ 第二层（各章）必须**再列一条同深度的选择器**：主题给这一层单独写了
+//   `.nav-list .nav-list-item > .nav-list .nav-list-item .nav-list-link {
+//      color: $nav-child-link-color }`（4 个类），比上面 3 个类的 `.active` 更专，
+//   于是「当前页」落到章节层时文字停在 `#99a1ad`、根本显不出强调色。
+//   **只有左指示条能生效**（`box-shadow` 没有竞争规则），所以只看指示条会以为没事——
+//   这是**实测**出来的（探针读 computedStyle：boxShadow 已是 rgb(168,177,255)，
+//   color 仍是 rgb(153,161,173)）。不是冗余规则，缺了它「各章」这一层没有选中色。
 .nav-list .nav-list-item .nav-list-link:hover,
-.nav-list .nav-list-item .nav-list-link.active {
-  color: $c-nav-link-on;
+.nav-list .nav-list-item .nav-list-link.active,
+.nav-list .nav-list-item .nav-list-item .nav-list-link:hover,
+.nav-list .nav-list-item .nav-list-item .nav-list-link.active {
+  color: $c-accent;
   background-image: none;
   background-color: $c-nav-on-bg;
-  box-shadow: inset 2px 0 0 0 $c-nav-on-bar;
+}
+
+// 只有**当前页**压指示条（参照站只在 `.is-active` 上给指示条，悬停不给）。
+// 悬停也给条的话，鼠标划过时每一条都像「当前页」，条就不再指向任何东西。
+.nav-list .nav-list-item .nav-list-link.active {
+  box-shadow: inset 2px 0 0 0 $c-accent;
 }
 
 .nav-list .nav-list-item .nav-list-expander {
@@ -763,16 +830,17 @@ html.toc-open .page-toc {
       color: $c-toc-link-on;
 
       // 参照站 `.outline-marker`：`left: -1px; width: 2px; height: 18px;
-      // border-radius: 2px; background-color: brand-1`。
+      // border-radius: 2px; background-color: var(--vp-c-brand-1)`。
       // 滑块的左边缘落在细轨上 → 链接左边缘再退 1rem（列表的 padding-left）。
-      // 整站去彩，滑块取当前项文字色（最亮的一档），与参照站的品牌色同地位。
+      // **滑块上强调色、文字不上**——这正是参照站的分工：一个页面里「当前章」和
+      // 「当前节」是两个层级，若两处都上蓝，蓝色就同时指两个东西。
       &::before {
         position: absolute;
         top: 50%;
         left: -1rem;
         width: 2px;
         height: 1.125rem;
-        background-color: $c-toc-link-on;
+        background-color: $c-accent;
         border-radius: 2px;
         content: "";
         transform: translateY(-50%);
@@ -782,6 +850,17 @@ html.toc-open .page-toc {
 }
 
 @media (min-width: $toc-min) {
+  // 外壳换档：大纲常驻后内容列多吃 $toc-w + $toc-gap，外壳从 91rem 涨到 106rem。
+  // 左右让位量随之重算，否则抽屉档算出的让位量会把整组推离中心。
+  .side-bar {
+    width: calc(#{$nav-w-lg} + #{shell-inset($shell-wide)});
+  }
+
+  .side-bar + .main {
+    margin-left: calc(#{$nav-w-lg} + #{shell-inset($shell-wide)});
+    padding-right: shell-inset($shell-wide);
+  }
+
   // 宽屏：正文列 + 大纲栏两列。面包屑与正文都在第 1 列，大纲在第 2 列、
   // 且与正文同一行——`align-self: start` 让它的盒子保持内容高度，
   // sticky 才有可移动的余量（被拉伸满行高的元素 sticky 不会动）。
@@ -830,20 +909,19 @@ html.toc-open .page-toc {
     display: none;
   }
 
-  // 收起大纲：把腾出的宽度还给正文——`max-width` 回到 $content-max、列数回到 1，
-  // 于是正文列宽与「没有大纲」时完全一致，不会因为收起而变窄或变宽。
+  // 收起大纲：**只把大纲藏起来，不要把内容列缩窄**。
+  // 旧写法把 `.main-content-wrap` 收窄到 $content-max 并回到 1 列——正文列宽确实没变，
+  // 但外面因此多出 240px 的余量、被 `margin: auto` 均分，右边白边就比左边厚一截，
+  // 刚做完的左右对称会被这一下破坏。这里改成列模板回 1 列、宽度上限保持 $wrap-max：
+  // 大纲那一栏整列让给正文（表格 / 源码摘录从 1152px 涨到 1392px），
+  // 右边界因此原地不动，收起 / 展开大纲不会让整页横跳。
   html.toc-closed {
     .page-toc {
       display: none;
     }
 
     .main-content-wrap {
-      max-width: $content-max;
       grid-template-columns: minmax(0, 1fr);
-    }
-
-    .main-header {
-      max-width: $content-max;
     }
   }
 }
