@@ -2,7 +2,7 @@
 layout: default
 title: "第 11 章 · 模型调用与 Provider"
 nav_order: 9
-parent: "内核区"
+parent: "第二部分 · 内核区"
 permalink: /ch/11/
 ---
 

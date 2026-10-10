@@ -6,7 +6,7 @@
 
 **pi**、**dsh**（deepseek-harness）、**codex**、**CC**（Claude-Code）四个开源 Agent 项目的**代码级横向对比研究**。按 Agent 运行时的架构层次逐层深入，每层产出一篇对比分析，每篇沿同一条**七问链**推进——先界定范围，再逐维对比，最后落到可执行的设计结论（见第四节）。
 
-全文按**三区**组织：**启动区**（循环之前，第 1–2 章）、**内核区**（一轮循环及其子系统，第 3–12 章）、**外围区**（内核之外，第 13–17 章）。**章号即层码**——第 N 章就是第 N 层（`LN`）：正文跨章引用写「第 N 章」，指代架构位置写「`LN`」。
+全文按**三部分**组织：**第一部分 · 启动区**（循环之前，第 1–2 章）、**第二部分 · 内核区**（一轮循环及其子系统，第 3–12 章）、**第三部分 · 外围区**（内核之外，第 13–17 章）。**章号即层码**——第 N 章就是第 N 层（`LN`）：正文跨章引用写「第 N 章」，指代架构位置写「`LN`」。
 
 所有断言均标注 `文件:行号`，可回到源码逐条核验。
 
@@ -36,28 +36,28 @@
 
 ## 二、文档地图
 
-按**层码**从「循环之前」走到「内核之外」（层码即章号）。**表中「主题」一列即入口**——点进去就是该篇（在仓库里读则对应同号 `NN-….md` 文件）。
+按章号从「循环之前」走到「内核之外」。**表中「主题」一列即入口**——点进去就是该篇（在仓库里读则对应同号 `NN-….md` 文件）。
 
-| 章 · 层 | 主题 | 覆盖的子职责 |
+| 章 | 主题 | 覆盖的子职责 |
 |---|---|---|
-| **00** · 索引 | [总览与导航](https://justineric777.github.io/Agents-Research/overview/) | 四项目档案卡 / 模块地图 / 术语对照表 / 报告索引 / 阅读路径 / 锚点速查 |
-| **01** · L1 | [配置 · 凭据与启动引导](https://justineric777.github.io/Agents-Research/ch/01/) | 配置分层与优先级 / 配置载体与 schema / 等价来源 / 凭据来源与解析 / 登录与授权流 / 凭据存储与安全 / 启动引导序列 / 自检 · 迁移 · 项目信任 |
-| **02** · L2 | [提示词与上下文注入](https://justineric777.github.io/Agents-Research/ch/02/) | 分节建模 / 顺序与优先级 / 项目指令发现 / 环境探测 / 内容预算 / 重算与提交 / 缓存前缀 / 异常降级 |
-| **03** · L3 | [Agent 主循环](https://justineric777.github.io/Agents-Research/ch/03/) | 循环骨架 / 流式事件 / 出口判定 / 熔断 |
-| **04** · L4 | [工具调用流程](https://justineric777.github.io/Agents-Research/ch/04/) | 调度链路 / 并发模型 / 权限门 / 失败物化 / 取消 / 进程与 Shell |
-| **05** · L5 | [工具定义机制](https://justineric777.github.io/Agents-Research/ch/05/) | 定义分层 / 模型可见投影 / schema 体积治理 / 动态工具 / 程序化调用 |
-| **06** · L6 | [上下文管理与压缩](https://justineric777.github.io/Agents-Research/ch/06/) | 计量 / 触发 / 选段 / 摘要 / 安装 / 策略级联 |
-| **07** · L7 | [消息 / 事件 / Session](https://justineric777.github.io/Agents-Research/ch/07/) | 消息模型 / 事件体系 / 会话组织 / 分支与回放 |
-| **08** · L8 | [会话持久化与恢复](https://justineric777.github.io/Agents-Research/ch/08/) | 落盘协议 / 崩溃恢复 / 迁移 / 损坏处理 / 写者所有权 |
-| **09** · L9 | [任务与子 Agent](https://justineric777.github.io/Agents-Research/ch/09/) | 委派入口 / 实体建模 / 上下文继承 / 驱动模型 / 通信 / 配额 / 对等协作 |
-| **10** · L10 | [权限与沙箱](https://justineric777.github.io/Agents-Research/ch/10/) | 判定入口 / 策略表达 / 决策 / 交互与记忆 / 系统隔离 / 失败降级 |
-| **11** · L11 | [模型调用与 Provider](https://justineric777.github.io/Agents-Research/ch/11/) | 模型标识 / 清单与能力 / 请求组装 / 传输 / 事件归一 / 重试降级 / 计量与鉴权 |
-| **12** · L12 | [Hook 与扩展机制](https://justineric777.github.io/Agents-Research/ch/12/) | 扩展单位 / 挂载点 / 调度语义 / 能力面 / 发现装配 / 协议契约 / 信任降级 |
-| **13** · L13 | [MCP 与外部能力接入](https://justineric777.github.io/Agents-Research/ch/13/) | 连接生命周期 / 能力协商 / 三类原语投影 / 传输 / 鉴权 / 失败降级 |
-| **14** · L14 | [长时任务与后台作业](https://justineric777.github.io/Agents-Research/ch/14/) | 作业类型学 / 提交与登记 / 生命周期状态机 / 调度与触发 / 输出收集与回注 / 存活与持久化 / 并发配额 / 取消级联与回收 |
-| **15** · L15 | [对外接口与集成协议](https://justineric777.github.io/Agents-Research/ch/15/) | 驱动面形态 / 会话镜像与注册表 / 事件推送 / 请求协议 / 审批回流 / 承载与传输 / 握手与鉴权 / 断连与并发 |
-| **16** · L16 | [交互层与终端 UI 机制](https://justineric777.github.io/Agents-Research/ch/16/) | 帧调度与合帧 / 差量绘制与视口 / 流式增量的提交边界 / 工具行状态载体 / 中断交互与键位 / 输入侧（Vim、粘贴、附件）/ 终端能力适配 / 界面权威源 |
-| **17** · L17 | [遥测 · 追踪 · 诊断](https://justineric777.github.io/Agents-Research/ch/17/) | 采集口径与事件模型 / 开关 · 同意与采样 / 导出通道与失败处理 / 脱敏与隐私边界 / 追踪模型 / 本地日志与诊断产物 / 诊断命令与运行时自检 / 用户反馈与故障上报 |
+| **00** | [总览与导航](https://justineric777.github.io/Agents-Research/overview/) | 四项目档案卡 / 模块地图 / 术语对照表 / 报告索引 / 阅读路径 / 锚点速查 |
+| **01** | [配置 · 凭据与启动引导](https://justineric777.github.io/Agents-Research/ch/01/) | 配置分层与优先级 / 配置载体与 schema / 等价来源 / 凭据来源与解析 / 登录与授权流 / 凭据存储与安全 / 启动引导序列 / 自检 · 迁移 · 项目信任 |
+| **02** | [提示词与上下文注入](https://justineric777.github.io/Agents-Research/ch/02/) | 分节建模 / 顺序与优先级 / 项目指令发现 / 环境探测 / 内容预算 / 重算与提交 / 缓存前缀 / 异常降级 |
+| **03** | [Agent 主循环](https://justineric777.github.io/Agents-Research/ch/03/) | 循环骨架 / 流式事件 / 出口判定 / 熔断 |
+| **04** | [工具调用流程](https://justineric777.github.io/Agents-Research/ch/04/) | 调度链路 / 并发模型 / 权限门 / 失败物化 / 取消 / 进程与 Shell |
+| **05** | [工具定义机制](https://justineric777.github.io/Agents-Research/ch/05/) | 定义分层 / 模型可见投影 / schema 体积治理 / 动态工具 / 程序化调用 |
+| **06** | [上下文管理与压缩](https://justineric777.github.io/Agents-Research/ch/06/) | 计量 / 触发 / 选段 / 摘要 / 安装 / 策略级联 |
+| **07** | [消息 / 事件 / Session](https://justineric777.github.io/Agents-Research/ch/07/) | 消息模型 / 事件体系 / 会话组织 / 分支与回放 |
+| **08** | [会话持久化与恢复](https://justineric777.github.io/Agents-Research/ch/08/) | 落盘协议 / 崩溃恢复 / 迁移 / 损坏处理 / 写者所有权 |
+| **09** | [任务与子 Agent](https://justineric777.github.io/Agents-Research/ch/09/) | 委派入口 / 实体建模 / 上下文继承 / 驱动模型 / 通信 / 配额 / 对等协作 |
+| **10** | [权限与沙箱](https://justineric777.github.io/Agents-Research/ch/10/) | 判定入口 / 策略表达 / 决策 / 交互与记忆 / 系统隔离 / 失败降级 |
+| **11** | [模型调用与 Provider](https://justineric777.github.io/Agents-Research/ch/11/) | 模型标识 / 清单与能力 / 请求组装 / 传输 / 事件归一 / 重试降级 / 计量与鉴权 |
+| **12** | [Hook 与扩展机制](https://justineric777.github.io/Agents-Research/ch/12/) | 扩展单位 / 挂载点 / 调度语义 / 能力面 / 发现装配 / 协议契约 / 信任降级 |
+| **13** | [MCP 与外部能力接入](https://justineric777.github.io/Agents-Research/ch/13/) | 连接生命周期 / 能力协商 / 三类原语投影 / 传输 / 鉴权 / 失败降级 |
+| **14** | [长时任务与后台作业](https://justineric777.github.io/Agents-Research/ch/14/) | 作业类型学 / 提交与登记 / 生命周期状态机 / 调度与触发 / 输出收集与回注 / 存活与持久化 / 并发配额 / 取消级联与回收 |
+| **15** | [对外接口与集成协议](https://justineric777.github.io/Agents-Research/ch/15/) | 驱动面形态 / 会话镜像与注册表 / 事件推送 / 请求协议 / 审批回流 / 承载与传输 / 握手与鉴权 / 断连与并发 |
+| **16** | [交互层与终端 UI 机制](https://justineric777.github.io/Agents-Research/ch/16/) | 帧调度与合帧 / 差量绘制与视口 / 流式增量的提交边界 / 工具行状态载体 / 中断交互与键位 / 输入侧（Vim、粘贴、附件）/ 终端能力适配 / 界面权威源 |
+| **17** | [遥测 · 追踪 · 诊断](https://justineric777.github.io/Agents-Research/ch/17/) | 采集口径与事件模型 / 开关 · 同意与采样 / 导出通道与失败处理 / 脱敏与隐私边界 / 追踪模型 / 本地日志与诊断产物 / 诊断命令与运行时自检 / 用户反馈与故障上报 |
 
 ---
 
@@ -99,7 +99,7 @@
 ## 五、关联文档
 
 - **[总览与导航](https://justineric777.github.io/Agents-Research/overview/)**（仓库内即 `00-总览与导航.md`）—— 结构地图与索引：四项目档案卡、模块地图（架构层次 × 四项目源码入口）、核心术语对照表、报告索引、阅读路径建议、跨项目源码锚点速查。
-- **三区入口页**（站点侧栏的三个分区）：**[启动区](https://justineric777.github.io/Agents-Research/startup/)**（第 1–2 章）· **[内核区](https://justineric777.github.io/Agents-Research/core/)**（第 3–12 章）· **[外围区](https://justineric777.github.io/Agents-Research/peripheral/)**（第 13–17 章）。
+- **三个分区入口页**（站点侧栏的三个分区）：**[第一部分 · 启动区](https://justineric777.github.io/Agents-Research/startup/)**（第 1–2 章）· **[第二部分 · 内核区](https://justineric777.github.io/Agents-Research/core/)**（第 3–12 章）· **[第三部分 · 外围区](https://justineric777.github.io/Agents-Research/peripheral/)**（第 13–17 章）。
 - 本 README 只做「门面与读法」——**项目档案卡、术语表与锚点表以 `00` 为准**，避免两处维护同一份信息。
 
 ---

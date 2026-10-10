@@ -2,7 +2,7 @@
 layout: default
 title: "第 12 章 · Hook 与扩展机制"
 nav_order: 10
-parent: "内核区"
+parent: "第二部分 · 内核区"
 permalink: /ch/12/
 ---
 
