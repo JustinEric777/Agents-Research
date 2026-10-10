@@ -12,6 +12,27 @@
 // 所以凡是要随浅色/深色分岔的颜色**不要**在这里定，放到 custom.scss 里用
 // `if($color-scheme == dark, …, …)` 写。
 
+// ----------------------------------------------------------------- 正文字体族
+// 对齐参照站（`https://dsh.zsh.im/`，VitePress 1.6.4 中文站）的 `--vp-font-family-base`：
+//
+//   "Punctuation SC", "Inter", ui-sans-serif, system-ui, sans-serif, <emoji 字体…>
+//
+// 主题自带的 `$body-font-family` 是 `system-ui, -apple-system, blinkmacsystemfont,
+// "Segoe UI", roboto, "Helvetica Neue", arial, sans-serif, "Segoe UI Emoji"`。
+// 两者在中文下最终都会落到系统黑体，真正的差别只有两处：
+//   ① 西文与数字取谁（参照站优先 Inter，其次 system-ui）；本机多半没装 Inter，
+//      于是顺延到 system-ui —— 与主题原栈等效，装了则与参照站逐字一致；
+//   ② **标点从哪一款字里取**（`Punctuation SC` 的作用，见 custom.scss 里的同名 @font-face）。
+//
+// 在参照站那一串之后补上各家系统的中文字体名：显式列出比依赖通用族 `sans-serif`
+// 的隐式回落更可控（Windows 上 `sans-serif` 会先命中 Arial，再靠浏览器的缺字回落兜底）。
+$body-font-family:
+  "Punctuation SC", "Inter", ui-sans-serif, system-ui, -apple-system,
+  BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial,
+  "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC",
+  "Source Han Sans SC", "WenQuanYi Micro Hei", sans-serif,
+  "Apple Color Emoji", "Segoe UI Emoji", "Noto Color Emoji";
+
 // ----------------------------------------------------------------- 等宽字体
 // 为什么值得覆盖：文档里有 300 余行盒线字符图（`├─ │ └─`），列宽按
 // 「中文 2 列 / 西文 1 列」排。系统默认等宽的西文约 0.6em、中文 1.0em，
@@ -30,7 +51,13 @@ $mono-font-family:
 // ------------------------------------------------------------- 字号与行距
 // 正文全是中文，主题默认的 $content-line-height: 1.6 对中文偏挤
 // （中文没有 x-height 撑开，行距要比西文大一档才好读）。
+// 取值 1.75 = 16px 字号下的 28px —— 与参照站 `.vp-doc p { line-height: 28px }` 逐像素相同。
 $content-line-height: 1.75;
+
+// body 行高：主题 1.4，参照站 `body { line-height: 24px }` = 1.5。
+// 它管的是正文之外的那层（表格单元格、列表项之外的容器、页脚等）——
+// `.main-content` 自己另设 $content-line-height，所以改这里不会动正文行距。
+$body-line-height: 1.5;
 
 // 标题行距：主题 1.25，中文标题（尤其带 `——` 长副标题的章名）容易压在一起。
 $body-heading-line-height: 1.35;

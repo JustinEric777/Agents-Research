@@ -56,11 +56,13 @@
 $content-max: 64rem;
 
 $nav-w-md: 15.5rem; // md 侧栏宽（沿用主题 $nav-width-md）
-$nav-w-lg: 19rem;   // lg 侧栏宽：导航字号提到 15px 后仍不折行。
-// 依据：最宽的一条是「第 13 章 · MCP 与外部能力接入」，15px 下实测 200px；
-// 深层条目的文字可用宽度 = 侧栏 − 44px（父级 2rem + 子级 ul 的 0.75rem 缩进）
-// − 32px（右侧折叠按钮）= 228px，余量 28px。（16px 时要 212px，只剩 16px 余量，
-// 换个西文字体就可能折行，故取 15px。）
+$nav-w-lg: 19rem;   // lg 侧栏宽：导航回到 14px（对齐参照站）后仍留足余量。
+// 依据：最宽的一条是「第 13 章 · MCP 与外部能力接入」，14px 下实测自然宽 195px；
+// 深层条目的文字可用宽度 = 侧栏 304px − 12px（子级 ul 缩进）− 64px（左右各 2rem 内边距）
+// = 228px，余量 33px。（15px 时要 209px、余 19px，也不折行；回到 14px 是为了
+// 与参照站的 `.VPSidebarItem .text { font-size: 14px }` 同值，宽度不必跟着收——
+// 参照站 272px 的侧栏装的是短西文标题，本站在 272px 下只剩 196px 可用，
+// 最长的一条要 195px，贴着边，故侧栏宽保持 19rem 这处偏离。）
 
 // ---- 本页大纲（右栏，见第十一节）
 $toc-w: 13rem;  // 208px：容得下「四、逐项目实现」「6.3 触发两个入口」这类条目
@@ -156,6 +158,68 @@ $c-nav-on-bg:     if($color-scheme == dark, rgba($white, 0.055), rgba($grey-dk-3
 // 小号次要文字。对齐参照站的 `--vp-c-text-2`（它同时用在侧栏层级、大纲未选中项、
 // 分页器的「上一章 / 下一章」标签上）。本站只在章末分页器用它。
 $c-text-2:        if($color-scheme == dark, #8f97a3, $grey-dk-000);
+
+// ============================================================================
+// 零、字体：标点取字来源 + 渲染平滑（对齐参照站）
+// ============================================================================
+// 参照站（VitePress 中文站）在 `--vp-font-family-base` 的第 0 位放了一个叫
+// `Punctuation SC` 的**本地字体**，它不提供任何字形文件，只做一件事：
+// 把下面这 11 个码位从「西文字体」改绑到「系统中文字体」（PingFang / Noto / 雅黑）：
+//
+//   U+201C “   U+201D ”   U+2018 ‘   U+2019 ’   U+2E3A ⸺
+//   U+2014 —   U+2013 –   U+2026 …   U+00B7 ·   U+007E ~   U+002F /
+//
+// 为什么需要它：字体链里排在最前的是西文字体（Inter / SF Pro / Segoe UI），
+// 而它们**也包含**上面这些码位。于是中文正文里的 `——`（两种破折号）、`·` 会按
+// **西文字形**绘制，与相邻汉字的中文度量对不齐——最直观的就是章标题里的
+// 「第 N 章：主题 —— 副标题」。本系列的章题、模块地图、侧栏条目里 `——` 与 `·`
+// 出现得极密，这一条能直接改善观感。
+//
+// 用法上是「本地优先、只作用于这 11 个码位」：`local()` 指系统字体，
+// 命中就用、命不中（如 Linux 上没有 PingFang / 雅黑）就顺延到下一个字体族，
+// **不会发起任何网络请求**，也不会让其它字符换字体（unicode-range 把它锁死了）。
+// 四档字重与参照站逐字一致，标题（600）里的 `——` 才会取到对应字重而不是合成的粗体。
+@font-face {
+  font-family: "Punctuation SC";
+  font-weight: 400;
+  src: local("PingFang SC Regular"), local("Noto Sans CJK SC"), local("Microsoft YaHei");
+  unicode-range: U+201C, U+201D, U+2018, U+2019, U+2E3A, U+2014, U+2013, U+2026, U+00B7, U+007E,
+    U+002F;
+}
+
+@font-face {
+  font-family: "Punctuation SC";
+  font-weight: 500;
+  src: local("PingFang SC Medium"), local("Noto Sans CJK SC"), local("Microsoft YaHei");
+  unicode-range: U+201C, U+201D, U+2018, U+2019, U+2E3A, U+2014, U+2013, U+2026, U+00B7, U+007E,
+    U+002F;
+}
+
+@font-face {
+  font-family: "Punctuation SC";
+  font-weight: 600;
+  src: local("PingFang SC Semibold"), local("Noto Sans CJK SC Bold"), local("Microsoft YaHei Bold");
+  unicode-range: U+201C, U+201D, U+2018, U+2019, U+2E3A, U+2014, U+2013, U+2026, U+00B7, U+007E,
+    U+002F;
+}
+
+@font-face {
+  font-family: "Punctuation SC";
+  font-weight: 700;
+  src: local("PingFang SC Semibold"), local("Noto Sans CJK SC Bold"), local("Microsoft YaHei Bold");
+  unicode-range: U+201C, U+201D, U+2018, U+2019, U+2E3A, U+2014, U+2013, U+2026, U+00B7, U+007E,
+    U+002F;
+}
+
+// 渲染平滑：参照站 `body { text-rendering: optimizeLegibility;
+// -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale }` 三条照搬。
+// 作用是把 macOS 上的次像素抗锯齿（subpixel，笔画偏肥、深色底上会发晕）
+// 换成灰度抗锯齿（antialiased），中文在 14–16px 这一档会明显更清爽、笔画更分明。
+body {
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
 
 // ============================================================================
 // 一、自适应布局
@@ -267,10 +331,15 @@ $c-text-2:        if($color-scheme == dark, #8f97a3, $grey-dk-000);
 // 二、等宽字体
 // ============================================================================
 // 字体族在 `custom/setup.scss` 里覆盖 `$mono-font-family`（单一出处）。
-// 这里补两件主题没做的事：
+// 这里补三件主题没做的事：
 //   ① 覆盖面——主题只在 `code` 上设字体，`pre` / `kbd` / `samp` 未覆盖，
 //      而盒线图是裸 `<pre>`（无 `language-*` 标签）时也会出现；
-//   ② 禁用连字——`->`、`=>` 连字会改变字符数，直接破坏盒线图的列对齐。
+//   ② 禁用连字——`->`、`=>` 连字会改变字符数，直接破坏盒线图的列对齐；
+//   ③ **把 `text-rendering` 退回 auto**——上面 `body` 那三条（对齐参照站）里的
+//      `optimizeLegibility` 会打开字距调整（kern）与可选连字，它对正文有益，
+//      对盒线字符图却是隐患：`├ ─ │ ┌` 一旦被某个等宽字体做了 kerning，
+//      整张图的列宽就会累积偏移（本系列 300 余行盒线图，肉眼极难发现）。
+//      `font-feature-settings` 压得住连字，压不住 kerning，只能整块退回 auto。
 // 本文件编译在整份 CSS 的最末尾（实测 99% 处），同特异性下后者胜，无需 !important。
 pre,
 code,
@@ -281,16 +350,29 @@ samp,
   font-family: $mono-font-family;
   font-variant-ligatures: none;
   font-feature-settings: "liga" 0, "calt" 0;
+  text-rendering: auto;
 }
 
 .main-content {
-  // 行内代码：主题 0.75em（16px 正文里只有 12px），中文文档里偏小
+  // 行内代码：主题 0.75em（16px 正文里只有 12px），中文文档里偏小。
+  // 0.875em = 14px，与参照站的 `--vp-code-font-size: .875em` 同值。
   code {
     font-size: 0.875em;
   }
 
+  // 行内代码的**左右**内边距：主题是 `padding: 0.2em 0.15em`（≈3px / 2px），
+  // 左右几乎贴住文字；而一行里常挤着五六个 code 片段（全系列实测 5469 处），
+  // 整行看着毛躁。参照站 `.vp-doc :not(pre)>code { padding: 3px 6px }`，
+  // 其 code 字号同为 14px ⇒ 0.21em / 0.43em。这里只放宽左右（上下不动，
+  // 免得撑高行框、把正文行距从 28px 顶开）。
+  :not(pre) > code {
+    padding-right: 0.4em;
+    padding-left: 0.4em;
+  }
+
   // 块内代码：12px → 13px。盒线图会因此宽 8%，但源码摘录占了 900 多个块，
-  // 可读性更值。
+  // 可读性更值。（参照站同位置用 14px；本站盒线图密度高，13px 是
+  // 「源码可读」与「盒线图不横滚」的交点，实测 640px 起 191 个块全部不横滚。）
   pre code {
     font-size: 0.8125rem;
   }
@@ -315,6 +397,14 @@ div.highlighter-rouge > .highlight,
 figure.highlight > pre {
   padding: 0.875rem 1rem;
   border-color: $c-code-border;
+}
+
+// 代码块与下一段之间：主题给顶层容器 `margin-bottom: $sp-3`(12px)，
+// 而段落间距是 16px，代码块因此显得「贴」在下一段上。参照站
+// `div[class*=language-] { margin: 16px 0 }`。这里补齐。
+.main-content div.highlighter-rouge,
+.main-content figure.highlight {
+  margin-bottom: 1rem;
 }
 
 // 盒线图与源码摘录常常超出正文宽度：块内横向滚动，而不是撑破版面。
@@ -456,12 +546,24 @@ pre > code.language-mermaid {
 }
 
 // ============================================================================
-// 七、标题 · 分隔线与正文链接
+// 七、标题 · 分隔线 · 正文节奏与正文链接
 // ============================================================================
+// 字号阶梯与参照站**逐像素相同**（实测两边 computedStyle 完全一致）：
+//
+//          h1        h2        h3        h4
+//   参照站 32/40     24/32     20/28     18/24     （px，字号/行高）
+//   本站   32/40     24/32     20/28     18/24
+//
+// 字重：参照站 `.vp-doc h1..h6 { font-weight: 600 }` 六级一律 600；本站原来把 h1
+// 单独降到 400（当时理由是「中文在这个字号上用 300 偏虚」），但 h2–h4 都是 600，
+// h1 反倒比章内小标题还轻 —— 层级读起来是反的。本轮对齐到 600。
+//
+// 间距：参照站是「标题自带 border-top」，所以它的 h2 是 `margin: 48px 0 16px;
+// padding-top: 24px` —— **分节线离上一段 48px、离标题文字 24px**。
+// 本站的分节线是正文里的 `---`（144 个 h2 里 132 个紧跟一条），所以把这两段距离
+// 搬到 `hr` 与 `h2` 上：`hr { margin: 3rem 0 1.5rem }` + `h2 { margin-top: 1.5rem }`，
+// 相邻外边距合并后正好是「线上 48px / 线下 24px」，与参照站同一条节奏。
 .main-content {
-  // 标题阶梯按参照站（VitePress）的比例定：32 / 24 / 20 / 18px，行高 1.25–1.4，
-  // 负字距。负字距对中文同样成立——汉字在 20px 以上时默认字距偏松，收
-  // 0.01–0.02em 后整段更像一个标题块。
   // 字号一律带 `!important`：主题对 h1–h4 都写了 `font-size: … !important`
   // （h1 2.25rem / h2 1.5rem / h3 1.125rem / h4 0.75rem），不带就压不住。
   h1,
@@ -473,12 +575,14 @@ pre > code.language-mermaid {
     font-size: 2rem !important; // 主题 2.25rem(36px) → 32px
     line-height: 1.25;
     letter-spacing: -0.02em;
-    // 主题给 300；中文标题在这个字号上用 300 偏虚，400 更稳
-    font-weight: 400;
+    font-weight: 600; // 参照站 h1–h6 一律 600
   }
 
+  // 下面两个顶部边距是**配合** `hr` 用的（见本节末的说明），不是独立取值：
+  // 132 条分节线后的 h2 由 `hr` 的 1.5rem 下边距托住，h2 自己那 1.5rem 只在
+  // 另外 10 条「没有 `---` 的 h2」（如紧跟源码摘录的「三、概念对齐表」）上单独生效。
   h2 {
-    margin-top: 2.25rem;
+    margin-top: 1.5rem;
     margin-bottom: 1rem;
     font-size: 1.5rem !important; // 24px（与主题同值，显式写以固定整条阶梯）
     line-height: 1.33;
@@ -487,8 +591,8 @@ pre > code.language-mermaid {
   }
 
   h3 {
-    margin-top: 1.75rem;
-    margin-bottom: 0.5rem;
+    margin-top: 2rem; // 28px → 32px，对齐参照站 `.vp-doc h3 { margin: 32px 0 0 }`
+    margin-bottom: 1rem; // 主题下一段的 margin-top 已被归零，间距全靠这一条
     font-size: 1.25rem !important; // 主题 1.125rem(18px) → 20px
     line-height: 1.4;
     letter-spacing: -0.01em;
@@ -500,7 +604,7 @@ pre > code.language-mermaid {
   // 只剩「又小又散」。这里按阶梯还原成 1.125rem(18px) 的加粗小标题。
   h4 {
     margin-top: 1.5rem;
-    margin-bottom: 0.5rem;
+    margin-bottom: 1rem;
     font-size: 1.125rem !important;
     line-height: 1.33;
     font-weight: 600;
@@ -523,13 +627,28 @@ pre > code.language-mermaid {
 // `---` 在每个小节前出现一次（144 个 h2 里有 132 个紧跟在一条 `---` 之后），
 // 是全文的**分节线**；主题用的 $border-color 在白底上几乎看不见（#eeebee），
 // 分节感因此消失。参照站的分节线是 h2 自带的 `border-top`——我们这里 `---`
-// 已经承担了这个角色，所以**不给 h2 再加 border-top**（会变成双线），
-// 只把这条线的可见度与上下留白抬一档。
+// 已经承担了这个角色，所以**不给 h2 再加 border-top**（会变成双线）。
+//
+// 上下留白按参照站的比例分配（它是 `h2 { margin: 48px 0 16px; padding-top: 24px }`）：
+// **线离上一段 48px、离标题文字 24px**。本站这条线在中间，所以要靠与 `h2` 的
+// 相邻外边距合并来凑：`hr` 上 3rem(48px)、下 1.5rem；`h2` 上边距同为 1.5rem，
+// 合并后仍是 24px（即使主题那条 `hr + * { margin-top: 0 }` 生效，结果也一样）。
 .main-content hr {
   height: 1px;
-  margin: 2.25rem 0;
+  margin: 3rem 0 1.5rem;
   background-color: $c-hairline;
   border: 0;
+}
+
+// ---- 正文节奏：列表的上边距 ----------------------------------------------
+// 主题 `content.scss` 把 `ol, ul, dl, pre, address, blockquote, .table-wrapper`
+// 的上边距一律压到 `0.5em`(8px)。列表段前只隔 8px、段后却是 16px，读起来会
+// 「粘」在上一段上。参照站 `.vp-doc ul, ol { margin: 16px 0 }`，与段落间距同值。
+// 只补 `ul / ol`：`pre` 与 `blockquote` 各有自己的处理（见第三、六节），
+// `.table-wrapper` 实测已是 16px。
+.main-content ul,
+.main-content ol {
+  margin-top: 1em;
 }
 
 // ---- 正文链接：默认态就要「看得出是链接」 ----------------------------------
@@ -616,11 +735,15 @@ html[data-theme="dark"] .theme-toggle {
 // ============================================================================
 // 字号：主题在 ≥800px 先按 fs-3 压到 0.75rem，再被 fs-3 自己的 sm 分支抬回
 // 0.875rem（14px）——**实测编译产物里最终生效的是 14px，且带 `!important`**，
-// 所以覆盖必须同用 `!important`（同特异性 + 后出现者胜）。中文界面 12–14px
-// 的导航偏小，这里统一到 15px。
+// 所以覆盖必须同用 `!important`（同特异性 + 后出现者胜）。
+// 本站一度抬到 15px（理由是「中文界面 12–14px 的导航偏小」），本轮**回到 14px**
+// 对齐参照站——它的 `.VPSidebarItem .text { font-size: 14px; line-height: 24px }`
+// 与本主题的 14px/24px 完全同值，条目行框也都是 32px，不必再自己加一档。
+// 放宽的余量由侧栏宽度承担（lg 19rem）：最长的一条「第 13 章 · MCP 与外部能力接入」
+// 实测 14px 下自然宽 195px，可用 228px，余 33px，不会折行。
 .nav-list .nav-list-item {
   @include mq(md) {
-    font-size: 0.9375rem !important;
+    font-size: 0.875rem !important;
   }
 }
 
@@ -736,7 +859,7 @@ html[data-theme="dark"] .theme-toggle {
   padding: 1.5rem 1rem;
   overflow-y: auto;
   // 内容比可视区高时照样能滚，但**不画出滚动条**。
-  // 一页 30+ 条大纲必然超出（实测第 13 章 37 条 × 32.5px + 标题 ≈ 1236px，
+  // 一页 30+ 条大纲必然超出（实测第 13 章 37 条 × 32px + 标题 32px ≈ 1216px，
   // 而常驻档的可视高只有 calc(100vh − 顶栏 − 2rem) ≈ 908px），于是这一栏右边
   // 会多出一根长长的滚动条——在本来就只有「细轨 + 文字」的版面上非常扎眼。
   // 做法与参照站一致（`.aside-container { scrollbar-width: none }` +
@@ -776,15 +899,17 @@ html.toc-open .page-toc {
   justify-content: space-between;
 }
 
-// 参照站 `.outline-title { font-size: 14px; font-weight: 600; line-height: 32px }`
-// ——13px 是我们自己压的，与正文的 16px 差得太多，标题看着像脚注。
+// 参照站 `.outline-title { line-height: 32px; font-size: 14px; font-weight: 600 }`
+// ——13px 是我们自己压的，与正文的 16px 差得太多，标题看着像脚注；字号已对齐到 14px。
+// 行高同步取 32px（原来是自己定的 1.5 = 21px）：参照站这一栏里**标题与每个条目
+// 的行框都是 32px**，标题若矮一截，第一组条目会往上挤、整栏的节奏是断的。
+// 原来还加过 `letter-spacing: 0.02em`，参照站没有这一笔——四个字的标题被撑开 1.1px
+// 反而与下面的条目不成一体，去掉。
 .page-toc-title {
   margin: 0;
   font-size: 0.875rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
-  // 参照站的 outline-title 不设 color，继承正文 `--vp-c-text-1`——即**最亮**的一档，
-  // 比下面各条目亮。原来取 `$grey-dk-000`(#959396)，那是个暖灰、且与条目同档。
+  line-height: 2rem;
   color: $body-heading-color;
 }
 
@@ -839,15 +964,18 @@ html.toc-open .page-toc {
 
   > .toc-link {
     display: block;
-    // 行距：0.25rem padding × 2 + 14px × 1.75 = 32.5px ≈ 参照站的 32px。
-    // 比原来的 0.35rem 收一档，条目更紧凑，一屏能多看两三条。
+    // 行距：4px padding × 2 + 24px 行高 = **32px**，与参照站 `.outline-link`
+    // 的 `line-height: 32px`（无内边距、整框 32px）逐像素同高。
+    // 原先是 `line-height: 1.75`(24.5px) + 同款内边距 = 32.5px——差 0.5px，
+    // 一页 37 条会累积成 18px 的偏差，端点也对不齐。改成整数后条目高度可整除，
+    // 大纲的「通轨 + 滑块」与参照站同轨同距。
     padding: 0.25rem 0.5rem;
     // 主题给 `a:not([class])` 加了下划线；这里的链接带 class，天然不受影响。
     // ⚠ 这个 `overflow: hidden` 是文字省略号（text-overflow: ellipsis）的前提，
     //   不能去掉——但**它会把超出本盒的伪元素一起裁掉**，所以当前项的滑块
     //   不能挂在链接上（宁可给 li 加 `.current`，见 `&.current::before`）。
     overflow: hidden;
-    line-height: 1.75;
+    line-height: 1.5rem;
     color: $c-toc-link;
     white-space: nowrap;
     text-overflow: ellipsis;
