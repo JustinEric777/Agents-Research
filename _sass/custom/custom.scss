@@ -1117,7 +1117,14 @@ html.toc-open .page-toc {
 // README.md 同时是仓库门面与站点首页（index.md 用 include_relative 复用）。
 // 那行「在线阅读」是给仓库访客用的入口，在站点首页里指向自己，属于冗余，
 // 这里只隐藏站点副本，仓库里的 Markdown 不受影响。
-.main-content > .online-reading {
+//
+// ⚠ 必须用**后代**选择器，不能用 `>`。主题的正文外壳是
+// `#main-content.main-content > main > (h1 + p.online-reading)`——
+// 那个 `<p>` 的父节点是 `<main>`，不是 `.main-content`。
+// 原来写成 `.main-content > .online-reading`（直接子）**一直匹配不到**，
+// 于是首页顶部长期挂着一行指向自己的蓝色「在线阅读」。
+// （同类判断一律先看 DOM 层级：`#main-content` 的直接子节点是 `<main>` 与分页器。）
+.main-content .online-reading {
   display: none;
 }
 
