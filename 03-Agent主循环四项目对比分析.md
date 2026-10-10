@@ -8,7 +8,11 @@ permalink: /ch/03/
 
 # 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
-本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。四个项目在这一层的骨架几乎同源——都是「外层续接 + 内层工具」的双层结构——但**「谁才是状态的主人」给出了四个完全不同的答案**：内存闭包、append-only 日志、`ContextManager`、显式传递的 `State` 对象。这个分歧决定了后面每一层的设计走向。
+**本章回答什么** —— 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。
+
+**四家分歧在哪** —— 四个项目在这一层的骨架几乎同源——都是「外层续接 + 内层工具」的双层结构——但**「谁才是状态的主人」给出了四个完全不同的答案**：内存闭包、append-only 日志、`ContextManager`、显式传递的 `State` 对象。
+
+**为什么会这样** —— 这个分歧决定了后面每一层的设计走向。
 
 > **本层定位**：L3，Agent 运行时的心脏。回答「谁在驱动模型 → 工具 → 决策这个循环、它何时停、停在哪里」。
 >
@@ -26,10 +30,31 @@ permalink: /ch/03/
 
 ## 一、核心结论速览
 
-1. **骨架同源，差异在「谁是状态的主人」**：四家都是「外层续接循环 + 内层工具循环」，但 pi 把状态放在内存闭包里、dsh 放在 append-only 日志里、codex 放在 `ContextManager` + rollout 里、CC 放在显式传递的 `State` 对象里。
-2. **停止判定四家完全一致**：「本轮没有工具调用即完成」是唯一主出口；差异全在**次要出口的丰富度**——pi 约 3 个、dsh 4 个、codex 6 个、CC 11+ 个。
-3. **压缩与循环的耦合度呈阶梯**：pi 完全解耦（靠 `prepareNextTurn` 回调外挂）→ dsh 半解耦（`agent/pre-step` + `agent/request-error` 两路事件驱动）→ codex 深度耦合（`run_turn` 内直接调 pre/mid/post 三阶段压缩）→ CC 最耦合（每轮开头串起 snip → microcompact → contextCollapse → autocompact 四条流水线）。
+1. **骨架同源，差异在「谁是状态的主人」**
+
+    - **pi** —— 把状态放在内存闭包里
+    - **dsh** —— 放在 append-only 日志里
+    - **codex** —— 放在 `ContextManager` + rollout 里
+    - **CC** —— 放在显式传递的 `State` 对象里
+    - **小结** —— 四家都是「外层续接循环 + 内层工具循环」
+
+2. **停止判定四家完全一致**
+
+    - **pi** —— 约 3 个
+    - **dsh** —— 4 个
+    - **codex** —— 6 个
+    - **CC** —— 11+ 个
+    - **小结** —— 「本轮没有工具调用即完成」是唯一主出口；差异全在**次要出口的丰富度**
+
+3. **压缩与循环的耦合度呈阶梯**
+
+    - **pi** —— 完全解耦（靠 `prepareNextTurn` 回调外挂）
+    - **dsh** —— 半解耦（`agent/pre-step` + `agent/request-error` 两路事件驱动）
+    - **codex** —— 深度耦合（`run_turn` 内直接调 pre/mid/post 三阶段压缩）
+    - **CC** —— 最耦合（每轮开头串起 snip → microcompact → contextCollapse → autocompact 四条流水线）
+
 4. **只有 dsh 与 CC 把「这轮是被截断的」当作一等状态**：dsh 的 max-tokens **粘性**（`:331-336`）保证后续正常 step 不降级 turn 结果；CC 用 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`query.ts:164`）做恢复式续写。
+
 5. **防死循环四家各有招式，唯 CC 的阈值有生产数据背书**：`MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`）注释里记着「1,279 个会话连续失败 50+ 次、全站每天浪费约 25 万次 API 调用」——全系列唯一给出量化依据的熔断阈值。
 
 ---

@@ -8,9 +8,11 @@ permalink: /ch/13/
 
 # 第 13 章：MCP 与外部能力接入 —— 能力除了内建的，还从哪来
 
-本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。读完本章你能得到三样东西：四家在这一层上的形态谱（含一家明确不做的立场）、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
+**本章回答什么** —— 本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。
 
-四家最大的分歧不在「怎么接」，而在**接不接、接多重**：pi 零实现并在文档里正面拒绝，dsh 用约 1,426 行实现配 3,800 行一致性测试，CC 用 16,250 行覆盖 8 种传输与 7 种配置作用域，codex 用两个 crate 共 59,175 行自建 OAuth 与企业授权——四家的投入跨越两个数量级。这个跨度本身就是结论：**MCP 不是一个「要不要支持」的功能开关，而是一次关于「内核该多小」的架构表态**。
+**四家分歧在哪** —— 四家最大的分歧不在「怎么接」，而在**接不接、接多重**：pi 零实现并在文档里正面拒绝，dsh 用约 1,426 行实现配 3,800 行一致性测试，CC 用 16,250 行覆盖 8 种传输与 7 种配置作用域，codex 用两个 crate 共 59,175 行自建 OAuth 与企业授权——四家的投入跨越两个数量级。这个跨度本身就是结论：**MCP 不是一个「要不要支持」的功能开关，而是一次关于「内核该多小」的架构表态**。
+
+**读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱（含一家明确不做的立场）、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
 > **本层定位**：L13，外围区的第一站，也是离内核最近的一层。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
@@ -32,11 +34,30 @@ permalink: /ch/13/
 
 ## 一、核心结论速览
 
-1. **这一层最大的分歧是「做不做」，不是「怎么做」**：pi 的实现为 0 行，`README.md:537` 直书 `No MCP.` 并给出理由链接，`docs/usage.md:310` 声明「有意不内置」；其余三家的实现体量跨两个数量级——dsh 1,426 行、CC 16,250 行、codex 59,175 行。[代码]
+1. **这一层最大的分歧是「做不做」，不是「怎么做」** [代码]
+
+    - **pi** —— 实现为 0 行，`README.md:537` 直书 `No MCP.` 并给出理由链接，`docs/usage.md:310` 声明「有意不内置」
+    - **dsh** —— 1,426 行
+    - **codex** —— 59,175 行
+    - **CC** —— 16,250 行
+    - **小结** —— 其余三家的实现体量跨两个数量级
+
 2. **四家都把外部工具收进同一条调度链，但「同一」的成色不同**：codex 与 dsh 是**结构性同一**（MCP 工具经既有的工具注册表与审批动作类型进入，`mcp_tool_exposure.rs:142`、`tools.ts:150`），CC 是**规则层同一**（靠 `mcpInfo` 让 allow / deny / ask 三类规则对 MCP 等价生效，`permissions.ts:238-269`），pi 无此层。[代码]
-3. **命名空间前缀四家形态一致，上限与碰撞策略完全不同**：都产出 `mcp__<server>__<tool>`；长度上限 codex 128（`tools.rs:226`）、dsh 64（`tools.ts:48`），CC 不设名字上限、只把描述截到 2048（`client.ts:218`）；碰撞时 codex 追加 12 位哈希续试，dsh **整代回滚**（`tools.ts:146-160`），CC 在 skip-prefix 模式下允许 MCP 工具覆写内建名（`client.ts:1760-1773`）。[代码]
+
+3. **命名空间前缀四家形态一致，上限与碰撞策略完全不同** [代码]
+
+    - **dsh** —— 长度上限 64（`tools.ts:48`）；碰撞时**整代回滚**（`tools.ts:146-160`）
+    - **codex** —— 长度上限 128（`tools.rs:226`）；碰撞时追加 12 位哈希续试
+    - **CC** —— 不设名字上限、只把描述截到 2048（`client.ts:218`）；碰撞时在 skip-prefix 模式下允许 MCP 工具覆写内建名（`client.ts:1760-1773`）
+    - **小结** —— 都产出 `mcp__<server>__<tool>`
+
 4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth（codex 落 keyring 并回退文件，CC 落 keychain 并回退 0600 明文），且各自把「企业授权」做成独立协议——codex 的 EMA（`mcp_ema.rs:29`）与 CC 的 XAA（`xaa.ts:1-17`）；dsh 完全没有 OAuth，只有静态 `env` / `headers` 注入；pi 无此层。[代码]
-5. **「外部能力不可用不应拖垮内核」是三家共识**：codex 默认把启动失败降级成事件、只有显式 `required = true` 才阻断（`required.rs:15`），dsh 默认 `failOnStartupError: false`（`index.ts:128`），CC 把失败收敛为 `failed` 状态并清空该 server 的工具表。[代码][注释]
+
+5. **「外部能力不可用不应拖垮内核」是三家共识** [代码][注释]
+
+    - **dsh** —— 默认 `failOnStartupError: false`（`index.ts:128`）
+    - **codex** —— 默认把启动失败降级成事件、只有显式 `required = true` 才阻断（`required.rs:15`）
+    - **CC** —— 把失败收敛为 `failed` 状态并清空该 server 的工具表
 
 ---
 
@@ -417,7 +438,8 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 - **SDK-managed spawns remain outside** — a transport that owns its internal spawn (the SDK client, MCP) cannot route that call through this service; it can still import `scrubbedParentEnv` so environment policy stays single-sourced.
 ```
 
-**「共享擦洗定义但不共享 spawn 路径」是一个精确的折中**：凭据形态的环境变量（`SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i`，`packages/subprocess/subprocess/src/index.ts:47`）不会泄漏给第三方 server，但 MCP 子进程也就不受 dsh 的进程组、超时强杀、输出限额那一全套管束。第 4 章已经记下 dsh 是四家里少数把「父死子必死」做成契约的实现（`linux-scope.ts:115` 的 systemd scope）——**这条契约不适用于 MCP server**，这是本章要补的一处交叉口径。
+**「共享擦洗定义但不共享 spawn 路径」是一个精确的折中**：凭据形态的环境变量（`SENSITIVE_ENV_PATTERN = /KEY|PASSWORD|SECRET|TOKEN/i`，`packages/subprocess/subprocess/src/index.ts:47`）不会泄漏给第三方 server，但 MCP 子进程也就不受 dsh 的进程组、超时强杀、输出限额那一全套管束。
+第 4 章已经记下 dsh 是四家里少数把「父死子必死」做成契约的实现（`linux-scope.ts:115` 的 systemd scope）——**这条契约不适用于 MCP server**，这是本章要补的一处交叉口径。
 
 #### 4.2.3 握手与能力协商：显式交权
 
@@ -1732,7 +1754,9 @@ elicitation 的链路比其他三家多一个环节：**连接期先注册一个
 - 响应之后还有 `runElicitationResultHooks`（`elicitationHandler.ts:264`）可以改写或阻断；
 - URL 模式的完成通知由 `ElicitationCompleteNotificationSchema` 处理（`elicitationHandler.ts:175` 起的 `setNotificationHandler`）。
 
-resources 与 prompts 都支持，但两者的处理方式不同：resources 通过两个工具暴露（`ListMcpResourcesTool` / `ReadMcpResourceTool`，且只在首个支持 resources 的 server 上挂一次，`client.ts:2360-2364`），prompts 则被转成 Command（`source: 'mcp'`，`client.ts:2054-2096`）。**不支持 `resources/subscribe`**——能力日志里会读 `hasResourceSubscribe`（`client.ts:1180`、`:1185`），但没有任何订阅调用，全仓搜 `resources/subscribe` 命中 0。
+resources 与 prompts 都支持，但两者的处理方式不同：resources 通过两个工具暴露（`ListMcpResourcesTool` / `ReadMcpResourceTool`，且只在首个支持 resources 的 server 上挂一次，`client.ts:2360-2364`），prompts 则被转成 Command（`source: 'mcp'`，`client.ts:2054-2096`）。
+
+**不支持 `resources/subscribe`**——能力日志里会读 `hasResourceSubscribe`（`client.ts:1180`、`:1185`），但没有任何订阅调用，全仓搜 `resources/subscribe` 命中 0。
 
 server 日志通知也没有处理器：`notifications/message` 在 `src/services/mcp/` 下命中 0。也就是说 **CC 不从 server 侧接收结构化日志**，与 codex 的 `logging_client_handler.rs` 形成对比。
 

@@ -14,12 +14,14 @@
 
 ## 一、研究对象
 
-| 代号 | 语言 | 本地路径 | 一句话定位 |
-|---|---|---|---|
-| **pi** | TypeScript | `../pi` | 面向 session 树与扩展层的 agent harness |
-| **dsh** | TypeScript | `../deepseek-harness` | 事件溯源 + 可审计会话的运行时 |
-| **codex** | Rust | `../codex` | provider 原生协议 + 强沙箱的 CLI agent |
-| **CC** | TypeScript | `../Claude-Code` | 成本治理与任务化最强的产品化 agent |
+| 代号 | 语言 | 本地路径 | 分析版本 | 一句话定位 |
+|---|---|---|---|---|
+| **pi** | TypeScript | `../pi` | `v0.87.0` +5 提交 | 面向 session 树与扩展层的 agent harness |
+| **dsh** | TypeScript | `../deepseek-harness` | `v0.1.7-alpha.1` | 事件溯源 + 可审计会话的运行时 |
+| **codex** | Rust | `../codex` | `v0.157.0-alpha.11` 同期 | provider 原生协议 + 强沙箱的 CLI agent |
+| **CC** | TypeScript | `../Claude-Code` | 无上游版本号 | 成本治理与任务化最强的产品化 agent |
+
+**「分析版本」是什么**：本系列的每一处 `文件:行号` 都指向**一份固定的 commit 快照**，不是「最新版」——上游改动会让行号漂移。pi / dsh / codex 三份快照取自官方仓库的 `main`，日期统一为 **2026-09-22**：pi 的 HEAD 比 `v0.87.0` 多 5 个提交（`v0.87.1` 尚未包含它），codex 的 release tag 与该 commit 不在同一条历史线上，故取其**同日**的 `rust-v0.157.0-alpha.11` 作参照。CC 那一列写不出上游版本号——它是从 npm 包 source map 还原的源码树，仓库自报 `999.0.0-restored`。逐条复核的命令与各项目的快照 commit 见 [`00` 第一节](https://justineric777.github.io/Agents-Research/overview/#一四项目档案卡)。
 
 **证据等级约定**（贯穿全系列）：
 

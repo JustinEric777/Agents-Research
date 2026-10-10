@@ -8,7 +8,11 @@ permalink: /ch/07/
 
 # 第 7 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
 
-本章是 L3–L6 全部设计差异的**根源层**：一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建。四个项目在这里给出了四种互不兼容的世界观——**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。不先读懂这一层，前面几章的很多结论都会缺根因。
+**本章回答什么** —— 一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建；这是 L3–L6 全部设计差异的**根源层**。
+
+**四家分歧在哪** —— 四个项目在这里给出了四种互不兼容的世界观：**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。
+
+**读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。回答「一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建」。
 >
@@ -28,10 +32,19 @@ permalink: /ch/07/
 
 ## 一、核心结论速览
 
-1. **四种世界观**：pi 是**可分支文档树**（Entry 是树节点，Branch 是游标）；dsh 是**可审计事件流**（append-only 日志为唯一事实源，消息从事件 derive）；codex 是**provider 原生 item 数组**（`ResponseItem` 直出 API，零转换）；CC 是**带父指针的消息 DAG**（`uuid` + `parentUuid`，写入时线性、读取时从 leaf 回溯）。
+1. **四种世界观**
+
+    - **pi** —— 是**可分支文档树**（Entry 是树节点，Branch 是游标）
+    - **dsh** —— 是**可审计事件流**（append-only 日志为唯一事实源，消息从事件 derive）
+    - **codex** —— 是**provider 原生 item 数组**（`ResponseItem` 直出 API，零转换）
+    - **CC** —— 是**带父指针的消息 DAG**（`uuid` + `parentUuid`，写入时线性、读取时从 leaf 回溯）
+
 2. **只有 dsh 有独立的「事实源 vs 视图」分离**：`surfaceOp: 'replace'` 让模型可见序列可被替换（压缩用），而日志永远保留被替换前的全部事件。pi/codex/CC 都是「历史即事实」。
+
 3. **只有 dsh 与 CC 把「不是模型可见消息」的记录也结构化保留**：dsh 的 `assistant/attempt`（失败的模型尝试）、`request/header`（log-only 事件）；CC 的 `ProgressMessage`/`HookResultMessage`/`TombstoneMessage`（判别联合的独立成员，而不是塞进某条消息的字段）。
+
 4. **CC 的 `TombstoneMessage`（墓碑）是四家中唯一的「就地删除标记」**：transcript 是 append-only 且有多消费者（UI/磁盘/SDK），删除通过墓碑广播，磁盘侧再按 UUID 做 truncate。
+
 5. **最严的边界守卫是 dsh 的 `ignorable`**（`session/types.ts:511`）：未知事件类型若无 `ignorable: true` 标记，读取方**必须拒绝重建**——「宁可误拒（不便），也不静默续上一个被掏空的会话（灾难）」（源码注释）。
 
 ---
@@ -362,7 +375,9 @@ export function deriveUUID(parentUUID: UUID, index: number): UUID {
 }
 ```
 
-**写入时线性、读取时 DAG**：`insertMessageChain`（`sessionStorage.ts:993-1069`）逐条推进 `parentUuid`；**compact boundary 特殊处理** `parentUuid: null, logicalParentUuid: <前一条>`（`:1040-1041`），tool_result 用 `sourceToolAssistantUUID` 覆盖父指针（`:1031-1037`）。读取用 `buildConversationChain`（`:2069-2094`）从 leaf 回溯并 reverse，**检测环**（`:2077-2085`）。
+**写入时线性、读取时 DAG**：`insertMessageChain`（`sessionStorage.ts:993-1069`）逐条推进 `parentUuid`；**compact boundary 特殊处理** `parentUuid: null, logicalParentUuid: <前一条>`（`:1040-1041`），tool_result 用 `sourceToolAssistantUUID` 覆盖父指针（`:1031-1037`）。
+
+读取用 `buildConversationChain`（`:2069-2094`）从 leaf 回溯并 reverse，**检测环**（`:2077-2085`）。
 
 链实际是 DAG（并行 tool_use 会分叉），有专门的 `recoverOrphanedParallelToolResults`（`:2118`）修复分叉。
 

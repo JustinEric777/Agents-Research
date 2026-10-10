@@ -8,7 +8,11 @@ permalink: /ch/12/
 
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
-前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。四家的扩展体系挂在完全不同的层次上：pi 在内核留 11 个回调、在外壳给 36 个事件；dsh 只有一种扩展单位，但配了 5 种调度模式；codex 同时开了**进程外**与**进程内**两条互不相通的通道；CC 则并置了六层能力面。读完能看清一个判断标准——**扩展点的价值不在数量，而在「它能改写什么、以及改写之后谁负责重新校验」**。
+**本章回答什么** —— 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。
+
+**四家分歧在哪** —— 四家的扩展体系挂在完全不同的层次上：pi 在内核留 11 个回调、在外壳给 36 个事件；dsh 只有一种扩展单位，但配了 5 种调度模式；codex 同时开了**进程外**与**进程内**两条互不相通的通道；CC 则并置了六层能力面。
+
+**读完能拿到什么** —— 读完能看清一个判断标准——**扩展点的价值不在数量，而在「它能改写什么、以及改写之后谁负责重新校验」**。
 
 > **本层定位**：L12，把运行时内部的事件与能力暴露给外部代码，并规定这些外部代码**能观察什么、能否阻断、能改写什么**。
 >
@@ -28,7 +32,12 @@ permalink: /ch/12/
 
 ## 一、核心结论速览
 
-1. **「扩展机制」不是一个东西，四家把口子开在了不同楼层**：pi 在**内核**留 11 个生命周期回调、在**外壳**给 36 个事件加 10 个 `register*`；dsh 只提供**一种扩展单位**（Cordis 插件），靠 5 种调度模式区分语义；codex 开了**两条互不相通的通道**——进程外的 hooks 与进程内的 `extension-api`；CC 则把 hooks / plugins / skills / commands / MCP / subagents **并置成六层**。
+1. **「扩展机制」不是一个东西，四家把口子开在了不同楼层**
+
+    - **pi** —— 在**内核**留 11 个生命周期回调、在**外壳**给 36 个事件加 10 个 `register*`
+    - **dsh** —— 只提供**一种扩展单位**（Cordis 插件），靠 5 种调度模式区分语义
+    - **codex** —— 开了**两条互不相通的通道**——进程外的 hooks 与进程内的 `extension-api`
+    - **CC** —— 则把 hooks / plugins / skills / commands / MCP / subagents **并置成六层**
 
 2. **只有 codex 同时提供进程外与进程内两种扩展，而且源码里写明了分工线**：要改写工具 payload 用 hooks，要拥有工具实现用 `ToolContributor`（`ext/extension-api/src/contributors.rs:346-351` 的注释）。**这条分工线是全章最值得抄的一句话**——它解释了为什么单靠 hook 做不了完整扩展。
 
@@ -36,7 +45,12 @@ permalink: /ch/12/
 
 4. **「阻断」的语义三家完全统一在一个数字上：`exit code 2`**。codex、CC、dsh 都复刻这一约定，dsh 甚至明确写下「忠实复刻两个参考实现，不发明第三种阈值」。与之配套的是一条同样统一的纪律：**其他非零退出码不是阻断**，只是把 stderr 展示给用户。
 
-5. **设计成熟度体现在「明确不做什么」上**：codex 显式拒绝 `updatedMCPToolOutput` 与 `updatedPermissions`，CC 保证 hook 的 `allow` **不越过** settings 的 deny 规则，dsh 有一份「永不支持」清单。**唯一的反例是 pi**——它的扩展改写工具输入之后**不做重新校验**（`extensions/types.ts:1026` 的注释直说了这一点），这是本章唯一一处明示的缺口。
+5. **设计成熟度体现在「明确不做什么」上**
+
+    - **pi** —— **唯一的反例**——它的扩展改写工具输入之后**不做重新校验**（`extensions/types.ts:1026` 的注释直说了这一点），这是本章唯一一处明示的缺口
+    - **dsh** —— 有一份「永不支持」清单
+    - **codex** —— 显式拒绝 `updatedMCPToolOutput` 与 `updatedPermissions`
+    - **CC** —— 保证 hook 的 `allow` **不越过** settings 的 deny 规则
 
 ---
 
@@ -214,7 +228,9 @@ throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 
 #### 4.1.5 skills 与子 Agent 不是扩展机制
 
-需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 9 章 4.1）。
+需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。
+
+子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 9 章 4.1）。
 
 ### 4.2 deepseek-harness —— 一种扩展单位，五种调度语义
 
