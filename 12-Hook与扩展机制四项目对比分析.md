@@ -182,7 +182,7 @@ beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promi
 // packages/coding-agent/src/core/agent-session.ts:3206
 const toolRegistry = new Map(wrappedBuiltInTools.map((tool) => [tool.name, tool]));
 for (const tool of wrappedExtensionTools as AgentTool[]) {
-	toolRegistry.set(tool.name, tool);
+    toolRegistry.set(tool.name, tool);
 }
 ```
 

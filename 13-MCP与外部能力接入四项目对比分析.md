@@ -151,9 +151,9 @@ permalink: /ch/13/
 
 `packages/coding-agent/src/utils/tool-result-images.ts:16-18`
 ```ts
- * The `read` tool and `@file` CLI attachments run their images through `processImage`, but tools
- * that produce images themselves (extensions, MCP bridges, screenshot tools) hand back arbitrary
- * base64 payloads that go straight into session history and every subsequent provider request.
+* The `read` tool and `@file` CLI attachments run their images through `processImage`, but tools
+* that produce images themselves (extensions, MCP bridges, screenshot tools) hand back arbitrary
+* base64 payloads that go straight into session history and every subsequent provider request.
 ```
 
 即：**pi 的核心源码里没有 MCP 的 handler、类型、配置解析或 SDK 调用**。
@@ -183,29 +183,29 @@ It intentionally does not include built-in MCP, sub-agents, permission popups, p
 
 `packages/coding-agent/src/core/extensions/types.ts:1425-1428`
 ```ts
-	/** Register a tool that the LLM can call. */
-	registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
-		tool: ToolDefinition<TParams, TDetails, TState>,
-	): void;
+/** Register a tool that the LLM can call. */
+registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
+    tool: ToolDefinition<TParams, TDetails, TState>,
+): void;
 ```
 
 注册的运行时实现会做两件事：要求参数 schema 必须是对象，然后刷新工具表（不是就地修改，而是重建）：
 
 `packages/coding-agent/src/core/extensions/loader.ts:273-285`
 ```ts
-		registerTool(tool: ToolDefinition): void {
-			assertActive();
-			if (typeof tool.parameters !== "object" || tool.parameters === null || Array.isArray(tool.parameters)) {
-				throw new Error(
-					`Tool "${tool.name}" registered by extension "${extension.path}" must define an object parameter schema.`,
-				);
-			}
-			extension.tools.set(tool.name, {
-				definition: tool,
-				sourceInfo: extension.sourceInfo,
-			});
-			runtime.refreshTools();
-		},
+registerTool(tool: ToolDefinition): void {
+    assertActive();
+    if (typeof tool.parameters !== "object" || tool.parameters === null || Array.isArray(tool.parameters)) {
+        throw new Error(
+            `Tool "${tool.name}" registered by extension "${extension.path}" must define an object parameter schema.`,
+        );
+    }
+    extension.tools.set(tool.name, {
+        definition: tool,
+        sourceInfo: extension.sourceInfo,
+    });
+    runtime.refreshTools();
+},
 ```
 
 **外部工具与内建工具在 pi 里走的是两条不同的类型路径**——内建工具的 `ToolName` 是一个 8 项字面量联合，外部工具只是个 `string`：
@@ -219,18 +219,18 @@ export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep
 
 `packages/coding-agent/src/core/extensions/runner.ts:586-596`
 ```ts
-	/** Get all registered tools from all extensions (first registration per name wins). */
-	getAllRegisteredTools(): RegisteredTool[] {
-		const toolsByName = new Map<string, RegisteredTool>();
-		for (const ext of this.extensions) {
-			for (const tool of ext.tools.values()) {
-				if (!toolsByName.has(tool.definition.name)) {
-					toolsByName.set(tool.definition.name, tool);
-				}
-			}
-		}
-		return Array.from(toolsByName.values());
-	}
+/** Get all registered tools from all extensions (first registration per name wins). */
+getAllRegisteredTools(): RegisteredTool[] {
+    const toolsByName = new Map<string, RegisteredTool>();
+    for (const ext of this.extensions) {
+        for (const tool of ext.tools.values()) {
+            if (!toolsByName.has(tool.definition.name)) {
+                toolsByName.set(tool.definition.name, tool);
+            }
+        }
+    }
+    return Array.from(toolsByName.values());
+}
 ```
 
 #### 4.1.3 若要自己接：三个可用挂点与两个硬缺口
@@ -252,11 +252,11 @@ export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep
 
 `packages/coding-agent/src/core/exec.ts:41-45`
 ```ts
-		const proc = spawn(command, args, {
-			cwd,
-			shell: false,
-			stdio: ["ignore", "pipe", "pipe"],
-		});
+const proc = spawn(command, args, {
+    cwd,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
+});
 ```
 
 MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ignore"` 的 stdin 直接排除了这条路。因此 MCP 适配扩展必须绕过 `pi.exec`（`packages/coding-agent/src/core/tools/bash.ts:96` 走的是原生 `child_process.spawn`，且它是工具实现而非扩展 API）。**「扩展机制里有起子进程的能力」与「这个能力够用」是两件事**——这一条只有把两处实现都打开才能看出来。
@@ -281,38 +281,38 @@ pi 的「用包分发能力」不是比喻，它有完整的安装与发现链�
 
 `packages/coding-agent/src/core/settings-manager.ts:135-136`
 ```ts
-	packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
-	extensions?: string[]; // Array of local extension file paths or directories
+packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
+extensions?: string[]; // Array of local extension file paths or directories
 ```
 
 npm 源的安装落点是确定的（user 级进 agent 目录，project 级进项目目录，且 project 级要求项目已受信）：
 
 `packages/coding-agent/src/core/package-manager.ts:2066-2075`
 ```ts
-	private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
-		if (scope === "temporary") {
-			return join(this.getTemporaryDir("npm"), "node_modules", source.name);
-		}
-		if (scope === "project") {
-			this.assertProjectTrustedForScope(scope);
-			return join(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
-		}
-		return join(this.agentDir, "npm", "node_modules", source.name);
-	}
+private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
+    if (scope === "temporary") {
+        return join(this.getTemporaryDir("npm"), "node_modules", source.name);
+    }
+    if (scope === "project") {
+        this.assertProjectTrustedForScope(scope);
+        return join(this.cwd, CONFIG_DIR_NAME, "npm", "node_modules", source.name);
+    }
+    return join(this.agentDir, "npm", "node_modules", source.name);
+}
 ```
 
 包内资源由 `package.json` 的 `pi` 字段声明，读取时对每个字段做「必须是字符串数组」的校验，不合法就整条丢弃：
 
 `packages/coding-agent/src/core/pi-manifest.ts:24-31`
 ```ts
-		const manifest: PiManifest = {};
-		for (const field of RESOURCE_FIELDS) {
-			const entries = pkg.pi[field];
-			if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string")) {
-				manifest[field] = entries;
-			}
-		}
-		return manifest;
+const manifest: PiManifest = {};
+for (const field of RESOURCE_FIELDS) {
+    const entries = pkg.pi[field];
+    if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string")) {
+        manifest[field] = entries;
+    }
+}
+return manifest;
 ```
 
 这套机制的信任边界被 pi 明确写在了文档里，且**只加在安装与加载上，不在运行中**：
@@ -425,38 +425,38 @@ dsh 的 `Client` 构造里只有两行与协商有关，且都是「放权」：
 
 `packages/mcp/mcp-client/src/connection.ts:258`
 ```ts
-    const generation = new Client(
-      { name: 'dsh-mcp-client', version: '0.0.1' },
-      {
-        capabilities: {},
-        versionNegotiation: { mode: 'auto' },
-        ...
-      },
-    )
+const generation = new Client(
+  { name: 'dsh-mcp-client', version: '0.0.1' },
+  {
+    capabilities: {},
+    versionNegotiation: { mode: 'auto' },
+    ...
+  },
+)
 ```
 
 `capabilities: {}` 意味着它**不声明 roots、不支持 sampling、不支持 elicitation**；`mode: 'auto'` 意味着协议版本由 SDK 挑。它依赖的是官方 SDK 的新版本包，而不是事实标准的 `@modelcontextprotocol/sdk`：
 
 `packages/mcp/mcp-client/package.json`
 ```json
-    "@modelcontextprotocol/client": "2.0.0",
+"@modelcontextprotocol/client": "2.0.0",
 ```
 
 dsh 用测试把这个交权行为**钉住**了——`negotiation-lifecycle.spec.ts` 断言的是「协商过程中的进程与重试行为」，而不是协商内容本身：
 
 `packages/mcp/mcp-client/tests/negotiation-lifecycle.spec.ts:66-76`
 ```ts
-  it('reaps the probe before starting the serving process', async () => {
-    const { handle, events, release } = await stdioFixture()
-    await release()
-    expect(await handle.ready).toEqual({})
-    const observed = await events()
-    const starts = observed.filter(item => item.event === 'start')
-    expect(starts).toHaveLength(2)
-    expect(starts[1]!.previousAlive).toBe(false)
-    await handle.dispose()
-    for (const item of starts) expect(() => process.kill(item.pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
-  })
+it('reaps the probe before starting the serving process', async () => {
+  const { handle, events, release } = await stdioFixture()
+  await release()
+  expect(await handle.ready).toEqual({})
+  const observed = await events()
+  const starts = observed.filter(item => item.event === 'start')
+  expect(starts).toHaveLength(2)
+  expect(starts[1]!.previousAlive).toBe(false)
+  await handle.dispose()
+  for (const item of starts) expect(() => process.kill(item.pid, 0)).toThrow(expect.objectContaining({ code: 'ESRCH' }))
+})
 ```
 
 这组测试揭示了一个实现细节：**stdio 协商先起一个临时探测进程，再起正式服务进程**。也就是说「连上」与「可用」是两段，探测阶段结束后会做一次进程收割。这是把协议协商让渡给 SDK 之后，客户端仍然必须自己负责的那部分（进程生命周期），而 dsh 确实负责了。
@@ -467,20 +467,20 @@ dsh 用测试把这个交权行为**钉住**了——`negotiation-lifecycle.spec
 
 `packages/mcp/mcp-client/src/tools.ts:119`
 ```ts
-  // Phase 1: fetch and build the next generation without touching the registry.
-  const definitions = new Map<string, ToolDefinition>()
-  const response = client.getServerCapabilities()?.tools === undefined
-    ? { tools: [] }
-    : await client.listTools(undefined, { cacheMode: 'refresh' })
-  for (const tool of response.tools) {
-    const publicName = publicToolName(opts.serverName, tool.name)
-    if (definitions.has(publicName)) {
-      throw new Error(
-        `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
-      )
-    }
-    ...
+// Phase 1: fetch and build the next generation without touching the registry.
+const definitions = new Map<string, ToolDefinition>()
+const response = client.getServerCapabilities()?.tools === undefined
+  ? { tools: [] }
+  : await client.listTools(undefined, { cacheMode: 'refresh' })
+for (const tool of response.tools) {
+  const publicName = publicToolName(opts.serverName, tool.name)
+  if (definitions.has(publicName)) {
+    throw new Error(
+      `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
+    )
   }
+  ...
+}
 ```
 
 三处判据值得注意：**能力优先**（server 未声明 tools 能力时直接返回空表，不发请求）、**强制刷新缓存**（`cacheMode: 'refresh'`）、**同名即错**（同一 server 在一份列表里报了两次同名工具，判为非法而不是取其一）。
@@ -489,21 +489,21 @@ dsh 用测试把这个交权行为**钉住**了——`negotiation-lifecycle.spec
 
 `packages/mcp/mcp-client/src/tools.ts:146-160`
 ```ts
-  for (const dispose of previous.values()) dispose()
-  const disposers: ToolDisposers = new Map()
-  try {
-    for (const [publicName, definition] of definitions) {
-      disposers.set(publicName, ctx.tools.register(definition))
-    }
-  } catch (error) {
-    // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
-    // registration occupies this server's namespace. Roll back so the model
-    // sees either the full generation or none of it — never a partial set.
-    for (const dispose of disposers.values()) dispose()
-    ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
-    if (opts.registrationFailure === 'throw') throw error
-    return new Map()
+for (const dispose of previous.values()) dispose()
+const disposers: ToolDisposers = new Map()
+try {
+  for (const [publicName, definition] of definitions) {
+    disposers.set(publicName, ctx.tools.register(definition))
   }
+} catch (error) {
+  // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
+  // registration occupies this server's namespace. Roll back so the model
+  // sees either the full generation or none of it — never a partial set.
+  for (const dispose of disposers.values()) dispose()
+  ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
+  if (opts.registrationFailure === 'throw') throw error
+  return new Map()
+}
 ```
 
 「要么整代可见、要么一个都不可见」——这条不变式在四家里只有 dsh 显式写出来并加了注释。它的代价是：一个坏工具会让整个 server 的工具全部消失；它的收益是模型侧永远不会看到半套名字空间。
@@ -563,41 +563,41 @@ dsh 的凭据面只有两处：stdio 的 `env`（经擦洗合并）与 HTTP 的 
 
 `packages/mcp/mcp-client/src/connection.ts:145-157`
 ```ts
-  /** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
-  let client: Client | undefined
-  /** Transport-aware close operation paired with {@link client}. */
-  let closeClient: (() => Promise<boolean>) | undefined
-  /** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
-  let disposers: ToolDisposers = new Map()
-  let reconnectTimer: NodeJS.Timeout | undefined
-  /** Consecutive failed connection attempts within the current outage. */
-  let failedAttempts = 0
-  /** When the current generation finished connect + initial sync; undefined while down. */
-  let connectedAt: number | undefined
-  /** The real error from the first connection attempt, for startup-await diagnostics. */
-  let firstAttemptError: unknown
+/** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
+let client: Client | undefined
+/** Transport-aware close operation paired with {@link client}. */
+let closeClient: (() => Promise<boolean>) | undefined
+/** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
+let disposers: ToolDisposers = new Map()
+let reconnectTimer: NodeJS.Timeout | undefined
+/** Consecutive failed connection attempts within the current outage. */
+let failedAttempts = 0
+/** When the current generation finished connect + initial sync; undefined while down. */
+let connectedAt: number | undefined
+/** The real error from the first connection attempt, for startup-await diagnostics. */
+let firstAttemptError: unknown
 ```
 
 退避逻辑里有一个四家中独有的设计——**稳定窗重置预算**：
 
 `packages/mcp/mcp-client/src/connection.ts:220-236`
 ```ts
-    // A connection that stayed up past the stability window (= maxDelayMs, the
-    // longest backoff spacing) ended the previous outage: start a fresh budget.
-    if (connectedAt !== undefined && Date.now() - connectedAt >= policy.maxDelayMs) failedAttempts = 0
-    connectedAt = undefined
-    failedAttempts += 1
-    if (failedAttempts > policy.maxAttempts) {
-      // Enqueue the give-up disposal so it cannot race an in-flight sync's
-      // phase-2 swap (which checks isCurrent inside the queue).
-      syncChain = syncChain.then(() => {
-        for (const dispose of disposers.values()) dispose()
-        disposers = new Map()
-        serverInstructions = ''
-      })
-      return
-    }
-    const delayMs = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (failedAttempts - 1))
+// A connection that stayed up past the stability window (= maxDelayMs, the
+// longest backoff spacing) ended the previous outage: start a fresh budget.
+if (connectedAt !== undefined && Date.now() - connectedAt >= policy.maxDelayMs) failedAttempts = 0
+connectedAt = undefined
+failedAttempts += 1
+if (failedAttempts > policy.maxAttempts) {
+  // Enqueue the give-up disposal so it cannot race an in-flight sync's
+  // phase-2 swap (which checks isCurrent inside the queue).
+  syncChain = syncChain.then(() => {
+    for (const dispose of disposers.values()) dispose()
+    disposers = new Map()
+    serverInstructions = ''
+  })
+  return
+}
+const delayMs = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (failedAttempts - 1))
 ```
 
 把「稳定窗 = 最长退避间隔」作为重置条件，解决的是一类具体故障：**周期性抖动**（连上、稳定运行、再断）如果累计计数，会在若干小时后耗尽预算而无谓注销工具；而**崩溃循环**（连上就崩）因为 `connectedAt` 很快被判为「未过稳定窗」而继续累计。默认值把这两个窗口的尺度定在了同一数量级：
@@ -620,33 +620,33 @@ export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
 
 `packages/mcp/mcp-resources/src/tools.ts:33-41`
 ```ts
-    yield ctx.tools.register(defineTool({
-      name: 'list_mcp_resources',
-      description: 'List resources available from an MCP server.',
-      parameters: listParameters,
-      output,
-      execute: (args, exec) => request(args.server, {
-        method: 'resources/list', ...args.cursor === undefined ? {} : { cursor: args.cursor },
-      }, exec),
-    }))
+yield ctx.tools.register(defineTool({
+  name: 'list_mcp_resources',
+  description: 'List resources available from an MCP server.',
+  parameters: listParameters,
+  output,
+  execute: (args, exec) => request(args.server, {
+    method: 'resources/list', ...args.cursor === undefined ? {} : { cursor: args.cursor },
+  }, exec),
+}))
 ```
 
 连接层负责把三个 method 路由到当前代，并在断开时直接抛错而不是排队：
 
 `packages/mcp/mcp-client/src/connection.ts:367`
 ```ts
-      async request(request, exec): Promise<JsonValue> {
-        const generation = client
-        if (!generation || connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
-        const options = { signal: exec.signal, timeout: config.toolCallTimeoutMs }
-        switch (request.method) {
-          case 'resources/list':
-            return await generation.listResources(
-              request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
-            ) as JsonValue
-          ...
-        }
-      },
+async request(request, exec): Promise<JsonValue> {
+  const generation = client
+  if (!generation || connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
+  const options = { signal: exec.signal, timeout: config.toolCallTimeoutMs }
+  switch (request.method) {
+    case 'resources/list':
+      return await generation.listResources(
+        request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
+      ) as JsonValue
+    ...
+  }
+},
 ```
 
 **分页是把 cursor 透传给调用方**，由模型自己翻页——这与 codex 在客户端内部 `collect_paginated` 收集全部分页（见 4.3.4）是两种相反的答案。
@@ -665,11 +665,11 @@ server 清单进 `config.toml` 的一个映射字段，且 schema 用自定义�
 
 `codex-rs/config/src/config_toml.rs:290-293`
 ```rust
-    /// Definition for MCP servers that Codex can reach out to for tool calls.
-    #[serde(default)]
-    // Uses the raw MCP input shape (custom deserialization) rather than `McpServerConfig`.
-    #[schemars(schema_with = "crate::schema::mcp_servers_schema")]
-    pub mcp_servers: HashMap<String, McpServerConfig>,
+/// Definition for MCP servers that Codex can reach out to for tool calls.
+#[serde(default)]
+// Uses the raw MCP input shape (custom deserialization) rather than `McpServerConfig`.
+#[schemars(schema_with = "crate::schema::mcp_servers_schema")]
+pub mcp_servers: HashMap<String, McpServerConfig>,
 ```
 
 同层还有两个企业相关字段，直接放在 config 顶层：`mcp_enterprise_managed_auth`（`config_toml.rs:298`）与 `mcp_oauth_credentials_store`（`:306`）——**凭据存储模式是配置项**，这是 codex 与 CC 的又一处分歧。
@@ -791,18 +791,18 @@ const MAX_MCP_STDERR_LINE_BYTES: usize = 1024 * 1024;
 
 `codex-rs/rmcp-client/src/stdio_server_launcher.rs:281-291`
 ```rust
-        let build_command = || {
-            let mut command = Command::new(&resolved_program);
-            command.current_dir(&cwd).envs(&envs).args(&args);
-            command.process_mode(ProcessMode::NewGroup);
-            // MCP uses only stdio; unrelated orchestrator descriptors must not
-            // propagate into the server or commands it launches.
-            // StdioOnly is currently Unix-only. Windows can still inherit unrelated
-            // handles and needs a handle allowlist in the shared spawn backend.
-            #[cfg(unix)]
-            command.descriptor_policy(DescriptorPolicy::StdioOnly);
-            command
-        };
+let build_command = || {
+    let mut command = Command::new(&resolved_program);
+    command.current_dir(&cwd).envs(&envs).args(&args);
+    command.process_mode(ProcessMode::NewGroup);
+    // MCP uses only stdio; unrelated orchestrator descriptors must not
+    // propagate into the server or commands it launches.
+    // StdioOnly is currently Unix-only. Windows can still inherit unrelated
+    // handles and needs a handle allowlist in the shared spawn backend.
+    #[cfg(unix)]
+    command.descriptor_policy(DescriptorPolicy::StdioOnly);
+    command
+};
 ```
 
 这一步使第 4 章记下的「父死子必死」契约同样覆盖 MCP server——`ProcessMode::NewGroup` 让 server 落在独立进程组里，于是超时与回收都能按组处理。
@@ -830,10 +830,10 @@ pub(crate) const DEFAULT_ENV_VARS: &[&str] = &[
 
 `codex-rs/rmcp-client/src/utils.rs:54-57`
 ```rust
-    env.retain(|name, _| {
-        name.to_str()
-            .is_none_or(|name| !is_non_inheritable_env_var(name))
-    });
+env.retain(|name, _| {
+    name.to_str()
+        .is_none_or(|name| !is_non_inheritable_env_var(name))
+});
 ```
 
 **与 dsh 的对照很清楚**：两家都「不把父进程环境整体给出去」，但 dsh 是**黑名单擦洗**（剔除 KEY/PASSWORD/SECRET/TOKEN 形态），codex 是**白名单重建**（只放 11 项 + 显式声明）。白名单更安全，但会让一个依赖未列出变量的 server 静默行为异常——这是两章之间需要对齐的一处取舍。
@@ -879,20 +879,20 @@ impl McpProtocolMode {
 
 `codex-rs/codex-mcp/src/rmcp_client.rs:1100-1113`
 ```rust
-    let mut capabilities = ClientCapabilities::default();
-    capabilities.elicitation = Some(client_elicitation_capability);
-    let extensions = client_mcp_extensions
-        .iter()
-        .filter_map(|(id, settings)| {
-            settings
-                .as_object()
-                .cloned()
-                .map(|settings| (id.to_string(), settings))
-        })
-        .collect::<BTreeMap<_, _>>();
-    if !extensions.is_empty() {
-        capabilities.extensions = Some(extensions);
-    }
+let mut capabilities = ClientCapabilities::default();
+capabilities.elicitation = Some(client_elicitation_capability);
+let extensions = client_mcp_extensions
+    .iter()
+    .filter_map(|(id, settings)| {
+        settings
+            .as_object()
+            .cloned()
+            .map(|settings| (id.to_string(), settings))
+    })
+    .collect::<BTreeMap<_, _>>();
+if !extensions.is_empty() {
+    capabilities.extensions = Some(extensions);
+}
 ```
 
 **「不声明 sampling」是三家的共同选择**（codex 只声明 elicitation，CC 声明 roots + elicitation，dsh 什么都不声明）。原因不在协议而在安全模型：sampling 意味着 server 可以反向消耗宿主的模型额度，三家的默认都是拒绝。
@@ -971,23 +971,23 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 `codex-rs/core/src/tools/spec_plan.rs:152-159`
 ```rust
-    let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
-        mcp,
-        &turn_context.config,
-        apps_enabled,
-        &mcp.config().mcp_server_catalog,
-        search_tool_enabled(turn_context, model_info),
-        &mut registry,
-    );
+let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
+    mcp,
+    &turn_context.config,
+    apps_enabled,
+    &mcp.config().mcp_server_catalog,
+    search_tool_enabled(turn_context, model_info),
+    &mut registry,
+);
 ```
 
 注册时同时应用一次「暴露策略」（`spec_plan.rs:160-166` 的 `apply_mcp_tool_exposure_policy`），而这个策略的落点在别处：
 
 `codex-rs/core/src/mcp_tool_exposure.rs:142-144`
 ```rust
-        if registry.register_external_with_exposure(handler, tool_exposure) && fits_agent_budget {
-            registered_tools.insert(tool_name);
-        }
+if registry.register_external_with_exposure(handler, tool_exposure) && fits_agent_budget {
+    registered_tools.insert(tool_name);
+}
 ```
 
 `tool_exposure` 与 `fits_agent_budget` 两个条件把「MCP 工具能否进模型可见面」与「当前 agent 的预算是否装得下」绑在了一起。这是第 5 章「schema 体积治理」在本层的投影——**外部工具是体积膨胀的主要来源**，所以限额必须卡在注册口。
@@ -996,29 +996,29 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 `codex-rs/core/src/mcp_tool_call.rs:1536`
 ```rust
-    let action = ApprovalAction::McpToolCall {
-        id: call_id.to_string(),
-        server: invocation.server.clone(),
-        tool_name: invocation.tool.clone(),
-        arguments: invocation.arguments.clone(),
-        connector_id: metadata.connector_id.clone(),
-        connector_name: metadata.connector_name.clone(),
-        connector_description: metadata.connector_description.clone(),
-        connected_account_email: (invocation.server == CODEX_APPS_MCP_SERVER_NAME)
-            .then(|| metadata.connected_account_email.clone())
-            ...
-    };
+let action = ApprovalAction::McpToolCall {
+    id: call_id.to_string(),
+    server: invocation.server.clone(),
+    tool_name: invocation.tool.clone(),
+    arguments: invocation.arguments.clone(),
+    connector_id: metadata.connector_id.clone(),
+    connector_name: metadata.connector_name.clone(),
+    connector_description: metadata.connector_description.clone(),
+    connected_account_email: (invocation.server == CODEX_APPS_MCP_SERVER_NAME)
+        .then(|| metadata.connected_account_email.clone())
+        ...
+};
 ```
 
 字段清单本身就是设计说明：审批界面能拿到 server 名、工具名、参数、连接器身份与已连账号邮箱——**即「这次调用是谁发起的、用了谁的凭据」在审批时是可见的**。这一点四家中只有 codex 做到了。动作随后走与内置工具同一个审批入口：
 
 `codex-rs/core/src/mcp_tool_call.rs:1574`
 ```rust
-    Some(
-        match sess.request_approval(action, approval_context).await {
-            ...
-        },
-    )
+Some(
+    match sess.request_approval(action, approval_context).await {
+        ...
+    },
+)
 ```
 
 自动放行条件也被显式建模，而不是散落在各处：
@@ -1053,11 +1053,11 @@ pub fn mcp_permission_prompt_is_auto_approved(
 
 `codex-rs/core/src/mcp_tool_call.rs:1610-1613`
 ```rust
-    if *approval_policy == AskForApproval::Never {
-        return ReviewDecision::denied(
-            "MCP tool call requires approval, but approval policy is never",
-        );
-    }
+if *approval_policy == AskForApproval::Never {
+    return ReviewDecision::denied(
+        "MCP tool call requires approval, but approval policy is never",
+    );
+}
 ```
 
 即：**策略说「从不询问」但这次调用非问不可时，答案是拒绝而不是放行**。这是「fail closed」在外部能力上的具体形态，也是本章最重要的一条可复用规则。
@@ -1092,19 +1092,19 @@ pub struct StoredOAuthTokens {
 
 `codex-rs/rmcp-client/src/oauth.rs:466-478`
 ```rust
-        OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
-            &keyring_store,
-            keyring_backend_kind,
-            server_name,
-            tokens,
-        ),
-        OAuthCredentialsStoreMode::File => save_oauth_tokens_to_file(tokens),
-        OAuthCredentialsStoreMode::Keyring => save_oauth_tokens_with_keyring_and_cleanup_file(
-            &keyring_store,
-            keyring_backend_kind,
-            server_name,
-            tokens,
-        ),
+OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
+    &keyring_store,
+    keyring_backend_kind,
+    server_name,
+    tokens,
+),
+OAuthCredentialsStoreMode::File => save_oauth_tokens_to_file(tokens),
+OAuthCredentialsStoreMode::Keyring => save_oauth_tokens_with_keyring_and_cleanup_file(
+    &keyring_store,
+    keyring_backend_kind,
+    server_name,
+    tokens,
+),
 ```
 
 认证方式是一个三值枚举，每个变体的注释都写明了失败回退规则：
@@ -1147,16 +1147,16 @@ pub struct McpEnterpriseManagedAuthConfig {
 
 `codex-rs/codex-mcp/src/executor_environment_http_client.rs:17-26`
 ```rust
-    fn attach_authorization(&self, params: &mut HttpRequestParams) {
-        params
-            .headers
-            .retain(|header| !header.name.eq_ignore_ascii_case("authorization"));
-        params.headers.push(HttpHeader {
-            name: "authorization".to_string(),
-            value: "Bearer ".to_string(),
-            value_env_var: Some(self.bearer_token_env_var.clone()),
-        });
-    }
+fn attach_authorization(&self, params: &mut HttpRequestParams) {
+    params
+        .headers
+        .retain(|header| !header.name.eq_ignore_ascii_case("authorization"));
+    params.headers.push(HttpHeader {
+        name: "authorization".to_string(),
+        value: "Bearer ".to_string(),
+        value_env_var: Some(self.bearer_token_env_var.clone()),
+    });
+}
 ```
 
 注意 `retain` 那一行——**先删掉已有 authorization 再写入**，防止配置里塞进来的头覆盖掉正确的 token。同一份文件里还有一处「值来自环境变量名而非值本身」的设计：token 只在最后一刻从环境变量取出，不进内存中的配置对象。
@@ -1197,56 +1197,56 @@ pub(crate) struct McpConnectionSet {
 
 `codex-rs/codex-mcp/src/connection_manager.rs:790-807`
 ```rust
-                for (server_name, outcome) in outcomes {
-                    match outcome {
-                        Ok(_) => summary.ready.push(server_name),
-                        Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
-                        Err(StartupOutcomeError::Failed { error, .. }) => {
-                            summary.failed.push(McpStartupFailure {
-                                server: server_name,
-                                error,
-                            })
-                        }
-                    }
-                }
-                let _ = tx_event
-                    .send(Event {
-                        id: startup_submit_id,
-                        msg: EventMsg::McpStartupComplete(summary),
-                    })
-                    .await;
+for (server_name, outcome) in outcomes {
+    match outcome {
+        Ok(_) => summary.ready.push(server_name),
+        Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
+        Err(StartupOutcomeError::Failed { error, .. }) => {
+            summary.failed.push(McpStartupFailure {
+                server: server_name,
+                error,
+            })
+        }
+    }
+}
+let _ = tx_event
+    .send(Event {
+        id: startup_submit_id,
+        msg: EventMsg::McpStartupComplete(summary),
+    })
+    .await;
 ```
 
 只有显式声明 `required` 的 server 会把失败升级为阻断：
 
 `codex-rs/codex-mcp/src/connection_manager/required.rs:15`
 ```rust
-    pub(crate) async fn validate_required_servers(&self) -> Result<()> {
-        let failures = async {
-            let mut failures = Vec::new();
-            for server_name in &self.required_servers {
-                let Some(view) = self.servers.get(server_name) else {
-                    failures.push(McpStartupFailure {
-                        server: server_name.clone(),
-                        error: format!("required MCP server `{server_name}` was not initialized"),
-                    });
-                    continue;
-                };
-                ...
-            }
-            failures
+pub(crate) async fn validate_required_servers(&self) -> Result<()> {
+    let failures = async {
+        let mut failures = Vec::new();
+        for server_name in &self.required_servers {
+            let Some(view) = self.servers.get(server_name) else {
+                failures.push(McpStartupFailure {
+                    server: server_name.clone(),
+                    error: format!("required MCP server `{server_name}` was not initialized"),
+                });
+                continue;
+            };
+            ...
         }
-        ...
+        failures
     }
+    ...
+}
 ```
 
 失败之后还会**自动排一次后台重连**，而不是等用户手动操作：
 
 `codex-rs/codex-mcp/src/connection_manager.rs:743-745`
 ```rust
-                if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
-                    async_managed_client.reconnect_failed_startup().await;
-                }
+if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
+    async_managed_client.reconnect_failed_startup().await;
+}
 ```
 
 超时的两个默认值把「连接」与「调用」分开给：
@@ -1344,21 +1344,21 @@ export const ConfigScopeSchema = lazySchema(() =>
 
 `src/services/mcp/config.ts:917`
 ```ts
-      while (currentDir !== parse(currentDir).root) {
-        dirs.push(currentDir)
-        currentDir = dirname(currentDir)
-      }
+while (currentDir !== parse(currentDir).root) {
+  dirs.push(currentDir)
+  currentDir = dirname(currentDir)
+}
 
-      // Process from root downward to CWD (so closer files have higher priority)
-      for (const dir of dirs.reverse()) {
-        const mcpJsonPath = join(dir, '.mcp.json')
+// Process from root downward to CWD (so closer files have higher priority)
+for (const dir of dirs.reverse()) {
+  const mcpJsonPath = join(dir, '.mcp.json')
 
-        ...
-        if (config.mcpServers) {
-          // Merge servers, with files closer to CWD overriding parent configs
-          Object.assign(allServers, addScopeToServers(config.mcpServers, scope))
-        }
-      }
+  ...
+  if (config.mcpServers) {
+    // Merge servers, with files closer to CWD overriding parent configs
+    Object.assign(allServers, addScopeToServers(config.mcpServers, scope))
+  }
+}
 ```
 
 user 与 local 各自读一处全局状态（`config.ts:963`、`:980`），enterprise 读一个固定路径（`config.ts:997`；路径函数见 `config.ts:62`）。
@@ -1371,21 +1371,21 @@ user 与 local 各自读一处全局状态（`config.ts:963`、`:980`），enter
 
 `src/services/mcp/config.ts:1082-1096`
 ```ts
-  // If an enterprise mcp config exists, do not use any others; this has exclusive control over all MCP servers
-  // (enterprise customers often do not want their users to be able to add their own MCP servers).
-  if (doesEnterpriseMcpConfigExist()) {
-    // Apply policy filtering to enterprise servers
-    const filtered: Record<string, ScopedMcpServerConfig> = {}
+// If an enterprise mcp config exists, do not use any others; this has exclusive control over all MCP servers
+// (enterprise customers often do not want their users to be able to add their own MCP servers).
+if (doesEnterpriseMcpConfigExist()) {
+  // Apply policy filtering to enterprise servers
+  const filtered: Record<string, ScopedMcpServerConfig> = {}
 
-    for (const [name, serverConfig] of Object.entries(enterpriseServers)) {
-      if (!isMcpServerAllowedByPolicy(name, serverConfig)) {
-        continue
-      }
-      filtered[name] = serverConfig
+  for (const [name, serverConfig] of Object.entries(enterpriseServers)) {
+    if (!isMcpServerAllowedByPolicy(name, serverConfig)) {
+      continue
     }
-
-    return { servers: filtered, errors: [] }
+    filtered[name] = serverConfig
   }
+
+  return { servers: filtered, errors: [] }
+}
 ```
 
 第 3 条的性质与另外两条不同：它不是「谁的优先级高」，而是**一个开关把多来源仲裁整个关掉**。这直接呼应第 1 章的配置层设计——企业托管的语义是「托管文件存在即独占」，而不是「托管优先级最高」。
@@ -1398,10 +1398,10 @@ project 作用域还多一道**批准闸门**：`.mcp.json` 里的 server 默认
 
 `src/services/mcp/officialRegistry.ts:39-42`
 ```ts
-    const response = await axios.get<RegistryResponse>(
-      'https://api.anthropic.com/mcp-registry/v0/servers?version=latest&visibility=commercial',
-      { timeout: 5000 },
-    )
+const response = await axios.get<RegistryResponse>(
+  'https://api.anthropic.com/mcp-registry/v0/servers?version=latest&visibility=commercial',
+  { timeout: 5000 },
+)
 ```
 
 它的消费者只有遥测与启动预取两处，且**未加载成功时返回 false**（`officialRegistry.ts:66-67` 的 `officialUrls?.has(...) ?? false`）。也就是说这是一条 fail-closed 的判定，即便被误用也不会放行未知 URL。
@@ -1436,20 +1436,20 @@ export const TransportSchema = lazySchema(() =>
 
 `src/services/mcp/client.ts:945-958`
 ```ts
-        const finalCommand =
-          process.env.CLAUDE_CODE_SHELL_PREFIX || serverRef.command
-        const finalArgs = process.env.CLAUDE_CODE_SHELL_PREFIX
-          ? [[serverRef.command, ...serverRef.args].join(' ')]
-          : serverRef.args
-        transport = new StdioClientTransport({
-          command: finalCommand,
-          args: finalArgs,
-          env: {
-            ...subprocessEnv(),
-            ...serverRef.env,
-          } as Record<string, string>,
-          stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
-        })
+const finalCommand =
+  process.env.CLAUDE_CODE_SHELL_PREFIX || serverRef.command
+const finalArgs = process.env.CLAUDE_CODE_SHELL_PREFIX
+  ? [[serverRef.command, ...serverRef.args].join(' ')]
+  : serverRef.args
+transport = new StdioClientTransport({
+  command: finalCommand,
+  args: finalArgs,
+  env: {
+    ...subprocessEnv(),
+    ...serverRef.env,
+  } as Record<string, string>,
+  stderr: 'pipe', // prevents error output from the MCP server from printing to the UI
+})
 ```
 
 `stderr: 'pipe'` 那行注释是本章的一个小但重要的细节：**第三方 server 的 stderr 必须被截住，否则它会直接污染 TUI**。第 4 章记下的「输出洪泛」在本层有一个具体形态。
@@ -1460,13 +1460,13 @@ export const TransportSchema = lazySchema(() =>
 
 `src/services/mcp/client.ts:994-1000`
 ```ts
-          capabilities: {
-            roots: {},
-            // Empty object declares the capability. Sending {form:{},url:{}}
-            // breaks Java MCP SDK servers (Spring AI) whose Elicitation class
-            // has zero fields and fails on unknown properties.
-            elicitation: {},
-          },
+capabilities: {
+  roots: {},
+  // Empty object declares the capability. Sending {form:{},url:{}}
+  // breaks Java MCP SDK servers (Spring AI) whose Elicitation class
+  // has zero fields and fails on unknown properties.
+  elicitation: {},
+},
 ```
 
 那两行注释是一条**为兼容第三方 SDK 而故意写成空对象的**设计记录：声明能力时字段留空反而比列全字段更兼容。**三家的 capability 声明集互不相同**（dsh 空、CC roots + elicitation、codex elicitation + 受信扩展），共同点是**都不声明 sampling**。
@@ -1495,10 +1495,10 @@ const DEFAULT_MCP_TOOL_TIMEOUT_MS = 100_000_000
 
 `src/services/mcp/client.ts:1752-1755`
 ```ts
-      const result = (await client.client.request(
-        { method: 'tools/list' },
-        ListToolsResultSchema,
-      )) as ListToolsResult
+const result = (await client.client.request(
+  { method: 'tools/list' },
+  ListToolsResultSchema,
+)) as ListToolsResult
 ```
 
 **这是一次性调用，不消费 cursor**——全目录搜 `nextCursor` 命中 0。同一份文件里 `resources/list`（`:2009`）与 `prompts/list`（`:2043`）也都是单次调用。三处一致，说明这是有意选择而非遗漏：**CC 假设 server 的工具数量在有界范围内**。
@@ -1545,15 +1545,15 @@ export function buildMcpToolName(serverName: string, toolName: string): string {
 
 `src/services/mcp/client.ts:1786-1794`
 ```ts
-            async description() {
-              return tool.description ?? ''
-            },
-            async prompt() {
-              const desc = tool.description ?? ''
-              return desc.length > MAX_MCP_DESCRIPTION_LENGTH
-                ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
-                : desc
-            },
+async description() {
+  return tool.description ?? ''
+},
+async prompt() {
+  const desc = tool.description ?? ''
+  return desc.length > MAX_MCP_DESCRIPTION_LENGTH
+    ? desc.slice(0, MAX_MCP_DESCRIPTION_LENGTH) + '… [truncated]'
+    : desc
+},
 ```
 
 常量值与其理由是：
@@ -1569,25 +1569,25 @@ skip-prefix 是第三种碰撞策略：
 
 `src/services/mcp/client.ts:1760`
 ```ts
-      // Check if we should skip the mcp__ prefix for SDK MCP servers
-      const skipPrefix =
-        client.config.type === 'sdk' &&
-        isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
+// Check if we should skip the mcp__ prefix for SDK MCP servers
+const skipPrefix =
+  client.config.type === 'sdk' &&
+  isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
 
-      // Convert MCP tools to our Tool format
-      return toolsToProcess
-        .map((tool): Tool => {
-          const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
-          return {
-            ...MCPTool,
-            // In skip-prefix mode, use the original name for model invocation so MCP tools
-            // can override builtins by name. mcpInfo is used for permission checking.
-            name: skipPrefix ? tool.name : fullyQualifiedName,
-            mcpInfo: { serverName: client.name, toolName: tool.name },
-            isMcp: true,
-            ...
-          }
-        })
+// Convert MCP tools to our Tool format
+return toolsToProcess
+  .map((tool): Tool => {
+    const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+    return {
+      ...MCPTool,
+      // In skip-prefix mode, use the original name for model invocation so MCP tools
+      // can override builtins by name. mcpInfo is used for permission checking.
+      name: skipPrefix ? tool.name : fullyQualifiedName,
+      mcpInfo: { serverName: client.name, toolName: tool.name },
+      isMcp: true,
+      ...
+    }
+  })
 ```
 
 触发条件是两个条件同时成立（type 为 `sdk` **且**环境变量为真），因此**默认路径永远是加前缀的**。skip-prefix 的意义是让 SDK server 能按原名顶替内建工具——`mcpInfo` 字段就是为这件事准备的：模型看到的是裸名，权限匹配时还原成全限定名。第 5 节的判定链会用到这一点。
@@ -1600,28 +1600,28 @@ MCP 工具自己的 `checkPermissions` 不做判定，只返回 `passthrough` �
 
 `src/utils/permissions/permissions.ts:247-268`
 ```ts
-  // MCP tools are matched by their fully qualified mcp__server__tool name. In
-  // skip-prefix mode (CLAUDE_AGENT_SDK_MCP_NO_PREFIX), MCP tools have unprefixed
-  // display names (e.g., "Write") that collide with builtin names; rules targeting
-  // builtins should not match their MCP replacements.
-  const nameForRuleMatch = getToolNameForPermissionCheck(tool)
+// MCP tools are matched by their fully qualified mcp__server__tool name. In
+// skip-prefix mode (CLAUDE_AGENT_SDK_MCP_NO_PREFIX), MCP tools have unprefixed
+// display names (e.g., "Write") that collide with builtin names; rules targeting
+// builtins should not match their MCP replacements.
+const nameForRuleMatch = getToolNameForPermissionCheck(tool)
 
-  // Direct tool name match
-  if (rule.ruleValue.toolName === nameForRuleMatch) {
-    return true
-  }
+// Direct tool name match
+if (rule.ruleValue.toolName === nameForRuleMatch) {
+  return true
+}
 
-  // MCP server-level permission: rule "mcp__server1" matches tool "mcp__server1__tool1"
-  // Also supports wildcard: rule "mcp__server1__*" matches all tools from server1
-  const ruleInfo = mcpInfoFromString(rule.ruleValue.toolName)
-  const toolInfo = mcpInfoFromString(nameForRuleMatch)
+// MCP server-level permission: rule "mcp__server1" matches tool "mcp__server1__tool1"
+// Also supports wildcard: rule "mcp__server1__*" matches all tools from server1
+const ruleInfo = mcpInfoFromString(rule.ruleValue.toolName)
+const toolInfo = mcpInfoFromString(nameForRuleMatch)
 
-  return (
-    ruleInfo !== null &&
-    toolInfo !== null &&
-    (ruleInfo.toolName === undefined || ruleInfo.toolName === '*') &&
-    ruleInfo.serverName === toolInfo.serverName
-  )
+return (
+  ruleInfo !== null &&
+  toolInfo !== null &&
+  (ruleInfo.toolName === undefined || ruleInfo.toolName === '*') &&
+  ruleInfo.serverName === toolInfo.serverName
+)
 ```
 
 这个函数把三条语义合在了一起：**精确名匹配**、**server 级匹配**（规则写 `mcp__server1` 即覆盖该 server 的全部工具）、**通配匹配**（`mcp__server1__*`）。由于它被 `toolAlwaysAllowedRule`、`getDenyRuleForTool`、`getAskRuleForTool` 三个函数共用，**allow / deny / ask 三类规则对 MCP 工具等价生效**——这就是「规则层同一」的含义。
@@ -1632,13 +1632,13 @@ MCP 工具自己的 `checkPermissions` 不做判定，只返回 `passthrough` �
 
 `src/services/mcp/channelPermissions.ts:187-193`
 ```ts
-  return clients.filter(
-    (c): c is T & { type: 'connected' } =>
-      c.type === 'connected' &&
-      isInAllowlist(c.name) &&
-      c.capabilities?.experimental?.['claude/channel'] !== undefined &&
-      c.capabilities?.experimental?.['claude/channel/permission'] !== undefined,
-  )
+return clients.filter(
+  (c): c is T & { type: 'connected' } =>
+    c.type === 'connected' &&
+    isInAllowlist(c.name) &&
+    c.capabilities?.experimental?.['claude/channel'] !== undefined &&
+    c.capabilities?.experimental?.['claude/channel/permission'] !== undefined,
+)
 ```
 
 （判定体要求同时满足：已连接、在允许名单内、且 capability 里声明了 `claude/channel` 与 `claude/channel/permission` 两个实验扩展。）入站是结构化事件而不是文本正则——文件头注释明确说明 CC 侧**不做正则解析**。
@@ -1651,15 +1651,15 @@ token 的键不是 server 名，而是「server 名 + 配置内容哈希」的�
 
 `src/utils/secureStorage/plainTextStorage.ts:57-64`
 ```ts
-      writeFileSync_DEPRECATED(storagePath, jsonStringify(data), {
-        encoding: 'utf8',
-        flush: false,
-      })
-      chmodSync(storagePath, 0o600)
-      return {
-        success: true,
-        warning: 'Warning: Storing credentials in plaintext.',
-      }
+writeFileSync_DEPRECATED(storagePath, jsonStringify(data), {
+  encoding: 'utf8',
+  flush: false,
+})
+chmodSync(storagePath, 0o600)
+return {
+  success: true,
+  warning: 'Warning: Storing credentials in plaintext.',
+}
 ```
 
 「返回 warning 但不拒绝写入」是本层值得记录的一个取舍：**跨平台可用性优先于存储安全**。它至少做到了落盘即改权限位（`0o600`）。
@@ -1695,9 +1695,9 @@ const MAX_BACKOFF_MS = 30000
 
 `src/services/mcp/useManageMCPConnections.ts:356`
 ```ts
-            if (configType !== 'stdio' && configType !== 'sdk') {
-              ...
-            }
+if (configType !== 'stdio' && configType !== 'sdk') {
+  ...
+}
 ```
 
 stdio 与 sdk 分支不做自动重连，直接置 `failed`（`:466`），靠用户在菜单里点 Reconnect。理由是这两类连接的失败通常意味着**子进程已经没了或本地环境变了**，盲目重连只会重复失败（dsh 的 `negotiation-lifecycle.spec.ts:132` 有一条同旨的测试：探测失败且无法确认传输清理时就停止重试）。
@@ -1706,7 +1706,7 @@ stdio 与 sdk 分支不做自动重连，直接置 `failed`（`:466`），靠用
 
 `src/services/mcp/client.ts:1228`
 ```ts
-      const MAX_ERRORS_BEFORE_RECONNECT = 3
+const MAX_ERRORS_BEFORE_RECONNECT = 3
 ```
 
 超过即关闭传输并拒绝所有待处理请求。这是**对「server 不断返回错误」这种软故障**的处理，与「连接断开」是两条不同的路径。

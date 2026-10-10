@@ -144,12 +144,12 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 ```ts
 // packages/agent/src/harness/session/types.ts:521-528
 export interface Branch {
-	readonly name: string;
-	getTipId(context: Context): Promise<string | null>;
-	findEntries(query: BranchScan | undefined, context: Context): Promise<Entry[]>;
-	findEntry(query: BranchScan | undefined, context: Context): Promise<Entry | undefined>;
-	appendMessage(message: AgentMessage, context: Context): Promise<string>;
-	appendCustomEntry(customType: string, data: JsonValue | undefined, context: Context): Promise<string>;
+    readonly name: string;
+    getTipId(context: Context): Promise<string | null>;
+    findEntries(query: BranchScan | undefined, context: Context): Promise<Entry[]>;
+    findEntry(query: BranchScan | undefined, context: Context): Promise<Entry | undefined>;
+    appendMessage(message: AgentMessage, context: Context): Promise<string>;
+    appendCustomEntry(customType: string, data: JsonValue | undefined, context: Context): Promise<string>;
 }
 ```
 
@@ -163,18 +163,18 @@ export const branchTip = (branch: string) => value<string | null>("pi.branch.tip
 ```ts
 // packages/agent/src/harness/session/session.ts:355-368
 async createBranch(name: string, at: string | null, context: Context): Promise<Branch> {
-	this.assertOpen();
-	this.assertValidBranchName(name);
-	await this.mutate(async (mutator) => {
-		if ((await mutator.getValue(branchTip(name), context)) !== undefined) {
-			throw new SessionBranchExistsError(name);
-		}
-		if (at !== null && !(await mutator.getEntries([at], context)).has(at)) {
-			throw new SessionUnknownTargetError(at);
-		}
-		await mutator.commit([setValueWrite(branchTip(name), at)], context);
-	}, context);
-	return this.getOrCreateBranchObject(name);
+    this.assertOpen();
+    this.assertValidBranchName(name);
+    await this.mutate(async (mutator) => {
+        if ((await mutator.getValue(branchTip(name), context)) !== undefined) {
+            throw new SessionBranchExistsError(name);
+        }
+        if (at !== null && !(await mutator.getEntries([at], context)).has(at)) {
+            throw new SessionUnknownTargetError(at);
+        }
+        await mutator.commit([setValueWrite(branchTip(name), at)], context);
+    }, context);
+    return this.getOrCreateBranchObject(name);
 }
 ```
 
@@ -185,20 +185,20 @@ async createBranch(name: string, at: string | null, context: Context): Promise<B
 ```ts
 // packages/agent/src/harness/runtime/drive/structural.ts:260-298（节选）
 if (outcome.kind === "compaction") {
-	...
+    ...
 } else if (outcome.kind === "branch_summary") {
-	const boundary = navigationBoundary(current.task);
-	const entry: NewEntry<BranchSummaryEntry> = {
-		id: outcome.resultEntryId,
-		parentId: boundary.targetId,
-		type: "branch_summary",
-		fromId: meta.sourceTipId,
-		summary: outcome.result.summary,
-		details: { readFiles: outcome.result.readFiles, modifiedFiles: outcome.result.modifiedFiles },
-	};
-	writes.push(setValue(branchTip(lane.name), boundary.targetId));
-	...
-	writes.push(insertEntry(entry), setValue(branchTip(lane.name), outcome.resultEntryId));
+    const boundary = navigationBoundary(current.task);
+    const entry: NewEntry<BranchSummaryEntry> = {
+        id: outcome.resultEntryId,
+        parentId: boundary.targetId,
+        type: "branch_summary",
+        fromId: meta.sourceTipId,
+        summary: outcome.result.summary,
+        details: { readFiles: outcome.result.readFiles, modifiedFiles: outcome.result.modifiedFiles },
+    };
+    writes.push(setValue(branchTip(lane.name), boundary.targetId));
+    ...
+    writes.push(insertEntry(entry), setValue(branchTip(lane.name), outcome.resultEntryId));
 }
 ```
 
@@ -214,9 +214,9 @@ const model = agent.model ?? dispatchDefaults.model;
 if (model) args.push("--model", model);
 ...
 const proc = spawn(invocation.command, invocation.args, {
-	cwd: cwd ?? defaultCwd,
-	shell: false,
-	stdio: ["ignore", "pipe", "pipe"],
+    cwd: cwd ?? defaultCwd,
+    shell: false,
+    stdio: ["ignore", "pipe", "pipe"],
 });
 ```
 

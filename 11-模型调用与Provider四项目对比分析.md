@@ -141,8 +141,8 @@ pi 把标识拆成三个正交维度，这是它能支持 41 家的前提：
 ```ts
 // packages/ai/src/types.ts:17 —— 线协议（怎么说话）
 export type KnownApi = "openai-completions" | "mistral-conversations" | "openai-responses"
-	| "azure-openai-responses" | "openai-codex-responses" | "anthropic-messages"
-	| "bedrock-converse-stream" | "google-generative-ai" | "google-vertex" | "pi-messages";
+    | "azure-openai-responses" | "openai-codex-responses" | "anthropic-messages"
+    | "bedrock-converse-stream" | "google-generative-ai" | "google-vertex" | "pi-messages";
 export type Api = KnownApi | (string & {});
 ```
 
@@ -155,10 +155,10 @@ export type ProviderId = KnownProvider | string;
 ```ts
 // packages/ai/src/types.ts:982 —— 模型（具体哪个）
 export interface Model<TApi extends Api> {
-	id: string; name: string; api: TApi; provider: ProviderId; baseUrl: string;
-	reasoning: boolean; input: ("text" | "image")[];
-	cost: ModelCost; promptCache?: ModelPromptCache;
-	contextWindow: number; maxTokens: number;
+    id: string; name: string; api: TApi; provider: ProviderId; baseUrl: string;
+    reasoning: boolean; input: ("text" | "image")[];
+    cost: ModelCost; promptCache?: ModelPromptCache;
+    contextWindow: number; maxTokens: number;
 }
 ```
 
@@ -177,7 +177,7 @@ export interface Model<TApi extends Api> {
 // packages/ai/src/providers/anthropic.models.ts:4
 import values from "./data/anthropic.json" with { type: "json" };
 export const ANTHROPIC_MODELS: ModelCatalog<typeof values, "anthropic"> =
-	flattenModelCatalog("anthropic", values);
+    flattenModelCatalog("anthropic", values);
 ```
 
 **唯一的运行时动态目录是 `radius`**（网关型 provider）：
@@ -244,7 +244,7 @@ return provider.auth.apiKey ? resolveApiKey(requestAuthContext, provider.auth.ap
 ```ts
 // packages/ai/src/utils/provider-env.ts:45
 export function getProviderEnvValue(name: string, env?: ProviderEnv): string | undefined {
-	return env?.[name] || (typeof process !== "undefined" ? process.env[name] : undefined) || getBunSandboxEnvValue(name) || undefined;
+    return env?.[name] || (typeof process !== "undefined" ? process.env[name] : undefined) || getBunSandboxEnvValue(name) || undefined;
 }
 ```
 
@@ -269,22 +269,22 @@ export const DEFAULT_RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 3,
 ```ts
 // packages/agent/src/harness/runtime/drive/response.ts:276-295 —— if/else 链中的 error 分支
 if (response.stopReason === "error") {
-	if (
-		current.at === "assistant.effect_pending" &&
-		(options.recovery === true || isRetryableAssistantError(response)) &&
-		current.attempt < current.generationContext.retryPolicy.maxAttempts
-	) {
-		settled = {
-			...scope,
-			at: "assistant.retry_wait",
-			generationContext: current.generationContext,
-			nextAttempt: current.attempt + 1,
-			notBefore: retryNotBefore(current.generationContext.retryPolicy, current.attempt),
-			errorMessage: response.errorMessage ?? "Assistant request failed",
-		};
-	} else {
-		failure = providerError(source, response);
-	}
+    if (
+        current.at === "assistant.effect_pending" &&
+        (options.recovery === true || isRetryableAssistantError(response)) &&
+        current.attempt < current.generationContext.retryPolicy.maxAttempts
+    ) {
+        settled = {
+            ...scope,
+            at: "assistant.retry_wait",
+            generationContext: current.generationContext,
+            nextAttempt: current.attempt + 1,
+            notBefore: retryNotBefore(current.generationContext.retryPolicy, current.attempt),
+            errorMessage: response.errorMessage ?? "Assistant request failed",
+        };
+    } else {
+        failure = providerError(source, response);
+    }
 }
 ```
 
@@ -293,11 +293,11 @@ if (response.stopReason === "error") {
 ```ts
 // packages/ai/src/utils/provider-retry.ts:23
 function isRetryableProviderError(error: ProviderError): boolean {
-	const shouldRetry = error.headers?.get("x-should-retry");
-	if (shouldRetry === "true") return true;
-	if (shouldRetry === "false") return false;
-	if (error.status === undefined) return true;
-	return error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
+    const shouldRetry = error.headers?.get("x-should-retry");
+    if (shouldRetry === "true") return true;
+    if (shouldRetry === "false") return false;
+    if (error.status === undefined) return true;
+    return error.status === 408 || error.status === 409 || error.status === 429 || error.status >= 500;
 }
 ```
 
@@ -315,37 +315,37 @@ function isRetryableProviderError(error: ProviderError): boolean {
 ```ts
 // packages/ai/src/types.ts:396
 export interface Usage {
-	input: number; output: number; cacheRead: number; cacheWrite: number;
-	cacheWrite1h?: number; // 仅 Anthropic 报告
-	reasoning?: number;    // output 的子集
-	totalTokens: number;
-	cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
+    input: number; output: number; cacheRead: number; cacheWrite: number;
+    cacheWrite1h?: number; // 仅 Anthropic 报告
+    reasoning?: number;    // output 的子集
+    totalTokens: number;
+    cost: { input: number; output: number; cacheRead: number; cacheWrite: number; total: number };
 }
 ```
 
 ```ts
 // packages/ai/src/models.ts:900-917
 export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage): Usage["cost"] {
-	const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
-	let rates: ModelCostRates = model.cost;
-	let matchedThreshold = -1;
-	for (const tier of model.cost.tiers ?? []) {
-		if (inputTokens > tier.inputTokensAbove && tier.inputTokensAbove > matchedThreshold) {
-			rates = tier;
-			matchedThreshold = tier.inputTokensAbove;
-		}
-	}
+    const inputTokens = usage.input + usage.cacheRead + usage.cacheWrite;
+    let rates: ModelCostRates = model.cost;
+    let matchedThreshold = -1;
+    for (const tier of model.cost.tiers ?? []) {
+        if (inputTokens > tier.inputTokensAbove && tier.inputTokensAbove > matchedThreshold) {
+            rates = tier;
+            matchedThreshold = tier.inputTokensAbove;
+        }
+    }
 
-	// Anthropic charges 2x base input for 1h cache writes.
-	const longWrite = usage.cacheWrite1h ?? 0;
-	const shortWrite = usage.cacheWrite - longWrite;
+    // Anthropic charges 2x base input for 1h cache writes.
+    const longWrite = usage.cacheWrite1h ?? 0;
+    const shortWrite = usage.cacheWrite - longWrite;
 
-	usage.cost.input = (rates.input / 1000000) * usage.input;
-	usage.cost.output = (rates.output / 1000000) * usage.output;
-	usage.cost.cacheRead = (rates.cacheRead / 1000000) * usage.cacheRead;
-	usage.cost.cacheWrite = (rates.cacheWrite * shortWrite + rates.input * 2 * longWrite) / 1000000;
-	usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
-	return usage.cost;
+    usage.cost.input = (rates.input / 1000000) * usage.input;
+    usage.cost.output = (rates.output / 1000000) * usage.output;
+    usage.cost.cacheRead = (rates.cacheRead / 1000000) * usage.cacheRead;
+    usage.cost.cacheWrite = (rates.cacheWrite * shortWrite + rates.input * 2 * longWrite) / 1000000;
+    usage.cost.total = usage.cost.input + usage.cost.output + usage.cost.cacheRead + usage.cost.cacheWrite;
+    return usage.cost;
 }
 ```
 
