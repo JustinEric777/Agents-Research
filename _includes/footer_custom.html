@@ -5,8 +5,9 @@
   渲染 site.footer_content（本站是 MIT License 那一行）。覆盖时必须保留这段，
   否则页脚会空掉——下面的前三行就是它。
 
-  追加的两段脚本（都挂在 jtd.onReady 上；主题的 activateNav 在同一批回调里更早
-  注册，所以此处运行时它的高亮已经加好了）：
+  追加的五段脚本。⚠ **它们都在解析期同步执行，不挂 `jtd.onReady`**——成因见文件
+  末尾「统一入口」那段注释（一句话：含 mermaid 的页面里 module 脚本会把
+  DOMContentLoaded 拖后几秒，挂上去就等于先给用户看半成品）：
 
     ① 侧栏默认全展开
        给每个「含子列表」的 .nav-list-item 补 .active。这正是折叠按钮点击时做的事
@@ -44,22 +45,25 @@
        的话，蓝就不再指示任何东西（参照站给全部行内代码上色，是因为它的正文里
        行内代码密度远低于本站）。六条形态、两处后缀细节与「扩展名白名单即唯一
        防线」的说明见 `markCodeRefs()` 上方注释。
+
+    ⑤ 章末分页器（上一章 / 下一章）
+       每章末尾两张卡，规格逐条对齐参照站的 `.prev-next`（分隔线 + 两张等宽卡片，
+       小号灰标签 + 强调色的章标题，hover 换边框色）。章序与标题都取自**侧栏导航**
+       ——那是全站唯一按阅读顺序排齐 17 章的地方，标题也与侧栏逐字一致。
+       **不读 front matter 的 `nav_order`**：各章分挂在启动区/内核区/外围区三个
+       父节点下，序号在每个父节点内各自从 1 开始，拿不到全序；可靠的序是
+       permalink 里的两位章号。「我在第几章」从 `<h1>` 的「第 N 章」读，而不是
+       `location.pathname`——前者在本地的 file:// 骨架页里也成立，便于渲染核验。
+       插在 `</main>` 之后（`#main-content` 的直属子节点）：这样它既落在同一条
+       列宽里与面包屑对齐，又不在 `linkChapterRefs()` / `markCodeRefs()` 的
+       作用域内（那两处只看 `#main-content > main`），否则标题里的「第 N 章」
+       会被再链一次、变成链接套链接。样式见 custom.scss 第十三节。
 {%- endcomment -%}
 {%- if site.footer_content -%}
   <p class="text-small mb-0">{{ site.footer_content }}</p>
 {%- endif -%}
 <script>
   (function () {
-    function ready(fn) {
-      if (window.jtd && jtd.onReady) {
-        jtd.onReady(fn);
-      } else if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", fn);
-      } else {
-        fn();
-      }
-    }
-
     // jtd.addEvent 是主题的绑定助手；主题 JS 万一没加载，回落到原生绑定，
     // 免得下面第一处调用就抛错、把整块大纲带走。
     function on(node, type, handler) {
@@ -67,12 +71,10 @@
       else node.addEventListener(type, handler, false);
     }
 
-    ready(function () {
-      linkChapterRefs(); // 先补链接，再生成大纲（大纲取标题文本，顺序无先后依赖，这里只为稳定）
-      markCodeRefs();
-      expandNav();
-      buildPageToc();
-    });
+    // 五件 DOM 工作（补链接 / 染蓝 / 展开侧栏 / 建大纲 / 建分页器）的**调用**写在
+    // 本文件最末尾——它们要用到下面那些 var 令牌（CHAPTER_BASE、RE_CODE_REF…），
+    // 放在这里会在赋值之前执行。为什么必须在解析期跑、不能等 DOMContentLoaded，
+    // 见文件末尾的注释。
 
     // ---------------------------------------------------------------- ③ 跨章引用自动可点
     // 章号即层码：第 N 章 = LN，所以两种引用都指向 /ch/NN/。
@@ -313,6 +315,11 @@
       list.className = "page-toc-list";
 
       var links = [];
+      // 与 links 一一对应的 <li>。**当前项标记打在 li 上而不是链接上**：
+      // 链接带 `overflow: hidden`（文字省略号的前提），挂在它身上的伪元素会被
+      // 整段裁掉——`left: -1rem` 的滑块正好落在盒外，线上实测滑块中心点命中的是
+      // `UL.page-toc-list`，也就是说滑块从来没画出来过。
+      var items = [];
 
       for (var j = 0; j < headings.length; j++) {
         var heading = headings[j];
@@ -331,6 +338,7 @@
         li.appendChild(link);
         list.appendChild(li);
         links.push(link);
+        items.push(li);
       }
 
       aside.appendChild(list);
@@ -394,7 +402,9 @@
 
         var scrollY = window.pageYOffset || document.documentElement.scrollTop;
         var line = scrollY + 100; // 判定线：视口顶端往下 100px
-        var current = -1;
+        // 一条都没越过判定线时（页面停在顶端）**点亮第一条**，而不是整栏无高亮。
+        // 否则刚打开一章时右侧一看像是「没生效」；而此刻在读的确实就是第一节。
+        var current = headings.length ? 0 : -1;
 
         // 标题按文档顺序排列，一旦有一个越过判定线就停 —— 不用逐个测到底
         for (var k = 0; k < headings.length; k++) {
@@ -406,11 +416,18 @@
         }
 
         for (var m = 0; m < links.length; m++) {
-          links[m].classList.toggle("current", m === current);
+          items[m].classList.toggle("current", m === current);
         }
 
-        // 面板自身要滚动时，把当前项带进可视范围（面板不溢出就不做任何事）
-        if (current >= 0 && aside.scrollHeight > aside.clientHeight + 8) {
+        // 面板自身要不要滚（常驻档下 max-height 会截住超长的大纲）。
+        // `.is-long` 给 CSS 用：只在这时才给面板上「底帘渐隐」的 mask——
+        // 短大纲的内容没超过盒子，加 mask 会把最后一条白白削掉一截。
+        var scrollable = aside.scrollHeight > aside.clientHeight + 8;
+        aside.classList.toggle("is-long", scrollable);
+
+        // 面板要滚时，把当前项带进可视范围（不溢出就不做任何事）。
+        // 滚动条已按参照站整条隐藏，这个自动跟随就是「面板还能滚」的唯一线索。
+        if (current >= 0 && scrollable) {
           var rect = links[current].getBoundingClientRect();
           var box = aside.getBoundingClientRect();
           if (rect.top < box.top + 8) {
@@ -431,5 +448,101 @@
       on(window, "resize", schedule);
       update();
     }
+
+    // ---------------------------------------------------------------- ⑤ 章末分页器
+    function buildPager() {
+      var main = document.querySelector("#main-content > main");
+      if (!main || !main.parentNode) return;
+      if (main.parentNode.querySelector(".pager")) return; // 幂等
+
+      // 「我在第几章」读 <h1>。**不用 location.pathname**：本地 file:// 骨架页
+      // 的路径里没有 /ch/NN/，那样就没法在推送前渲染核验了。
+      // 用字面量正则而不是复用 RE_CHAPTER——那一个带 /g，`exec` 会改它的
+      // lastIndex，串到 linkChapterRefs 里去。
+      var h1 = main.querySelector("h1");
+      var hit = h1 ? /第\s*(\d{1,2})\s*章/.exec(h1.textContent || "") : null;
+      if (!hit) return; // 首页 / 总览 / 三个分区页没有章号，也就不加分页器
+      var here = parseInt(hit[1], 10);
+
+      // 章序 = 侧栏里章节条目的 DOM 顺序（= 阅读顺序）。
+      // **按章号而不是按 href 字符串配对**：href 在站点上是 `relative_url` 出来的
+      // 根相对路径，但本地骨架页会把它重写成站点的绝对 URL；比对字符串会导致
+      // 离线核验时永远配不上（这次就是这么踩到的）。章号两者都带，且唯一。
+      var found = document.querySelectorAll("#site-nav a.nav-list-link[href]");
+      var chapters = [];
+      for (var i = 0; i < found.length; i++) {
+        var href = found[i].getAttribute("href") || "";
+        var num = /\/ch\/(\d{2})\/$/.exec(href);
+        if (!num) continue; // 首页 / 总览 / 三个分区页
+        chapters.push({
+          n: parseInt(num[1], 10),
+          href: href,
+          text: (found[i].textContent || "").replace(/\s+/g, " ").trim()
+        });
+      }
+
+      var at = -1;
+      for (var j = 0; j < chapters.length; j++) {
+        if (chapters[j].n === here) { at = j; break; }
+      }
+      if (at < 0) return;
+
+      var prev = at > 0 ? chapters[at - 1] : null;
+      var next = at < chapters.length - 1 ? chapters[at + 1] : null;
+      if (!prev && !next) return;
+
+      var nav = document.createElement("nav");
+      nav.className = "pager";
+      nav.setAttribute("aria-label", "章节导航");
+      // 只造有内容的那一张：空的那一列由 CSS 的 `grid-column` 留白，
+      // 所以首章只出现「下一章」（靠右）、末章只出现「上一章」（靠左）。
+      if (prev) nav.appendChild(pagerCard("prev", "上一章", prev));
+      if (next) nav.appendChild(pagerCard("next", "下一章", next));
+
+      main.parentNode.insertBefore(nav, main.nextSibling);
+    }
+
+    function pagerCard(dir, label, chapter) {
+      var a = document.createElement("a");
+      a.className = "pager-link " + dir;
+      a.setAttribute("href", chapter.href);
+
+      var desc = document.createElement("span");
+      desc.className = "pager-desc";
+      desc.textContent = label;
+
+      var title = document.createElement("span");
+      title.className = "pager-title";
+      title.textContent = chapter.text;
+
+      a.appendChild(desc);
+      a.appendChild(title);
+      return a;
+    }
+
+    // ================================================================ 统一入口
+    // ⚠ 五件事都在**解析期同步**跑完，**不能**挂到 DOMContentLoaded 上。
+    //
+    // 成因：含 mermaid 的页面里有一句 `<script type="module">`（主题的
+    // components/mermaid.html，从 CDN 取 mermaid）。module 脚本天然 deferred，
+    // 它会一直压着 DOMContentLoaded 不放。实测（3G 冷缓存）首帧 2.1s 就画了，
+    // DCL 却落到 5.4s —— 挂在 DCL 上等于先给用户看一个「侧栏只展开当前分区、
+    // 文件引用没染蓝、右侧没有大纲、章末没有翻页」的半成品，几秒后再一次性跳成
+    // 终态；这正是「每次刷新样式都会乱一下」的第二半（第一半是配色表的换法，
+    // 见 head_custom.html）。
+    //
+    // 本脚本的位置就在 `</main>` 之后、`<body>` 收尾之前（主题 components/
+    // footer.html 里包的），此时侧栏（components/sidebar.html）与正文都已解析
+    // 完毕，直接跑即可。又因为内联脚本会等**阻塞样式的样式表**就绪才执行，
+    // 「跑完」到「首帧」之间不存在样式空窗。
+    //
+    // 顺序：先补链接（大纲取标题文本，其实无先后依赖，这样排只为稳定），
+    // 再染蓝、展开侧栏、建大纲，最后建分页器（它插在 </main> 外面，不影响
+    // 上面几处的作用域）。
+    linkChapterRefs();
+    markCodeRefs();
+    expandNav();
+    buildPageToc();
+    buildPager();
   })();
 </script>

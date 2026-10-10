@@ -1,19 +1,19 @@
 {%- comment -%}
-  首屏之前把配色与本页大纲的初始状态定下来。
+  首帧之前把三件事定下来：配色样式表、<html> 上的主题标记、本页大纲的初始状态。
 
-  主题的机制：head.html 先挂 assets/css/just-the-docs-default.css，再由
-  assets/js/just-the-docs.js 的 jtd.setTheme() 换这个 <link> 的 href
-  来切换配色。本文件在做同一件事，但发生在**浏览器首帧之前**——否则深色用户
-  每开一页都会先闪一下白底。
+  本文件被 _includes/head.html（本站覆盖版）放在**样式表之前**，所以这里
+  document.write 出来的 <link> 由解析器插入，是渲染阻塞资源，首帧必然等到样式
+  就绪；只下载一张表（浅色用主题自带，深色用自定义方案）。
 
-  ⚠ 这里**不用** jtd.setTheme()：它把文件名写死成
-  `assets/css/just-the-docs-<theme>.css`，而本站的深色是自定义方案，产出的是
-  just-the-docs-dark-premium.css（见 assets/css/just-the-docs-dark-premium.scss）。
-  所以 href 由下面的 MAP 显式给出，_includes/header_custom.html 的切换按钮用同一张表。
-  约定：操作的始终是 `document.querySelector('link[rel="stylesheet"]')`，即 head 里
-  **第一个**样式表（第二个是 id=jtd-head-nav-stylesheet 的无 JS 兜底表）。
+  ⚠ 不要改回「先挂一张表、再改它的 href」那种写法。改 href 会让这张表脱离渲染
+  阻塞，浏览器会先画一帧裸 HTML，等新表到了再重画——这正是「每次刷新样式都会乱
+  一下」的根因（实测 FCP 比样式表早 640ms，见 head.html 顶部的完整时间线）。
+  切换按钮（_includes/header_custom.html）同理：新表 onload 之后才撤旧表。
 
-  本页大纲同理：宽屏默认展开、窄屏默认收起，若等 DOM 就绪再定，窄屏上会看到抽屉
+  约定：这张表带 id="jtd-theme-stylesheet"，切换按钮按 id 找它，不再用
+  `querySelector('link[rel="stylesheet"]')`（head-nav 那张表也带 rel=stylesheet）。
+
+  本页大纲：宽屏默认展开、窄屏默认收起，若等 DOM 就绪再定，窄屏上会看到抽屉
   先滑出再收回。状态类挂在 <html> 上，两个类互斥：
     toc-closed → 宽屏收起（窄屏本来就收起）
     toc-open   → 窄屏唤出抽屉（宽屏本来就展开）
@@ -49,10 +49,10 @@
     // 供 CSS（图标、滚动条等）与其他脚本（mermaid）读取
     document.documentElement.setAttribute("data-theme", theme);
 
-    var link = document.querySelector('link[rel="stylesheet"]');
-    if (link) {
-      link.setAttribute("href", HREF[theme]);
-    }
+    // ★ 解析器插入的样式表：渲染阻塞 ⇒ 首帧就是终态
+    document.write(
+      '<link rel="stylesheet" id="jtd-theme-stylesheet" href="' + HREF[theme] + '">'
+    );
 
     var wide = window.matchMedia(TOC_MEDIA).matches;
     var toc = null;

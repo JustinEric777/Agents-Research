@@ -1,0 +1,72 @@
+{%- comment -%}
+  覆盖主题的 _includes/head.html。
+
+  ★ 覆盖的唯一原因：把「配色样式表的选取」提到 <link> 之前。
+
+  主题原本的做法是在这里**先挂一张固定样式表**，再由 JS 改它的 href 换配色
+  （见 head_custom.html）。那样做的后果是这张表**脱离渲染阻塞**——浏览器认为
+  「样式已就绪」，于是先画出一帧完全无样式的裸 HTML，等新表到了再重画。
+  实测（CDP 帧捕获 + PerformanceResourceTiming，3G 冷缓存）：
+
+      953ms  发起请求 just-the-docs-default.css
+     2084ms  它到达
+     2088ms  改 href 触发第二次请求 just-the-docs-light.css   ← 同一份 CSS 白下载两遍
+     2152ms  ★ first-contentful-paint —— 比样式表早 640ms，画的是裸 HTML
+     2709ms  换来的样式表才到达
+
+  head_custom.html 现在改用 document.write 写出这张表：内容由**解析器插入**，
+  天然是渲染阻塞资源，首帧必然等到样式就绪，而且只下载一张表。
+
+  其余部分与主题 0.12.0 的 head.html 完全一致（保留 ga_tracking / favicon /
+  seo / head-nav 样式表 / jtd-nav-activation 内联样式），升级主题时对着核一遍。
+  ⚠ head_custom.html 的位置从「head 末尾」挪到了「样式表之前」，别改回去。
+{%- endcomment -%}
+
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="X-UA-Compatible" content="IE=Edge">
+
+  {% include head_custom.html %}
+
+  {%- comment -%}
+    JS 关闭时的兜底：此时 document.write 不会执行，页面会**完全没有样式**。
+    含脚本的浏览器把 <head> 里的 <noscript> 内容当纯文本，这两个 <link> 不会被
+    解析、也就不会多下一次请求；只有真的关了 JS 才会生效。
+  {%- endcomment -%}
+  <noscript>
+    <link rel="stylesheet" href="{{ '/assets/css/just-the-docs-light.css' | relative_url }}" media="(prefers-color-scheme: light)">
+    <link rel="stylesheet" href="{{ '/assets/css/just-the-docs-dark-premium.css' | relative_url }}" media="(prefers-color-scheme: dark)">
+  </noscript>
+
+  <link rel="stylesheet" href="{{ '/assets/css/just-the-docs-head-nav.css' | relative_url }}" id="jtd-head-nav-stylesheet">
+
+  <style id="jtd-nav-activation">
+  {% include css/activation.scss.liquid %}
+  </style>
+
+  {% if site.ga_tracking != nil %}
+    {% assign ga_tracking_ids = site.ga_tracking | split: "," %}
+    <script async src="https://www.googletagmanager.com/gtag/js?id={{ ga_tracking_ids.first }}"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+
+      {% for ga_property in ga_tracking_ids %}
+      gtag('config', '{{ ga_property }}'{% unless site.ga_tracking_anonymize_ip == nil %}, { 'anonymize_ip': true }{% endunless %});
+      {% endfor %}
+    </script>
+  {% endif %}
+
+  {% if site.search_enabled != false %}
+    <script src="{{ '/assets/js/vendor/lunr.min.js' | relative_url }}"></script>
+  {% endif %}
+
+  <script src="{{ '/assets/js/just-the-docs.js' | relative_url }}"></script>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  {% include_cached favicon.html %}
+
+  {% seo %}
+</head>

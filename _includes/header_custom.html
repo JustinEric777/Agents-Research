@@ -141,10 +141,21 @@
 
       on(button, "click", function () {
         var next = current() === "dark" ? "light" : "dark";
-        var link = document.querySelector('link[rel="stylesheet"]');
+        var old = document.getElementById("jtd-theme-stylesheet");
 
-        // 换 <link href>，即换整份配色样式表（浅色用主题自带，深色用自定义方案）
-        if (link && ASSETS[next]) link.setAttribute("href", ASSETS[next]);
+        // ⚠ 不能改旧表的 href：那会让它脱离渲染阻塞，浏览器先画一帧裸 HTML
+        //   （与「刷新样式乱一下」同一个成因）。改为**新表就位后再撤旧表**——
+        //   中途始终有一张已生效的配色表，只会看到配色晚一两帧换过来。
+        if (old && ASSETS[next]) {
+          var nl = document.createElement("link");
+          nl.rel = "stylesheet";
+          nl.id = "jtd-theme-stylesheet";
+          nl.href = ASSETS[next];
+          nl.onload = nl.onerror = function () {
+            if (old.parentNode) old.parentNode.removeChild(old);
+          };
+          document.head.appendChild(nl);
+        }
         document.documentElement.setAttribute("data-theme", next);
 
         try {

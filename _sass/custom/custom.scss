@@ -25,29 +25,35 @@
 //    宽度上限与居中规则，头部才会和正文左右对齐（这是「规整」的关键）。
 
 // ---------------------------------------------------------------- 设计令牌
-// 版面分两档宽度（2026-10-08 改版，对齐 VitePress 类文档站的阅读规格）：
+// **单一列宽**（2026-10-09 定稿）。正文、表格、源码摘录、图共用同一条列的
+// 左右边界——这是参照站的模型：实测它的 `.vp-doc` 下 `p` / `h2` / `pre` / `table`
+// 四者的盒子**完全相同**（1512px 视口下都是 left 420 / width 688），
+// 所以整页只有一条左边界、一条右边界，不存在「文字比表格窄一截」的观感。
 //
-//   $prose-max   —— **文字列**。一段正文的舒适行宽。
-//   $content-max —— **内容列 / 展品列**。表格、源码摘录、图的宽度上限。
+// 本站改前的做法是分两档（文字 48rem / 展品 72rem），结果是每段正文右侧留下
+// 320px 空带、一页出现两条右边界——「整体上不一致」的直接来源。本轮取消两档。
 //
-// 为什么分两档：本系列是「密集正文 + 421 张表 + 大量源码摘录」。只用一条宽列
-// （改版前 1400px）在宽屏上一行超过 80 个汉字，回扫时容易串行；只用一条窄列
-// （如参照站的 688px）又会让表格频繁横向滚动。各管各的，是这类文档站的通行做法。
+// 列宽定在 **60rem = 960px ≈ 60 汉字/行**。取值依据是**实测**（把列宽与
+// `th/td min-width` 做二维扫描，数「多少张表会横向滚动」）：
 //
-// $prose-max = 48rem = 768px ≈ 48 汉字/行。参照站（VitePress）是 688px ≈ 43 字；
-// 本站略宽，因为正文里英文标识符、文件路径、行内代码占比高，过窄会频繁折行。
+//   列宽                     768   832   896   928   960   992  1024  1088
+//   6rem 表头 / 118 张表      44    27    22    18    12     9     7     3
+//   7.5rem 表头 / 90 张表     43    33    23    21    15     —     9     4
 //
-// $content-max = 72rem = 1152px。**旧值 87.5rem 的取值依据已失效**：那里写的
-// 「横向对比表最多 10 列」是预估；实测全系列 421 张表**最多 7 列**（仅 2 张）、
-// 多数为 3–6 列，主题每格 `min-width: 7.5rem`(120px) ⇒ 6 列只需约 730px。
-// 1152px 仍给源码摘录（Rust/TS 常见 90 列以上）留足了横向空间。
+// （第 2 行是主题默认的 7.5rem 表头，取自 06/12/09 三章 90 张表；第 1 行是
+//   本轮把表头最小列宽收到 6rem 后、4 篇最重表格章节共 118 张表的复测。
+//   两组样本不同，只做趋势参考，不要跨行相减。）
 //
-// $content-max 同时决定「自适应」的档位：侧栏 19rem + 内容列 72rem = 91rem（1456px），
-// 即下面的 $shell-drawer。**视口 ≤ 1456px 时上限不生效，正文列铺满侧栏右侧的全部空间**；
-// 更宽则两侧各留等量白边（**左右边界对称**，见 $shell-drawer / shell-inset()）。
-// 想整体调宽/调窄，只改这两个变量即可。
-$prose-max: 48rem;
-$content-max: 72rem;
+// 参照站是 688px（≈43 字），我们取不到那么窄——同在 7.5rem 表头下，688px 时
+// 90 张表里 58 张要横滚。也不能取更宽：1024px 起虽然只剩 7 张横滚，但一行
+// 64 个汉字已越过舒适区。960px 是「正文行宽」与「表格不横滚」两条约束的交点：
+// 约 10% 的表需要横向拖动，其余（含**全部**源码摘录——实测 640px 起就没有任何
+// 代码块横滚，宽列其实一直是**为表格留的**）都在列内。
+//
+// $content-max 是**外壳**上限，不是列宽：`.main-content-wrap` 自身有 2rem 内边距，
+// 所以列宽 = $content-max − 4rem = 1024 − 64 = 960px。
+// 它同时决定「自适应」的档位（见 $shell-drawer）。想整体调宽/调窄只改这一个变量。
+$content-max: 64rem;
 
 $nav-w-md: 15.5rem; // md 侧栏宽（沿用主题 $nav-width-md）
 $nav-w-lg: 19rem;   // lg 侧栏宽：导航字号提到 15px 后仍不折行。
@@ -59,11 +65,13 @@ $nav-w-lg: 19rem;   // lg 侧栏宽：导航字号提到 15px 后仍不折行。
 // ---- 本页大纲（右栏，见第十一节）
 $toc-w: 13rem;  // 208px：容得下「四、逐项目实现」「6.3 触发两个入口」这类条目
 $toc-gap: 2rem; // 正文列与大纲之间的间距
-$wrap-max: $content-max + $toc-w + $toc-gap; // 87rem = 1392px
+$wrap-max: $content-max + $toc-w + $toc-gap; // 79rem = 1264px（外壳常驻态的上限）
 $toc-min: 105rem; // 1680px：视口够宽才把大纲放成常驻栏；否则退化成右侧抽屉。
-// 门槛**有意高于 $wrap-max**：1680px 时可用宽度是 1680 − 侧栏 19rem = 1376px，
-// 仍小于 1392px，所以这一档下正文列不会被上限截断，只是被大纲栏挤掉 240px
-// （内容列 1136px，仍容得下 6 列表格）；要更宽才会看到整组居中收口。
+// 门槛必须 **≥ $shell-wide(98rem = 1568px)**：常驻态下正文列要用
+// `$wrap-max − 4rem − $toc-w − $toc-gap = 60rem = 960px`，而 `$wrap-max` 只有在
+// 视口装得下整个外壳时才真的生效。取 105rem 留了 7rem 余量，所以跨过这个断点时
+// 列宽稳定在 960px 不跳变（跳的是外壳整体位置：抽屉档让位量按 83rem 算、
+// 常驻档按 98rem 算——这是「大纲从抽屉换成栏」本身的代价，两侧都验算过）。
 
 // ---- 整站左右边界：把「侧栏 + 内容列」当成一个外壳，宽屏整体居中 ----------
 // 参照站的做法（它的编译产物）：≥1440px 时
@@ -77,11 +85,11 @@ $toc-min: 105rem; // 1680px：视口够宽才把大纲放成常驻栏；否则�
 // 居中 → 左侧墨迹固定 32px，右侧随视口变宽一路涨到 60 / 144 / 464px。
 //
 // 下面两个常量是外壳宽度（侧栏 + 内容列），**不能合并成一个**：大纲常驻时内容列要多
-// 吃 15rem（$toc-w + $toc-gap），外壳随之变宽。若统一用宽的那个，抽屉档（1456–1680px）
-// 里正文列会白白宽出 240px，而它跨过 $toc-min 又会被大纲栏挤回 1152px —— 一次列宽跳变。
+// 吃 15rem（$toc-w + $toc-gap），外壳随之变宽。若统一用宽的那个，抽屉档（1328–1680px）
+// 里正文列会白白宽出 240px，而它跨过 $toc-min 又会被大纲栏挤回 960px —— 一次列宽跳变。
 $gutter: 2rem; // 与内容列左右内边距一致：左右边界的**最小**留白就是它。
-$shell-drawer: $nav-w-lg + $content-max; // 91rem  = 1456px（大纲为抽屉时）
-$shell-wide:   $nav-w-lg + $wrap-max;    // 106rem = 1696px（大纲常驻时）
+$shell-drawer: $nav-w-lg + $content-max; // 83rem = 1328px（大纲为抽屉时）
+$shell-wide:   $nav-w-lg + $wrap-max;    // 98rem = 1568px（大纲常驻时）
 
 // 让位量：外壳比视口窄时两侧各留 (V − 外壳) / 2，否则 0。
 // 用 50% 而不是 50vw——固定定位元素与普通流的百分比都按**不含滚动条**的宽度解析，
@@ -145,6 +153,9 @@ $c-prose-link-on:   if($color-scheme == dark, #ffffff, #000000);
 // 19 章同时可见，一整条淡底比只靠文字颜色更容易「一眼找到我在哪」。
 // 指示条与文字色走上面的 `$c-accent`，不在令牌层重复定义。
 $c-nav-on-bg:     if($color-scheme == dark, rgba($white, 0.055), rgba($grey-dk-300, 0.05));
+// 小号次要文字。对齐参照站的 `--vp-c-text-2`（它同时用在侧栏层级、大纲未选中项、
+// 分页器的「上一章 / 下一章」标签上）。本站只在章末分页器用它。
+$c-text-2:        if($color-scheme == dark, #8f97a3, $grey-dk-000);
 
 // ============================================================================
 // 一、自适应布局
@@ -207,27 +218,24 @@ $c-nav-on-bg:     if($color-scheme == dark, rgba($white, 0.055), rgba($grey-dk-3
     padding-left: 2rem;
   }
 
-  // ---- 阅读测度：只收「文字类」块级元素，展品类保持内容列全宽 ----------
-  // `#main-content` 的直属结构是 `div#main-content.main-content > main`（TOC 脚本
-  // 取的就是 `#main-content > main`），渲染后的 Markdown 是 `<main>` 的直属子元素。
-  // 实测这些子元素只有两类：
-  //   文字类——p / ul / ol / blockquote / h1–h6 / hr；
-  //   展品类——div.table-wrapper（表格，主题已包好 overflow-x:auto）、
-  //           div.language-*（源码摘录）、mermaid 容器。
-  // 只收前者：表格与源码在宽屏上需要更宽的版面，硬压到 768px 会让它们频繁横滚
-  // （实测把列宽从 1088 收到 768，5 篇样本里 144 张表中 59 张开始横滚；
-  //   而 191 个代码块在 768 就已经全部不横滚，所以宽列其实是**为表格留的**）。
+  // ---- 单一列宽（2026-10-09）：不再给「文字类」子元素单独收窄 ----------
+  // 这里原先有一条 `#main-content > main > :is(p, ul, …, hr) { max-width: 48rem }`
+  // ——把文字收到 768px、表格与源码留在 1088px。**本轮删掉**。
   //
-  // 收窄之后**靠左**（margin-right: auto），不收左——这是「左右边界对齐」的关键：
-  // 1800px 下旧写法把文字列居中，文字左边界落在 548px，而面包屑、表格、代码块
-  // 都在 388px，同一页出现两条左边界，抬头第一眼就是「没对齐」。
-  // 靠左之后全篇只有一个左边界（列的内边缘），展品右伸出去的那一截交给右侧留白，
-  // 不再同时向左右两侧溢出，也就不存在「文字比展品缩进」的观感。
-  #main-content > main > :is(p, ul, ol, dl, blockquote, h1, h2, h3, h4, h5, h6, hr) {
-    max-width: $prose-max;
-    margin-right: auto;
-    margin-left: 0;
-  }
+  // 删的理由是它在页面上留下了一条 320px 的空带：每段正文的右边界落在
+  // `列左 + 768`，而表格、代码块、面包屑落在 `列左 + 1088`，**同一页两条右边界**。
+  // 参照站没有这个问题，因为它 `.vp-doc` 下 p / h2 / pre / table 的盒子完全一样
+  // （实测 1512px 视口下四者都是 left 420 / width 688）——整个页面对齐到**一条栅格**。
+  // 用户三次提出「整体上一致」，指向的就是这条空带。
+  //
+  // 宽度改由 `$content-max` 一处决定（见文件头的设计令牌），文字与展品共用，
+  // 于是四条边界（侧栏、正文、展品、面包屑）两两对齐，只剩一条左边界一条右边界。
+  //
+  // 实测留档：`#main-content > main` 的直属子元素确实只有两类——文字类
+  // （p / ul / ol / dl / blockquote / h1–h6 / hr）与展品类（div.table-wrapper、
+  // div.language-*、mermaid 容器）。这条分类信息现在仍然有用：**分页器是插在
+  // `</main>` 外面的**（见 _includes/footer_custom.html 的 buildPager），
+  // 所以它既不在文字类里、也不会被 `linkChapterRefs` 当成正文去改写。
 
   // 正文左右留白沿用主题的 $gutter-spacing（2rem）——**不要改**：
   //   左：标题的 `#` 锚点 `.anchor-heading` 绝对定位在 left: -1.5rem，需要 2rem 才不越界；
@@ -386,6 +394,12 @@ pre > code.language-mermaid {
     // 单元格里几乎都是多行长文，默认的 baseline 对齐会让首行错位
     vertical-align: top;
     border-color: $c-hairline;
+    // 主题（_sass/tables.scss:24）给的是 `min-width: 7.5rem`(120px)，对本站偏高：
+    // 全系列 421 张表实测**最多 7 列、多数 3–6 列**，而格子内容普遍很短
+    // （`pi` / `dsh` / `✓` / `—`）。收到 6rem 后，960px 列宽下会横滚的表
+    // 从 17 张降到 12 张（118 张样本）。这是**下限**不是上限——长内容仍会把
+    // 格子撑开，所以不会挤坏「源码依据」那种长路径列。
+    min-width: 6rem;
   }
 
   thead th {
@@ -721,6 +735,21 @@ html[data-theme="dark"] .theme-toggle {
   max-width: 84vw;
   padding: 1.5rem 1rem;
   overflow-y: auto;
+  // 内容比可视区高时照样能滚，但**不画出滚动条**。
+  // 一页 30+ 条大纲必然超出（实测第 13 章 37 条 × 32.5px + 标题 ≈ 1236px，
+  // 而常驻档的可视高只有 calc(100vh − 顶栏 − 2rem) ≈ 908px），于是这一栏右边
+  // 会多出一根长长的滚动条——在本来就只有「细轨 + 文字」的版面上非常扎眼。
+  // 做法与参照站一致（`.aside-container { scrollbar-width: none }` +
+  // `.aside-container::-webkit-scrollbar { display: none }`）；末端由常驻档的
+  // 「底帘渐隐」收尾，暗示还有下文（见 @media (min-width: $toc-min)）。
+  // ⚠ 与下面 JS 里「把当前项带进可视范围」的自动滚动是一对：不出条之后，
+  //   自动滚动就是用户唯一能感知到「面板还能滚」的线索。
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+
   // 参照站的 outline-link 是 14px / 行高 32px；这里同样用 0.875rem，
   // 行高交给下面 .toc-link 的 padding + line-height 凑出同等行距。
   font-size: 0.875rem;
@@ -789,6 +818,10 @@ html.toc-open .page-toc {
 
 .page-toc-item {
   margin: 0;
+  // 当前项滑块的定位基准。**必须放在 li 上，不能放在 `.toc-link` 上**：
+  // 链接为了长标题的省略号带 `overflow: hidden`，挂它身上的伪元素会被整段裁掉
+  // （见下面 `> .toc-link` 里的说明）。li 没有溢出约束。
+  position: relative;
 
   // h3 比 h2 再缩进一档、色阶降一档，层级一眼可见。
   // 缩进 13px 对齐参照站 `.outline-link.nested { padding-left: 13px }`；
@@ -796,22 +829,23 @@ html.toc-open .page-toc {
   // （h2/h3/h4 全用 `--vp-c-text-2`，只靠缩进分层），但一页 30+ 条的长大纲
   // 会因此失去层级线索。保留后靠「缩进 + 明度」双重区分。
   //
-  // ⚠ 必须写在下面 `> .toc-link` **之前**：`&.toc-level-3 > .toc-link` 与
-  //   `.page-toc-item > .toc-link:hover`、`.page-toc-item > .toc-link.current`
-  //   特异性同为 (0,3,0)，同级时**后来者胜**。放前面，悬停与当前项的「提亮」
-  //   才压得过这一档「降色」；放后面会让 h3 的当前项比普通 h3 还暗（已实测踩到）。
+  // ⚠ 这条与下面 `> .toc-link:hover` 特异性同为 (0,3,0)，同级时**后来者胜**，
+  //   所以必须写在前面，悬停的「提亮」才压得过这一档「降色」。
+  //   （当前项不受影响：它多了 `.page-toc-list` 前缀，是 (0,4,0)，无条件胜出。）
   &.toc-level-3 > .toc-link {
     padding-left: 0.8125rem;
     color: $c-toc-link-weak;
   }
 
   > .toc-link {
-    position: relative; // `.current::before` 的定位基准
     display: block;
     // 行距：0.25rem padding × 2 + 14px × 1.75 = 32.5px ≈ 参照站的 32px。
     // 比原来的 0.35rem 收一档，条目更紧凑，一屏能多看两三条。
     padding: 0.25rem 0.5rem;
     // 主题给 `a:not([class])` 加了下划线；这里的链接带 class，天然不受影响。
+    // ⚠ 这个 `overflow: hidden` 是文字省略号（text-overflow: ellipsis）的前提，
+    //   不能去掉——但**它会把超出本盒的伪元素一起裁掉**，所以当前项的滑块
+    //   不能挂在链接上（宁可给 li 加 `.current`，见 `&.current::before`）。
     overflow: hidden;
     line-height: 1.75;
     color: $c-toc-link;
@@ -825,32 +859,43 @@ html.toc-open .page-toc {
     &:hover {
       color: $c-toc-link-on;
     }
+  }
 
-    &.current {
-      color: $c-toc-link-on;
+  // 当前项：文字提亮 + 细轨上压一段强调色滑块。
+  // 参照站 `.outline-marker` 是 `left:-1px; width:2px; height:18px;
+  // border-radius:2px; background-color: var(--vp-c-brand-1)`。
+  //   左边缘落在细轨上 → li 左边缘再退 1rem（= 列表的 padding-left），**再退 1px**
+  //   抵掉轨自身的宽度。细轨是 `.page-toc-list` 的 1px border-left，而 li 是从
+  //   「border 之后 + padding 16px」开始的，所以 `-1rem` 只到轨的内沿；补上这 1px
+  //   滑块才和轨的左沿对齐（等价参照站的 `left: -1px`：滑块的左沿压在轨上，
+  //   2px 宽的滑块盖住 1px 的轨并向右多出 1px）。
+  //   **滑块上强调色、文字不上**——这正是参照站的分工：一个页面里「当前章」和
+  //   「当前节」是两个层级，若两处都上蓝，蓝色就同时指两个东西。
+  // 长度取 0.875rem(14px) 而**不是**参照站的 18px：参照站条目行高 32px / 字号
+  //   16px，18px 的竖条略短于文字；本站条目 32.5px 但字号只有 14px，18px 就比
+  //   文字本身还高一截，看着像根长条。对齐到文字行高（14px）后与文字等长，
+  //   整列读下来最整齐。
+  &.current::before {
+    position: absolute;
+    top: 50%;
+    left: calc(-1rem - 1px);
+    width: 2px;
+    height: 0.875rem;
+    background-color: $c-accent;
+    border-radius: 2px;
+    content: "";
+    transform: translateY(-50%);
+  }
 
-      // 参照站 `.outline-marker`：`left: -1px; width: 2px; height: 18px;
-      // border-radius: 2px; background-color: var(--vp-c-brand-1)`。
-      // 滑块的左边缘落在细轨上 → 链接左边缘再退 1rem（列表的 padding-left）。
-      // **滑块上强调色、文字不上**——这正是参照站的分工：一个页面里「当前章」和
-      // 「当前节」是两个层级，若两处都上蓝，蓝色就同时指两个东西。
-      &::before {
-        position: absolute;
-        top: 50%;
-        left: -1rem;
-        width: 2px;
-        height: 1.125rem;
-        background-color: $c-accent;
-        border-radius: 2px;
-        content: "";
-        transform: translateY(-50%);
-      }
-    }
+  // `.page-toc-list` 前缀把特异性提到 (0,4,0)：条目的「降色」与链接的「悬停提亮」
+  // 都是 (0,3,0)，这样当前项就不必依赖书写顺序。
+  .page-toc-list &.current > .toc-link {
+    color: $c-toc-link-on;
   }
 }
 
 @media (min-width: $toc-min) {
-  // 外壳换档：大纲常驻后内容列多吃 $toc-w + $toc-gap，外壳从 91rem 涨到 106rem。
+  // 外壳换档：大纲常驻后内容列多吃 $toc-w + $toc-gap，外壳从 83rem 涨到 98rem。
   // 左右让位量随之重算，否则抽屉档算出的让位量会把整组推离中心。
   .side-bar {
     width: calc(#{$nav-w-lg} + #{shell-inset($shell-wide)});
@@ -902,6 +947,18 @@ html.toc-open .page-toc {
     border-left: 0;
     box-shadow: none;
     transform: none;
+
+    // 大纲比可视区高时，末端不是被硬切一刀，而是淡出。
+    // 参照站用 `.aside-curtain`（固定在底部的 32px 渐变帘，`linear-gradient(
+    // transparent, var(--vp-c-bg) 70%)`）；这里用 mask 替代——mask 作用在盒子上，
+    // 滚动内容在盒子下沿自然淡出，效果等价且不必多一个 DOM 节点。
+    // ⚠ 只在真的溢出时才上：`.is-long` 由 footer 脚本量完 scrollHeight 再打，
+    //   否则短大纲的最后一条会被白白淡掉一截（这是 mask 与「帘」的关键区别：
+    //   帘盖在内容上，短大纲时它下面没有内容、看不出；mask 却会削掉内容）。
+    &.is-long {
+      -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+      mask-image: linear-gradient(to bottom, #000 calc(100% - 2rem), transparent);
+    }
   }
 
   // 常驻形态用页头按钮收起，不需要抽屉里那个 ×
@@ -913,7 +970,7 @@ html.toc-open .page-toc {
   // 旧写法把 `.main-content-wrap` 收窄到 $content-max 并回到 1 列——正文列宽确实没变，
   // 但外面因此多出 240px 的余量、被 `margin: auto` 均分，右边白边就比左边厚一截，
   // 刚做完的左右对称会被这一下破坏。这里改成列模板回 1 列、宽度上限保持 $wrap-max：
-  // 大纲那一栏整列让给正文（表格 / 源码摘录从 1152px 涨到 1392px），
+  // 大纲那一栏整列让给正文（表格 / 源码摘录从 960px 涨到 1200px），
   // 右边界因此原地不动，收起 / 展开大纲不会让整页横跳。
   html.toc-closed {
     .page-toc {
@@ -934,4 +991,79 @@ html.toc-open .page-toc {
 // 这里只隐藏站点副本，仓库里的 Markdown 不受影响。
 .main-content > .online-reading {
   display: none;
+}
+
+// ============================================================================
+// 十三、章末分页器（上一章 / 下一章）
+// ============================================================================
+// DOM 由 _includes/footer_custom.html 的 `buildPager()` 生成，插在 `</main>` 之后
+// （`#main-content` 的直属子节点），所以它落在同一条列宽里、与面包屑左右对齐，
+// 又不会跑进 `linkChapterRefs()` / `markCodeRefs()` 的作用域（那两处都只看
+// `#main-content > main`）——否则分页器标题里的「第 N 章」会被再链一次，
+// 变成链接套链接。
+//
+// 规格逐条对齐参照站（取自它的编译产物 `.prev-next` / `.pager-link`）：
+//   border-top:1px solid divider; padding-top:24px; margin-top:64px
+//   grid 两列、列间距 16px、行间距 8px
+//   卡片 border:1px solid divider; border-radius:8px; padding:11px 16px 13px
+//   hover 只换边框色 → brand-1；卡片文字两行：desc 12px/text-2，title 14px/brand-1
+// 站内两处对齐：颜色走 `$c-hairline` / `$c-text-2` / `$c-accent`（= 参照站的
+// divider / text-2 / brand-1），圆角沿用 `$border-radius`（主题值 4px）——参照站
+// 是 8px，这里跟主题走，避免全站出现第二种圆角。
+.pager {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr); // 窄屏先堆成一列
+  row-gap: 0.5rem;
+  margin-top: 4rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid $c-hairline;
+}
+
+.pager-link {
+  display: block;
+  padding: 0.6875rem 1rem 0.8125rem; // 11px 16px 13px
+  border: 1px solid $c-hairline;
+  border-radius: $border-radius;
+  // 主题给不带 class 的 `a` 加了下划线，给带 class 的留了 `$link-color`；
+  // 这里两条都显式清掉，颜色只由下面两个 span 决定。
+  color: inherit;
+  text-decoration: none;
+  transition: border-color 250ms ease;
+
+  // 参照站**只**换边框色，标题本身已经是强调色，所以不用再动文字
+  &:hover,
+  &:focus {
+    border-color: $c-accent;
+  }
+}
+
+.pager-desc {
+  display: block;
+  font-size: 0.75rem; // 12px
+  font-weight: 500;
+  line-height: 1.25rem; // 20px
+  color: $c-text-2;
+}
+
+.pager-title {
+  display: block;
+  font-size: 0.875rem; // 14px
+  font-weight: 500;
+  line-height: 1.25rem; // 20px
+  color: $c-accent;
+}
+
+// 窄屏上下两栏堆叠，两张卡都左对齐；≥md 起左右各一张。
+// 首章没有「上一章」、末章没有「下一章」时，另一张仍留在自己那一列
+// （`grid-column` 是显式写的，空出来的格子不会被后面的卡片顶上去）。
+@include mq(md) {
+  .pager {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    column-gap: 1rem;
+  }
+
+  .pager-link.next {
+    grid-column: 2;
+    text-align: right;
+  }
 }
