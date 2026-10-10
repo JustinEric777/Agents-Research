@@ -42,6 +42,42 @@
 
   <style id="jtd-nav-activation">
   {% include css/activation.scss.liquid %}
+
+  /* ------------------------------------------------------------------------
+     深色下「点击目录闪一下白底」的修法 —— **必须写在这个 <style> 里**，别挪去
+     custom.scss。
+
+     症状与根因：侧栏当前项的「JS 接管前」底色来自主题的
+       assets/css/just-the-docs-head-nav.css   （由上面那行 <link id=
+       "jtd-head-nav-stylesheet"> 挂出，全文只有一条规则）
+       内容：`.site-nav ul li a { background-image: linear-gradient(
+              -90deg, rgba($feedback-color,1) 0%, … 0.8 80%, … 0 100%) }`
+     它是**按 `_config.yml` 的 `site.color_scheme`（本站 = light）在构建期
+     scssify 出来的静态文件**，只有浅色一套 → 深色下这层高亮是**近白的
+     #ebedf5**。它落在谁身上由本 <style> 决定：下面 activation 生成的那几条
+     `.site-nav … :not(:nth-child(N)) > a { background-image: none }` 把**除当前页
+     外**的条目全部抹平，于是那条浅色渐变正好只剩当前项挂着。
+     两者都要等主题 JS 在 DOMContentLoaded 里 `disableHeadStyleSheets()` 才撤，
+     而本章带 mermaid 的 `<script type="module">`、DCL 会被拖后 —— 于是每次点
+     目录、每次加载新页，当前项先闪一下白底再变成正常选中态。**实测证据**
+     （无头 Chrome + rAF 逐帧读 computedStyle，点「第 9 章」后新文档）：
+       77ms   第 9 章 |-|rgba(0,0,0,0) linear-gradient(-90deg, rgb(235,237,245) 0% …)
+       110ms  第 9 章 |A|rgba(255,255,255,0.055) noimg   ← JS 已接管
+     （浅色对照组同一位置给的是三条 #ebedf5：当前项 + 各分区第 1 条，因为
+     activation 的 `:not(:nth-child(N))` 只按序号排除、跨分区也会漏。）
+
+     修法：照原配方换色，把深色那套补上。特异性 (0,2,4) —— 高于 head-nav 的
+     (0,1,4)（它虽然是后加载的，但同分才比顺序，这里靠 [data-theme] 多一分赢），
+     低于 activation 的 (0,3,0)/(0,4,0)，所以「非当前项 = none」的判定原样保留。
+     `data-theme` 由 _includes/head_custom.html 在解析期落到 <html> 上，
+     与两处 pre-JS 提示同时生效、也同时被禁用，**不会在本页滚动之后残留**
+     （写在 custom.scss 里就会残留：那时 head-nav 与 activation 都已 disabled，
+     这条会命中整条侧栏的每一个链接）。
+     色值与 _sass/color_schemes/dark-premium.scss 的 `$feedback-color` 一致。
+     ---------------------------------------------------------------------- */
+  html[data-theme="dark"] .site-nav ul li a {
+    background-image: linear-gradient(-90deg, #171a1f 0%, rgba(23, 26, 31, 0.8) 80%, rgba(23, 26, 31, 0) 100%);
+  }
   </style>
 
   {% if site.ga_tracking != nil %}
