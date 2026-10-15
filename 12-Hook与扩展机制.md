@@ -4,9 +4,15 @@ title: "第 12 章 · Hook 与扩展机制"
 nav_order: 10
 parent: "第二部分 · 内核区"
 permalink: /ch/12/
+reviewed_at: 2026-10-14
+baseline: current
+evidence_mode: mixed
+review_priority: P1
 ---
 
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
+
+> **当前基线补充（2026-10-14）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
 
 **本章回答什么** —— 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。
 
@@ -744,7 +750,7 @@ flowchart TD
 - **plugin 加载容错逐级降级**：manifest 缺失 → 合成默认继续；manifest 非法 → 抛错并记 `PluginError`；commands/skills 加载失败 → catch 成空数组继续（`pluginLoader.ts:1154-1160/1189-1211`、`commands.ts:361-372`）。**单组件损坏不拖垮整个 plugin**。
 - **skill 名冲突**：按文件 realpath 去重（首见优先，`loadSkillsDir.ts:753-762`），plugin command 强制命名空间前缀（`loadPluginCommands.ts:80`）。
 
-**门控提示**：`src/utils/hooks/` 目录内仅 1 处 `feature()` 门控（`skillImprovement.ts:177` 的 `[门控 SKILL_IMPROVEMENT]`），主执行器 `src/utils/hooks.ts` **无门控**，可作 `[代码]` 采信。其余门控集中在命令层（`WORKFLOW_SCRIPTS`、`MCP_SKILLS`）与 settings schema 层。
+**门控提示**：`src/utils/hooks/` 目录内仅 1 处 `feature()` 门控（`skillImprovement.ts:177` 的 `[code] SKILL_IMPROVEMENT`），主执行器 `src/utils/hooks.ts` **无门控**，可作 `[code]` 采信。其余门控集中在命令层（`WORKFLOW_SCRIPTS`、`MCP_SKILLS`）与 settings schema 层。
 
 ---
 

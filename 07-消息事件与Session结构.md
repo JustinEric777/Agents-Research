@@ -4,6 +4,10 @@ title: "第 7 章 · 消息 / 事件 / Session"
 nav_order: 5
 parent: "第二部分 · 内核区"
 permalink: /ch/07/
+reviewed_at: 2026-10-14
+baseline: current
+evidence_mode: mixed
+review_priority: P0
 ---
 
 # 第 7 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
@@ -13,6 +17,8 @@ permalink: /ch/07/
 **四家分歧在哪** —— 四个项目在这里给出了四种互不兼容的世界观：**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
+
+> **当前基线补充（2026-10-14）** —— 事实源不再只比较「消息怎样存」。pi `v1.2.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:40-61`）；dsh `dsh-v0.2.1-alpha.2` 继续以 append-only session log 与 surface 投影分离；codex `rust-v0.163.0-alpha.11` 的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.299` 以发行产物和探针为证据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
@@ -231,7 +237,7 @@ ContextForm = 'instructions' | 'catalog' | 'snapshot' | 'notice' | 'relay' | 're
 ```
 
 - **`source` 强制**：没有 catch-all 的 `plugin` 兜底——每个生产者自证身份。
-- **`ContextForm` 语义轴**：声明「这是什么内容」，消费者决定展示形式（源码注释 `[注释]`：「colors, icons, ordering are the consumer's business」）。**语义与视觉严格分离**。
+- **`ContextForm` 语义轴**：声明「这是什么内容」，消费者决定展示形式（源码注释 `[code]`：「colors, icons, ordering are the consumer's business」）。**语义与视觉严格分离**。
 - **`ContentBlockMap`**（`llm/types.ts:138/149/151`，块类型 `:62-127`）：`TextBlock`/`ReasoningBlock`/`ImageBlock`/`FileBlock`/`ToolCallBlock`/`ToolAdditionBlock`/`ToolRemovalBlock`。其中 `tool-addition`/`tool-removal` 必须出现在 **developer role** 消息中（`validateSessionEventData` 强制）。
 
 #### 4.2.3 SessionHeader：会话配置随会话落盘
@@ -244,7 +250,7 @@ export interface SessionHeader {
 }
 ```
 
-**两个持久化字段最有价值**（`[注释]`）：
+**两个持久化字段最有价值**（`[code]`）：
 - `delegationDepth`：子 agent 递归深度存盘——「runtime-only 深度会在 resume 时失效」，重启后子 agent 不会被误当成顶层。
 - `agentPreset`：resume 必须恢复**相同的工具 + prompt 组合**，否则模型面对的历史它无法操作。
 
@@ -317,7 +323,7 @@ pub(crate) struct ContextManager {
 // :555 replace / :559 replace_annotated / :509 history_version()
 ```
 
-**写时复制快照**（`[注释]`）：「snapshots share the vector until a caller needs to mutate it」——只读消费者零拷贝共享历史。
+**写时复制快照**（`[code]`）：「snapshots share the vector until a caller needs to mutate it」——只读消费者零拷贝共享历史。
 
 **三版本号**管理重写语义：`history_version`（压缩/回滚等重写）、`reset_version`（破坏性重置）、`user_message_revision`（用户输入，自增点在 `context_manager/history_user_authorization.rs:103`）。
 
@@ -358,7 +364,7 @@ export type MessageBase = {
 
 **边界系统消息全部是 `SystemMessage` 的别名**（`:54-72`），靠 `subtype` 字符串区分：`SystemLocalCommandMessage` / `SystemCompactBoundaryMessage` / `SystemMicrocompactBoundaryMessage` / `SystemAPIErrorMessage` / `SystemTurnDurationMessage` / `SystemBridgeStatusMessage`。
 
-**注意**（`[代码]`）：这是 source-map 还原版的**宽松**类型——索引签名 `[key: string]: unknown` 意味着运行时会带更多字段（`context_management`、`sourceToolAssistantUUID`、`permissionMode`、`imagePasteIds` 等）。这也是这套源码不可与官方源码完全等同的证据之一。
+**注意**（`[code]`）：这是 source-map 还原版的**宽松**类型——索引签名 `[key: string]: unknown` 意味着运行时会带更多字段（`context_management`、`sourceToolAssistantUUID`、`permissionMode`、`imagePasteIds` 等）。这也是这套源码不可与官方源码完全等同的证据之一。
 
 #### 4.4.2 身份与链：DAG
 
@@ -397,7 +403,7 @@ if (streamingFallbackOccured) {
 //   慢路径：整文件重写；>50MB 直接放弃（:927-933）
 ```
 
-**为什么不用删除**（`[推断]`）：transcript 是 append-only，且有**三路消费者**（UI、磁盘、SDK stream）。墓碑是一个「控制信号」载体，把「要移除谁」一次性广播给所有消费者，还能参与遥测。这比让每个消费者各自判断「哪些消息不该显示」要可靠。
+**为什么不用删除**（`[inference]`）：transcript 是 append-only，且有**三路消费者**（UI、磁盘、SDK stream）。墓碑是一个「控制信号」载体，把「要移除谁」一次性广播给所有消费者，还能参与遥测。这比让每个消费者各自判断「哪些消息不该显示」要可靠。
 
 #### 4.4.4 协议转换：`normalizeMessagesForAPI`
 
@@ -496,7 +502,7 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 编译期 union，无运行时概念 | `ignorable` 守卫（`types.ts:511`）——未知事件若无标记，**拒绝重建**。源码注释（`[注释]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」 | serde tag 反序列化失败即错 | 宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传 |
+| 做法 | 编译期 union，无运行时概念 | `ignorable` 守卫（`types.ts:511`）——未知事件若无标记，**拒绝重建**。源码注释（`[code]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」 | serde tag 反序列化失败即错 | 宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传 |
 
 > **设计理由**：dsh 的 fail-closed 与 CC 的 fail-open 是两种极端，取决于定位——dsh 要保证「恢复出来的会话与用户实际经历一致」，CC 要保证「旧版本能打开新版本写的会话」。
 
@@ -507,7 +513,7 @@ normalizeMessagesForAPI()
 | 机制 | `parentId` 存在性校验；缺失时抛 `SessionInvariantError` | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `response_id`/`window_ids` 随元数据持久化 | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 |
 | 源码依据 | `session.ts` | `surface.ts:410` | `CompactedHistoryMetadata` | `sessionStorage.ts:2088-2090` |
 
-> **设计理由**（`[注释]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
+> **设计理由**（`[code]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
 
 
 ### 6.3 消息被撤销
@@ -516,7 +522,7 @@ normalizeMessagesForAPI()
 |---|---|---|---|---|
 | 做法 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | 不用删除，用 `surfaceOp.replace` 把区间从「视图」中移出，日志保留 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | `TombstoneMessage` 广播 + 磁盘 `removeMessageByUuid` truncate（`:871-951`）；**>50MB 直接放弃**（不重写大文件） |
 
-> **设计理由**（`[推断]` CC）：大文件整写代价过高，宁可保留被撤销的消息（多几条历史）也不阻塞用户。
+> **设计理由**（`[inference]` CC）：大文件整写代价过高，宁可保留被撤销的消息（多几条历史）也不阻塞用户。
 
 ### 6.4 tool_use / tool_result 配对
 
@@ -524,7 +530,7 @@ normalizeMessagesForAPI()
 |---|---|---|---|---|
 | 保证方式 | 构造时保证（每条 toolCall 必生成结果，见 第 4 章「零逃逸」） | 事件层校验：`tool/result` 必须引用 `tool/call` 的 seq | payload 类型校验 + `Fatal` | **`ensureToolResultPairing` 独立兜底**（`:5133`，7 路修复） |
 
-> **设计理由**（`[推断]`）：CC 需要独立兜底，因为它的消息可能来自历史文件（可能被手工编辑、可能来自旧版本、可能因压缩留下残片）。pi/dsh 的配对在写入时就保证了。
+> **设计理由**（`[inference]`）：CC 需要独立兜底，因为它的消息可能来自历史文件（可能被手工编辑、可能来自旧版本、可能因压缩留下残片）。pi/dsh 的配对在写入时就保证了。
 
 
 ### 6.5 分支/继承边界的识别
@@ -533,7 +539,7 @@ normalizeMessagesForAPI()
 |---|---|---|---|---|
 | 做法 | `parentId` 链（数据层） | `session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
 
-> **设计理由**（`[推断]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
+> **设计理由**（`[inference]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
 
 ### 6.6 上下文替换（压缩后）
 
@@ -558,7 +564,7 @@ normalizeMessagesForAPI()
 | 做法 | 无此机制（配置来自当前启动参数，可能与历史不匹配） | `agentPreset`/`delegationDepth` 随会话落盘——resume 时配置必然匹配 | 无此机制（配置来自当前启动参数，可能与历史不匹配） | 无此机制（配置来自当前启动参数，可能与历史不匹配） |
 | 源码依据 | — | `core/session/src/types.ts:94`（`SessionHeader`） | — | — |
 
-> **设计理由**（`[注释]` dsh）：模型面对的历史如果超出它当前的工具 / prompt 能力，就会产生「历史里有我无法执行的操作」的错位。这是多 agent / 多 preset 系统的真实风险。
+> **设计理由**（`[code]` dsh）：模型面对的历史如果超出它当前的工具 / prompt 能力，就会产生「历史里有我无法执行的操作」的错位。这是多 agent / 多 preset 系统的真实风险。
 ---
 
 ## 七、设计建议

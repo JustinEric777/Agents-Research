@@ -1,0 +1,38 @@
+name: Validate research docs
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.3"
+          bundler-cache: true
+
+      - name: Validate sources and citations
+        run: |
+          ruby tools/check_sources.rb
+          ruby tools/check_citations.rb
+
+      - name: Verify generated matrix
+        run: |
+          ruby tools/build_refresh_matrix.rb --output /tmp/current-matrix.md
+          cmp -s /tmp/current-matrix.md reports/current-matrix.md
+
+      - name: Build site
+        run: bundle exec jekyll build --trace
+        env:
+          JEKYLL_ENV: production

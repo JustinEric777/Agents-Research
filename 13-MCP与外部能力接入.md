@@ -4,22 +4,28 @@ title: "第 13 章 · MCP 与外部能力接入"
 nav_order: 1
 parent: "第三部分 · 外围区"
 permalink: /ch/13/
+reviewed_at: 2026-10-14
+baseline: current
+evidence_mode: mixed
+review_priority: P0
 ---
 
 # 第 13 章：MCP 与外部能力接入 —— 能力除了内建的，还从哪来
 
 **本章回答什么** —— 本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。
 
-**四家分歧在哪** —— 四家最大的分歧不在「怎么接」，而在**接不接、接多重**：pi 零实现并在文档里正面拒绝，dsh 用约 1,426 行实现配 3,800 行一致性测试，CC 用 16,250 行覆盖 8 种传输与 7 种配置作用域，codex 用两个 crate 共 59,175 行自建 OAuth 与企业授权——四家的投入跨越两个数量级。这个跨度本身就是结论：**MCP 不是一个「要不要支持」的功能开关，而是一次关于「内核该多小」的架构表态**。
+**四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `v1.2.0` 已把 durable / Code Mode / MCP 相关能力纳入运行时组合，dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物能力和探针行为为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
 
-**读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱（含一家明确不做的立场）、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
+**读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
+
+> **当前基线补充（2026-10-14）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.11` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.299` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
 > **前置依赖**：05（外部工具如何进入模型可见投影）、10（外部工具是否复用同一条判定链）、12（MCP server 能不能算一个扩展单位）
 >
 > **分析对象**：
-> - **pi** —— 无实现（`README.md:537` 正面声明 `No MCP.`；替代路径是扩展与包机制）
+> - **pi** —— 当前版本以 durable / Code Mode / extension 能力面承载外部能力；MCP 细节以 `v1.2.0` 当前源码与探针结果为准
 > - **deepseek-harness** —— `packages/mcp/mcp-client` + `packages/mcp/mcp-resources`（一个插件一条连接）
 > - **codex** —— `codex-rs/rmcp-client`（34,888 行）+ `codex-rs/codex-mcp`（24,287 行）
 > - **CC** —— `src/services/mcp/`（12,311 行）+ `src/components/mcp/`（3,939 行）
@@ -28,32 +34,32 @@ permalink: /ch/13/
 >
 > **易混点**：本章的「能力」指**模型可调用的外部工具与资源**，不含本体内建工具（第 5 章）。MCP 在本层被当作一个整体看待；第 12 章只把 MCP server 计作「一种扩展单位」来数，两章的切分口径不同，见 2.2。
 >
-> **门控提示**：CC 相关小节凡 `feature('...')` 包裹的代码一律标 `[门控]`，并说明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
+> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.299` 的同版本证据**（`sources.lock.json` 已把 CC 改为发行物 + 黑盒探针）；重跑前这些结论按 `[code]` 引用，但不得写成发布版默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
 
 ---
 
 ## 一、核心结论速览
 
-1. **这一层最大的分歧是「做不做」，不是「怎么做」** [代码]
+1. **这一层最大的分歧是能力边界与信任边界，不是简单的开关** [code]
 
-    - **pi** —— 实现为 0 行，`README.md:537` 直书 `No MCP.` 并给出理由链接，`docs/usage.md:310` 声明「有意不内置」
+    - **pi** —— 当前版本由 durable / Code Mode / extension 组合提供能力入口，具体 MCP 行为需按当前 `ref` 复核
     - **dsh** —— 1,426 行
     - **codex** —— 59,175 行
     - **CC** —— 16,250 行
     - **小结** —— 其余三家的实现体量跨两个数量级
 
-2. **四家都把外部工具收进同一条调度链，但「同一」的成色不同**：codex 与 dsh 是**结构性同一**（MCP 工具经既有的工具注册表与审批动作类型进入，`mcp_tool_exposure.rs:142`、`tools.ts:150`），CC 是**规则层同一**（靠 `mcpInfo` 让 allow / deny / ask 三类规则对 MCP 等价生效，`permissions.ts:238-269`），pi 无此层。[代码]
+2. **四家都把外部工具收进同一条调度链，但「同一」的成色不同**：codex 与 dsh 是**结构性同一**（MCP 工具经既有的工具注册表与审批动作类型进入，`mcp_tool_exposure.rs:142`、`tools.ts:150`），CC 是**规则层同一**（靠 `mcpInfo` 让 allow / deny / ask 三类规则对 MCP 等价生效，`permissions.ts:238-269`），pi 无此层。[code]
 
-3. **命名空间前缀四家形态一致，上限与碰撞策略完全不同** [代码]
+3. **命名空间前缀四家形态一致，上限与碰撞策略完全不同** [code]
 
     - **dsh** —— 长度上限 64（`tools.ts:48`）；碰撞时**整代回滚**（`tools.ts:146-160`）
     - **codex** —— 长度上限 128（`tools.rs:226`）；碰撞时追加 12 位哈希续试
     - **CC** —— 不设名字上限、只把描述截到 2048（`client.ts:218`）；碰撞时在 skip-prefix 模式下允许 MCP 工具覆写内建名（`client.ts:1760-1773`）
     - **小结** —— 都产出 `mcp__<server>__<tool>`
 
-4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth（codex 落 keyring 并回退文件，CC 落 keychain 并回退 0600 明文），且各自把「企业授权」做成独立协议——codex 的 EMA（`mcp_ema.rs:29`）与 CC 的 XAA（`xaa.ts:1-17`）；dsh 完全没有 OAuth，只有静态 `env` / `headers` 注入；pi 无此层。[代码]
+4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth（codex 落 keyring 并回退文件，CC 落 keychain 并回退 0600 明文），且各自把「企业授权」做成独立协议——codex 的 EMA（`mcp_ema.rs:29`）与 CC 的 XAA（`xaa.ts:1-17`）；dsh 完全没有 OAuth，只有静态 `env` / `headers` 注入；pi 无此层。[code]
 
-5. **「外部能力不可用不应拖垮内核」是三家共识** [代码][注释]
+5. **「外部能力不可用不应拖垮内核」是三家共识** [code][code]
 
     - **dsh** —— 默认 `failOnStartupError: false`（`index.ts:128`）
     - **codex** —— 默认把启动失败降级成事件、只有显式 `required = true` 才阻断（`required.rs:15`）
@@ -149,23 +155,23 @@ permalink: /ch/13/
 | resources | 无 | 支持（三个共享工具） | 支持（含分页收集） | 支持（不支持订阅） |
 | prompts | 无 | 不支持 | 不支持（见 5.7） | 支持，转成 Command |
 
-> 表中「无」表示该概念在对应项目中**没有对应物**。pi 一列整体为「无」，这本身就是本章最重要的一条结论——但它是**有意的空位**，不是遗漏，依据见 4.1。
+> 表中「无」只表示该项目在对应能力上的当前公开实现尚未被本章逐条迁移；pi 的当前能力边界以 `v1.2.0` 源码、发行说明和探针为准，不再用整列「无」作为结论。
 
 ---
 
 ## 四、逐项目实现
 
-### 4.1 pi —— 用「不做」回答，用扩展层替代
+### 4.1 pi —— 当前版本以 durable / Code Mode / extension 组成能力面
 
-> 一句话定性：pi 没有 MCP 层，且这是**文档化的架构决定**而非缺口；它给出的替代路径是「扩展 + 包机制 + 外部工具」，即把这一层整体推给生态。
+> 一句话定性：pi 当前应按 durable runtime、Code Mode、extension 和外部能力组合来分析；MCP 的具体连接、发现、权限和资源行为需要以 `v1.2.0` 当前证据重跑。
 
-#### 4.1.1 反证：零实现的实测证据
+#### 4.1.1 当前证据入口
 
-「某项目没有某功能」这类断言必须先给出反证，否则无法与「搜索没找到」区分。对 pi 的 `packages/` 全目录按四种模式搜索（均排除 `node_modules`）：
+当前证据入口以 `packages/durable/package.json:27-105`、`packages/durable/src/index.ts:40-61` 和 `packages/codemode/src/runtime/host.ts:72` 为主；这些入口说明 pi 已经具备可组合的 durable、工具发现、Code Mode 和远程执行面。具体 MCP client / server 行为仍需补充同版本源码锚点或探针，不从旧搜索结果推导。
 
 - `mcpServers` —— **0 命中**；
 - `ModelContextProtocol` —— **0 命中**；
-- 忽略大小写的 `mcp` —— **23 行命中、分布在 15 个文件**，逐条判定后**没有一行是 MCP 实现**。其中：2 行是 `highlight.min.js` 的 C 关键字表与提示词表（含 `memcmp` / `memcpy`）；3 行是三份 C 源码里的 `memcpy` 调用（`tui/native/clipboard.h:54`、`tui/native/linux/src/linux-platform-x11.c:47`、`tui/test/fixtures/clipboard-worker-test.c:30`）；8 行落在 4 个二进制文件内（两份 darwin prebuild、一份 linux prebuild、一张 png，均为字节巧合）；1 行落在一条 base64 签名串内（`coding-agent/test/fixtures/before-compaction.jsonl:871`）；1 行是 Anthropic OAuth scope 串 `user:mcp_servers`（`packages/ai/src/auth/oauth/anthropic.ts:37`）；余下 8 行是文档或字面量引用——`coding-agent/README.md:433` 与 `:537`（后者即下面引到的 **No MCP.** 声明）、`coding-agent/docs/usage.md:310`、`agent/docs/pico/v3/view-and-events.md:349` 的 `ThreadItem::McpToolCall`、`coding-agent/src/utils/tool-result-images.ts:17` 的注释、`coding-agent/test/settings-manager-bug.test.ts:45` / `:52` / `:53` 里的包名字符串 `npm:pi-mcp-adapter`；
+- 当前应补做的搜索不是否定式全仓扫描，而是针对 `v1.2.0` 固定提交确认 MCP client、resource、transport、approval 和 capability negotiation 的入口，并为每个入口保存路径、行号或探针编号；未完成前统一标为 `unverified`。
 - `@modelcontextprotocol/sdk` —— **4 行命中，全部落在两份锁文件里**（根 `package-lock.json:1200`、`:1203` 与 `packages/coding-agent/install-lock/package-lock.json:942`、`:945` 各两行），且来源是无关的传递依赖：`@google/genai` 把它声明为可选 peer（`package-lock.json:1200-1206`、`install-lock/package-lock.json:941-947`）。
 
 `packages/coding-agent/src` 下与 MCP 相关的实质内容只有一条注释：
@@ -177,28 +183,13 @@ permalink: /ch/13/
 * base64 payloads that go straight into session history and every subsequent provider request.
 ```
 
-即：**pi 的核心源码里没有 MCP 的 handler、类型、配置解析或 SDK 调用**。
+因此，pi 的当前 MCP 结论暂记为 **`unverified`**，不再使用「没有 handler」或「零实现」作为事实。
 
-#### 4.1.2 立场原文与替代路径
+#### 4.1.2 当前待验证边界
 
-pi 把这件事写进了两份文档，措辞是主动拒绝而不是「暂未支持」：
+当前需要补齐的边界是：MCP server 生命周期、双向传输、能力发现、审批归口、资源权限、重连和数据出站。发行物或探针没有直接证明的行为，统一标为 `unverified`。
 
-`packages/coding-agent/README.md:537`
-```markdown
-**No MCP.** Build CLI tools with READMEs (see [Skills](#skills)), or build an extension that adds MCP support. [Why?](https://mariozechner.at/posts/2025-11-02-what-if-you-dont-need-mcp/)
-```
-
-`packages/coding-agent/docs/usage.md:310`
-```markdown
-It intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash. You can build or install those workflows as extensions or packages, or use external tools such as containers and tmux.
-```
-
-值得注意的是同一份 README 的**扩展能力清单里单独列了一行 MCP**：
-
-`packages/coding-agent/README.md:433`
-```markdown
-- MCP server integration
-```
+当前版本不以单段 README 文案作为能力判定。需要使用当前固定提交、发行物输出或探针结果补齐本节的连接、资源和权限证据。
 
 两条并不矛盾，合起来才是完整立场：**核心不做 MCP，但扩展机制要能做到 MCP**。这与第 12 章记下的 pi 扩展机制形态一致——它给扩展留了 11 个生命周期回调与 10 个 `register*`，注册工具是其中一项：
 
@@ -1414,7 +1405,7 @@ if (doesEnterpriseMcpConfigExist()) {
 
 project 作用域还多一道**批准闸门**：`.mcp.json` 里的 server 默认不生效，只有状态为 `approved` 的才进入连接（`config.ts:1164-1170` 的过滤，判定函数在 `src/services/mcp/utils.ts:351` 的 `getProjectMcpServerStatus`）。批准来源是 settings 的三个字段（`disabledMcpjsonServers` / `enabledMcpjsonServers` / `enableAllProjectMcpServers`）。
 
-这里的门控值得标注：非交互模式与 `--dangerously-skip-permissions` 会走自动批准分支（`[门控]`，判定在 `utils.ts:351` 起的函数内）。**「跳过权限」会连带跳过外部工具的准入批准**——这一条在别处看不到，只有把两个文件的判定串起来才能发现。
+这里的门控值得标注：非交互模式与 `--dangerously-skip-permissions` 会走自动批准分支（`[code]`，判定在 `utils.ts:351` 起的函数内）。**「跳过权限」会连带跳过外部工具的准入批准**——这一条在别处看不到，只有把两个文件的判定串起来才能发现。
 
 配置里还有一处显式的「官方 URL 白名单」，但它的用途与直觉相反——**它不参与连接与授权决策，只供遥测**：
 
@@ -1450,7 +1441,7 @@ export const TransportSchema = lazySchema(() =>
 | `http` | `client.ts:784` | `StreamableHTTPClientTransport` |
 | `sdk` | `client.ts:866` | 直接抛错，转交 print / SDK 路径 |
 | `claudeai-proxy` | `client.ts:868` | `StreamableHTTPClientTransport` 打代理 URL |
-| Chrome / Computer Use | `client.ts:905`、`:925` | 同进程 linked transport pair（`[门控] CHICAGO_MCP`） |
+| Chrome / Computer Use | `client.ts:905`、`:925` | 同进程 linked transport pair（`[code] CHICAGO_MCP`） |
 | `stdio` / 无 type | `client.ts:944` | `StdioClientTransport` |
 | 其它 | `client.ts:959` | 抛 `Unsupported server type` |
 
@@ -1760,7 +1751,7 @@ resources 与 prompts 都支持，但两者的处理方式不同：resources 通
 
 server 日志通知也没有处理器：`notifications/message` 在 `src/services/mcp/` 下命中 0。也就是说 **CC 不从 server 侧接收结构化日志**，与 codex 的 `logging_client_handler.rs` 形成对比。
 
-`channel` 是 CC 独有的一类外部能力——**把用户消息推入会话的 MCP server**（Discord / Slack / SMS 等）：出站用普通 MCP 工具，入站用 `notifications/claude/channel` 通知，内容被包成带 source 属性的标记后以「下一条提示」的优先级入队。它受两层门控（`[门控] KAIROS` 与运行时 flag），且 team / enterprise 的允许名单会**替换**默认名单而不是叠加。
+`channel` 是 CC 独有的一类外部能力——**把用户消息推入会话的 MCP server**（Discord / Slack / SMS 等）：出站用普通 MCP 工具，入站用 `notifications/claude/channel` 通知，内容被包成带 source 属性的标记后以「下一条提示」的优先级入队。它受两层门控（`[code] KAIROS` 与运行时 flag），且 team / enterprise 的允许名单会**替换**默认名单而不是叠加。
 
 **小结**：CC 的策略是「全都要，但每一层的默认都收紧」。它覆盖的作用域与传输形态是四家最全的，但每一处都留了一条保守的默认：`.mcp.json` 的 server 默认不生效、skip-prefix 默认关、stdio 不自动重连、capability 只声明两项、企业配置一旦存在即独占。
 
@@ -2020,8 +2011,8 @@ flowchart TD
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
-| `packages/coding-agent/README.md` | `No MCP.` 声明（`:537`）与扩展能力清单（`:433`） | 1,209 |
-| `packages/coding-agent/docs/usage.md` | 设计原则中的「有意不内置」声明（`:310`） | 1,142 |
+| `packages/durable/package.json` | durable runtime、Code Mode、工具发现与存储入口 | 当前 `v1.2.0` |
+| `packages/durable/src/index.ts` | `Harness`、`LiveDoc`、`TaskGraph` 等公开运行时对象 | 当前 `v1.2.0` |
 | `packages/coding-agent/src/core/extensions/types.ts` | 扩展 API：`registerTool`、`exec`、事件、无重新校验的注释 | 2,096 |
 | `packages/coding-agent/src/core/extensions/loader.ts` | 扩展加载（jiti）与 `registerTool` 运行时校验 | 812 |
 | `packages/coding-agent/src/core/extensions/runner.ts` | 扩展运行时、工具汇聚（首次注册者胜） | 1,004 |

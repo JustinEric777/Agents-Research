@@ -78,3 +78,6 @@ exclude:
   - .idea/
   - vendor/
   - node_modules/
+  # 研发工具链不进站点产物：三个 ruby 校验脚本由 CI 直接调用，
+  # 发布到线上只会暴露实现细节。git 仍跟踪，CI 照常读到。
+  tools/

@@ -1,0 +1,55 @@
+{
+  "schema_version": 2,
+  "checked_at": "2026-10-14",
+  "baseline": "current",
+  "projects": {
+    "pi": {
+      "repository": "https://github.com/earendil-works/pi",
+      "ref": "v1.2.0",
+      "commit": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
+      "source_kind": "official_git_tag",
+      "evidence": "source_readable",
+      "layers": [3, 4, 5, 6, 7, 8, 9, 11, 12, 13, 14, 15, 16, 17],
+      "focus": ["durable runtime", "nested tool calls", "Code Mode", "MCP", "model catalog"]
+    },
+    "dsh": {
+      "repository": "https://github.com/deepseek-ai/deepseek-harness",
+      "ref": "dsh-v0.2.1-alpha.2",
+      "commit": "d743267388641bc76f17c45ce8b4c231aed1d32c",
+      "source_kind": "official_git_tag",
+      "evidence": "source_readable",
+      "layers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+      "focus": ["profile and bundle", "session format v4", "Agent Teams", "plugin lifecycle", "ACP and SDK"]
+    },
+    "codex": {
+      "repository": "https://github.com/openai/codex",
+      "ref": "rust-v0.163.0-alpha.11",
+      "commit": "5425d3e625daa58eea3ad1de27c087eb3b2ffbd3",
+      "source_kind": "official_git_tag",
+      "evidence": "source_readable",
+      "layers": [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 14, 15, 16, 17],
+      "focus": ["app-server v2", "multi-agent", "Guardian", "MCP resources", "diagnostics"]
+    },
+    "claude_code": {
+      "repository": "https://github.com/anthropics/claude-code",
+      "ref": "v2.1.299",
+      "artifact": "@anthropic-ai/claude-code@2.1.299",
+      "source_kind": "official_release_and_npm_binary_package",
+      "evidence": "release_and_black_box",
+      "layers": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17],
+      "focus": ["release behavior", "structured I/O", "permission flow", "MCP", "telemetry"],
+      "constraint": "The current official artifact is a platform package; local recovered TypeScript is not used as same-version source evidence."
+    }
+  },
+  "review_policy": {
+    "citation": "Every code-level claim names project, path, and line or a probe identifier.",
+    "evidence_labels": ["code", "release", "probe", "inference"],
+    "current_only": true,
+    "unknown_behavior": "mark_unverified_and_do_not_promote_to_fact"
+  },
+  "layer_priorities": {
+    "P0": [7, 8, 9, 10, 13, 14, 15],
+    "P1": [3, 4, 5, 6, 11, 12, 17],
+    "P2": [1, 2, 16]
+  }
+}

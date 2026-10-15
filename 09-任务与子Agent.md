@@ -4,11 +4,17 @@ title: "第 9 章 · 任务与子 Agent"
 nav_order: 7
 parent: "第二部分 · 内核区"
 permalink: /ch/09/
+reviewed_at: 2026-10-14
+baseline: current
+evidence_mode: mixed
+review_priority: P0
 ---
 
 # 第 9 章：任务与子 Agent —— 把工作交给另一个 Agent
 
 **本章回答什么** —— 一个 Agent 如何把工作委派给「另一个 Agent」，以及被委派者如何被创建、驱动、通信、回收。
+
+> **当前基线补充（2026-10-14）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 只能以发行行为和探针确认。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
 
 **四家分歧在哪** —— **这一层的分歧是四家中最大的**：子 Agent 的本体是另一个操作系统进程、一个可被驱动的会话、线程图上的一个节点，还是一个一等任务对象——四种答案互不兼容，且各自推导出完全不同的上下文继承、深度限制与结果回灌策略。
 
@@ -801,7 +807,7 @@ CC 的队友机制最「土」，也因此最容易照着做：**消息存在文
 
 **门控必须标清楚**：团队总开关是 `isAgentSwarmsEnabled()` —— 内部构建（`USER_TYPE === 'ant'`）恒开，外部需要 `--agent-teams` 或 `CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS`，且还要过 GrowthBook 的 killswitch（`src/utils/agentSwarmsEnabled.ts:24-40`）；`TeamCreate` 与 `SendMessage` 的 `isEnabled()` 都返回它。
 
-跨会话寻址与名册发现是 `feature('UDS_INBOX')`，而 `ListPeersTool` 的**实现文件在还原版里不存在**（`src/tools.ts:126-128` 直接 `require` 一个磁盘上不存在的 `ListPeersTool.js`）。因此凡是引用 `UDS_INBOX` 与 `ListPeers` 的结论，都应标 `[门控]` 与「还原不完整」。
+跨会话寻址与名册发现是 `feature('UDS_INBOX')`，而 `ListPeersTool` 的**实现文件在还原版里不存在**（`src/tools.ts:126-128` 直接 `require` 一个磁盘上不存在的 `ListPeersTool.js`）。因此凡是引用 `UDS_INBOX` 与 `ListPeers` 的结论，都应标 `[code]` 与「还原不完整」。
 
 ---
 
@@ -893,7 +899,7 @@ sequenceDiagram
 | 投递方式 | — | 事务内先登记后分派 | 事件注入 + `inject_if_running` | 轮询（1000 ms / 500 ms） | — |
 | 共享任务板 | 无 | ✓（实验包） | 无（消息板是论坛） | ✓ | 2/4 |
 | 认领的原子性 | — | 版本号 CAS（`expectedRevision`） | — | 文件锁 + 锁内重读校验 | 2/2 都保证 |
-| 名册发现 | — | `list_agents`（实验包任意成员） | `list_agents`（全树 live） | `ListPeers`（`[门控]`，还原不全） | 2/4 可用 |
+| 名册发现 | — | `list_agents`（实验包任意成员） | `list_agents`（全树 live） | `ListPeers`（`[code]`，还原不全） | 2/4 可用 |
 | 队友能否再组队 | — | 否（扁平不可变名册） | 由 feature 与角色决定 | 否（扁平 roster） | 2/2 扁平 |
 | 投递保证 | — | 进程本地重试 + 去重（**非跨进程 exactly-once**） | 不唤醒空闲 Agent | 不唤醒（终态丢弃） | — |
 
@@ -997,7 +1003,7 @@ sequenceDiagram
 |---|---|---|---|---|
 | 做法 | 不适用——无对等协作，跨会话范围被 `subtree` 断言限制在自身子树内（`harness/pico3/harness.ts:329-340`） | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`experimental/agent-team/src/task-board.ts:119-124`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:133-142`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
-> **设计理由**（`[推断]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
+> **设计理由**（`[inference]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---
 
 ## 七、设计建议
