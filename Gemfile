@@ -1,5 +1,7 @@
 source "https://rubygems.org"
 
+ruby "~> 3.3.0"
+
 # GitHub Pages 走 GitHub Actions 构建，因此不受旧版白名单插件限制，
 # 版本在此显式锁定，保证 CI 与本地构建结果一致。
 gem "jekyll", "~> 4.3"

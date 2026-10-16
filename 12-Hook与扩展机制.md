@@ -4,7 +4,7 @@ title: "第 12 章 · Hook 与扩展机制"
 nav_order: 10
 parent: "第二部分 · 内核区"
 permalink: /ch/12/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,9 @@ review_priority: P1
 
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
-> **当前基线补充（2026-10-14）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
+本章结论与源码证据：[pi.mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [dsh.plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) · [codex.pre-tool-hooks]({{ site.baseurl }}/appendix/claims/#claim.codex.pre-tool-hooks)。其余分析须结合对应来源逐条复核。
+
+> **当前基线补充（2026-10-15）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
 
 **本章回答什么** —— 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。
 

@@ -4,7 +4,7 @@ title: "第 11 章 · 模型调用与 Provider"
 nav_order: 9
 parent: "第二部分 · 内核区"
 permalink: /ch/11/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,9 @@ review_priority: P1
 
 # 第 11 章：模型调用与 Provider 抽象 —— 把 N 种线协议归一成一套事件词汇表
 
-> **当前基线补充（2026-10-14）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
+本章结论与源码证据：[pi.models-provider]({{ site.baseurl }}/appendix/claims/#claim.pi.models-provider) · [codex.auth-modes]({{ site.baseurl }}/appendix/claims/#claim.codex.auth-modes) · [dsh.model-discovery-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.model-discovery-contract)。其余分析须结合对应来源逐条复核。
+
+> **当前基线补充（2026-10-15）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
 
 **本章回答什么** —— 前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。
 
@@ -35,6 +37,8 @@ review_priority: P1
 > **易混点**：codex 的 `WireApi` 枚举只有 `Responses` 一个变体，Chat Completions 协议不在本版本源码中（配置里写 `wire_api = "chat"` 会直接报错并附修复指引，见 4.3.1）。CC 不定义自己的事件词汇表，而是把 Anthropic 原生 `stream_event` 透给上层（见 2.3 与 4.4.3）。
 >
 > **门控提示**：CC 在本层大量能力由 `feature()` 编译开关门控，逐文件清单见附录。
+>
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -1128,7 +1132,7 @@ FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRet
 // :144  getModelCosts —— 未知模型回退默认并打点 tengu_unknown_model_cost（:166）
 ```
 
-> **设计理由**（`[code]`）：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:764`）。
+> **设计理由**（`[inference]`）：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:764`）。
 
 #### 4.4.7 鉴权：OAuth 与 API key 二选一
 
@@ -1197,7 +1201,7 @@ return expiresWithBuffer >= expiresAt
 | 做法 | `isContextOverflow()` 覆盖 **3 类**：报错文本（约 24 条正则）、静默溢出（usage 超窗）、length-零输出；另设 `NON_OVERFLOW_PATTERNS` 排除误判 | 用**稳定错误码** `CONTEXT_WINDOW_EXCEEDED` | 错误枚举 `ContextWindowExceeded`，在 `retry_delay` 中列为**不可重试** | 双路：`stop_reason==='model_context_window_exceeded'` 复用 max_output 恢复路径；旧 400 文本解析后**下调 `max_tokens` 重试** |
 | 源码依据 | `packages/ai/src/utils/overflow.ts:136`、`:37`、`:152`、`:162`、`:75` | `packages/llm/llm/src/error.ts:25`；pi-ai 侧 `llm-pi-ai/src/stream.ts:80-93` | `protocol/src/error.rs:396`、`:406`；turn 层 `session/turn.rs:1659-1662` | `claude.ts:2279-2292`；`withRetry.ts:388-425`；预检 `query.ts:641-646` |
 
-> **设计理由**：**pi**：`[code]` 排除表专门防 Bedrock 限流被误判为溢出——**误判会导致不必要的压缩，压缩又可能丢上下文**；**dsh**：`[code]` 「consumers 不解析 message」——错误码是可路由的，文本不是；**codex**：`[inference]` 重试同一超长请求必然再失败，不如直接置满并交给压缩；**CC**：`[code]` 新老 API 双兼容——用户可能用旧版端点
+> **设计理由**：**pi**：`[inference]` 排除表专门防 Bedrock 限流被误判为溢出——**误判会导致不必要的压缩，压缩又可能丢上下文**；**dsh**：`[inference]` 「consumers 不解析 message」——错误码是可路由的，文本不是；**codex**：`[inference]` 重试同一超长请求必然再失败，不如直接置满并交给压缩；**CC**：`[inference]` 新老 API 双兼容——用户可能用旧版端点
 
 **共识**：四家都**没有**把超限当致命错误。差异在于**识别手段**——provider 越多，越只能靠文本嗅探。
 
@@ -1208,7 +1212,7 @@ return expiresWithBuffer >= expiresAt
 | 做法 | 三级兜底：`JSON.parse` → `repairJson` → `partial-json`，最终返回 `{}` | 上游 patch 后**不再每个 delta 重解析**；适配层只读 delta 串，结束时 `JSON.stringify(event.toolCall.arguments)` 还原原始 JSON 约定 | 参数**始终是字符串**，服务端不预解析，客户端也不在流中解析 | 流中按字符串累加，结束时 `normalizeContentFromAPI` 递归 parse，失败回退 `{}` 并打点 |
 | 源码依据 | `packages/ai/src/utils/json-parse.ts:104`（注释 `:98` 「Always returns a valid object」） | patch 文件；`llm-pi-ai/src/stream.ts:183-192`、`:204` | `protocol/src/models.rs:1081-1084` | `claude.ts:2111`；`src/utils/messages.ts:2677` |
 
-> **设计理由**（`[code]`）：CC 的注释写明「宁可空输入走下游校验，也不让半截 JSON 崩掉整轮」。**四家在此高度一致**——这是流式工具调用的共同现实：JSON 是增量拼出来的，任何时刻都可能不完整。
+> **设计理由**（`[inference]`）：CC 的注释写明「宁可空输入走下游校验，也不让半截 JSON 崩掉整轮」。**四家在此高度一致**——这是流式工具调用的共同现实：JSON 是增量拼出来的，任何时刻都可能不完整。
 
 
 ### 6.3 限流（429）：谁负责退避
@@ -1228,7 +1232,7 @@ return expiresWithBuffer >= expiresAt
 | 做法 | 主动抛错并把临时字段（`index`/`partialJson`）剥掉，**不让流式草稿进入会话历史** | 未完成时关闭上游迭代器；只保留**可见前缀**（`live.interruptedBlocks()`） | 未收到 `response.completed` 即关闭 → 报错；**SSE 无 `Last-Event-ID` 续传**，只能整请求重发 | 只有 `content_block_stop` 才产出消息，故 partial 不落库；流式失败降级到非流式 |
 | 源码依据 | `anthropic-messages.ts:791`、`:817`（注释 `:820`） | `llm/src/index.ts:1093-1098`；`agent.ts:431` | `sse/responses.rs:603-609`；重试 `core/src/responses_retry.rs:113-134` | `claude.ts:2171`、`:2551` |
 
-> **设计理由**（`[code]`）：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
+> **设计理由**（`[inference]`）：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
 
 
 ### 6.5 usage 缺失
@@ -1238,7 +1242,7 @@ return expiresWithBuffer >= expiresAt
 | 做法 | Anthropic 只覆盖非 null 字段（保 `message_start` 真值）；OpenAI 兜底读 `choice.usage`（Moonshot 等） | `usage` chunk 可选；无 usage 时回落 `baseline.kind='estimated'` | `Completed.token_usage` 是 `Option`；仅 `Some` 时累计 | `updateUsage` 对 undefined 直接返回拷贝；输入类 token 用 `> 0` 守卫 |
 | 源码依据 | `anthropic-messages.ts:763-765`；`openai-completions.ts:569-571` | `token-meter/src/index.ts:176-180` | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` | `claude.ts:2928`、`:2932-2945` |
 
-> **设计理由**（`[code]`）：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
+> **设计理由**（`[inference]`）：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
 
 
 ### 6.6 provider 不支持某能力：三种态度

@@ -1,8 +1,8 @@
 # ============================================================ 站点标识
 title: Agents-Research
 description: >-
-  四个开源 Agent 项目的代码级横向对比研究。按架构层次逐层深入，
-  每层一篇对比分析，所有断言标注 `文件:行号` 可回源码核验。
+  四个 Agent 项目的源码与发行物横向对比研究。按架构层次逐层深入，
+  每层一篇对比分析，登记结论通过文件行号和证据图核验。
 url: https://justineric777.github.io
 baseurl: /Agents-Research
 lang: zh-CN
@@ -64,7 +64,7 @@ aux_links_new_tab: true
 
 footer_content: >-
   <a href="https://github.com/JustinEric777/Agents-Research/blob/master/LICENSE">MIT License</a>
-  · 四项目源码对比分析，结论均可回溯至 `文件:行号`
+  · 四项目源码与发行物分析，登记结论与证据可追溯
 
 # ============================================================ 构建排除
 # README.md 有意不排除：index.md 通过 {% include_relative README.md %} 复用它，
@@ -77,7 +77,6 @@ exclude:
   - .gitignore
   - .idea/
   - vendor/
+  - reports/
   - node_modules/
-  # 研发工具链不进站点产物：三个 ruby 校验脚本由 CI 直接调用，
-  # 发布到线上只会暴露实现细节。git 仍跟踪，CI 照常读到。
-  tools/
+  - tools/

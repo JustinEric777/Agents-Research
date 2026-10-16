@@ -4,7 +4,7 @@ title: "第 13 章 · MCP 与外部能力接入"
 nav_order: 1
 parent: "第三部分 · 外围区"
 permalink: /ch/13/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,20 +12,22 @@ review_priority: P0
 
 # 第 13 章：MCP 与外部能力接入 —— 能力除了内建的，还从哪来
 
+本章结论与源码证据：[pi.mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [pi.mcp-disable-flag]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-disable-flag) · [pi.mcp-runtime]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-runtime) · [pi.mcp-resources]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-resources) · [dsh.mcp-client]({{ site.baseurl }}/appendix/claims/#claim.dsh.mcp-client) · [codex.mcp-v2]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-v2) · [codex.mcp-resource-handler]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-resource-handler) · [claude-code.artifact-baseline]({{ site.baseurl }}/appendix/claims/#claim.claude-code.artifact-baseline) · [pi.mcp-tool-projection]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-tool-projection) · [dsh.acp-interface]({{ site.baseurl }}/appendix/claims/#claim.dsh.acp-interface)。其余分析须结合对应来源逐条复核。
+
 **本章回答什么** —— 本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。
 
-**四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `v1.2.0` 已把 durable / Code Mode / MCP 相关能力纳入运行时组合，dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物能力和探针行为为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
+**四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `v1.2.0` 已内置 MCP extension，并把 MCP 工具、资源、OAuth、重连和 Code Mode 暴露组合到同一运行时；dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物资料和明确推断为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
 
 **读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
-> **当前基线补充（2026-10-14）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.11` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.299` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
+> **当前基线补充（2026-10-15）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.299` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
 > **前置依赖**：05（外部工具如何进入模型可见投影）、10（外部工具是否复用同一条判定链）、12（MCP server 能不能算一个扩展单位）
 >
 > **分析对象**：
-> - **pi** —— 当前版本以 durable / Code Mode / extension 能力面承载外部能力；MCP 细节以 `v1.2.0` 当前源码与探针结果为准
+> - **pi** —— 当前版本由 durable / Code Mode / 内置 MCP extension 共同承载外部能力；MCP 细节以 `v1.2.0` 当前源码为准
 > - **deepseek-harness** —— `packages/mcp/mcp-client` + `packages/mcp/mcp-resources`（一个插件一条连接）
 > - **codex** —— `codex-rs/rmcp-client`（34,888 行）+ `codex-rs/codex-mcp`（24,287 行）
 > - **CC** —— `src/services/mcp/`（12,311 行）+ `src/components/mcp/`（3,939 行）
@@ -34,7 +36,7 @@ review_priority: P0
 >
 > **易混点**：本章的「能力」指**模型可调用的外部工具与资源**，不含本体内建工具（第 5 章）。MCP 在本层被当作一个整体看待；第 12 章只把 MCP server 计作「一种扩展单位」来数，两章的切分口径不同，见 2.2。
 >
-> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.299` 的同版本证据**（`sources.lock.json` 已把 CC 改为发行物 + 黑盒探针）；重跑前这些结论按 `[code]` 引用，但不得写成发布版默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
+> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.299` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
 
 ---
 
@@ -48,7 +50,7 @@ review_priority: P0
     - **CC** —— 16,250 行
     - **小结** —— 其余三家的实现体量跨两个数量级
 
-2. **四家都把外部工具收进同一条调度链，但「同一」的成色不同**：codex 与 dsh 是**结构性同一**（MCP 工具经既有的工具注册表与审批动作类型进入，`mcp_tool_exposure.rs:142`、`tools.ts:150`），CC 是**规则层同一**（靠 `mcpInfo` 让 allow / deny / ask 三类规则对 MCP 等价生效，`permissions.ts:238-269`），pi 无此层。[code]
+2. **四家都把外部工具收进同一条调度链，但「同一」的成色不同**：pi、codex 与 dsh 都有结构性接入（pi 通过内置 MCP extension 的工具暴露与普通 tool pipeline，codex 与 dsh 通过既有工具表和审批动作），CC 则主要表现为规则层同一。pi 的当前实现入口是 `packages/coding-agent/src/extensions/mcp/index.ts`、`tools.ts` 与 `resources.ts`。[inference]
 
 3. **命名空间前缀四家形态一致，上限与碰撞策略完全不同** [code]
 
@@ -57,7 +59,7 @@ review_priority: P0
     - **CC** —— 不设名字上限、只把描述截到 2048（`client.ts:218`）；碰撞时在 skip-prefix 模式下允许 MCP 工具覆写内建名（`client.ts:1760-1773`）
     - **小结** —— 都产出 `mcp__<server>__<tool>`
 
-4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth（codex 落 keyring 并回退文件，CC 落 keychain 并回退 0600 明文），且各自把「企业授权」做成独立协议——codex 的 EMA（`mcp_ema.rs:29`）与 CC 的 XAA（`xaa.ts:1-17`）；dsh 完全没有 OAuth，只有静态 `env` / `headers` 注入；pi 无此层。[code]
+4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth，且各自把「企业授权」做成独立协议；dsh 当前客户端以静态 `env` / `headers` 注入为主；pi `v1.2.0` 已提供 MCP OAuth challenge、credential store 和登录入口，但企业托管能力仍需补充具体源码路径。[inference]
 
 5. **「外部能力不可用不应拖垮内核」是三家共识** [code][code]
 
@@ -121,14 +123,14 @@ review_priority: P0
 
 | 维度 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 实现形态 | 无（0 行） | packages/mcp | 两个 crate | services/mcp |
-| 配置来源 | 无（扩展自定） | cordis 插件 | config.toml | .mcp.json 等 |
-| 传输 | — | stdio / http | 6 种（含 PTY） | 8 种 |
-| 命名上限 | — | 64 | 128 | 无上限 |
-| 凭据 | — | env / headers | OAuth + EMA | OAuth + XAA |
-| 启动失败 | — | 不阻断 | 不阻断 | 不阻断 |
+| 实现形态 | 内置 MCP extension + Code Mode | packages/mcp | 两个 crate | services/mcp |
+| 配置来源 | `mcp.json`、`.pi/mcp.json`、CLI 覆盖 | cordis 插件 | config.toml | .mcp.json 等 |
+| 传输 | stdio / HTTP | stdio / http | 6 种（含 PTY） | 8 种 |
+| 命名上限 | 64 | 64 | 128 | 无上限 |
+| 凭据 | OAuth + credential store + headers/env | env / headers | OAuth + EMA | OAuth + XAA |
+| 启动失败 | 默认不阻断，可禁用 MCP | 不阻断 | 不阻断 | 不阻断 |
 
-**表 13-1**：四家骨架。**「不阻断」这一行是真正的共识**——三家都选择让外部能力失败只影响自己，唯一的例外需要显式声明（codex 的 `required = true`）。而「命名上限」这一行的差别说明：CC 把外部工具当成**内建工具的同类**（所以沿用同一套命名，不额外设界），codex 与 dsh 把它当成**受约束的外来物**（所以要设界并定义超限行为）。
+**表 13-1**：四家骨架。**「不阻断」这一行是真正的共识**——四家都选择让外部能力失败只影响自己，codex 只有在显式声明 `required = true` 时才升级为阻断。命名上，pi / dsh / codex 都有长度或清洗约束，CC 侧未发现同等上限；这反映的是工具投影策略差异，而不是 MCP 是否存在的差异。
 
 ---
 
@@ -136,62 +138,50 @@ review_priority: P0
 
 | 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 本层的实体 | 无 | Cordis 插件（`McpClient`）+ 作用域服务（`McpResourceRuntime`） | `McpConnectionSet`（连接集）+ `McpServerRegistration` / `ResolvedMcpCatalog`（登记项与解析后目录） | `MCPServerConnection`（5 态 union） |
-| 配置载体 | 无（核心 settings 无 `mcp` 字段，`settings-manager.ts:110-163`） | `cordis.yml` 的插件 `config`（每行一个 server，`index.ts:119-135`） | `config.toml` 的 `[mcp_servers]`（`config_toml.rs:290`） | `.mcp.json` 等 7 种 `ConfigScope`（`types.ts:10-20`） |
-| 来源仲裁 | 无 | 无仲裁：一个插件实例一条连接 | 5 类来源 + 优先级枚举（`catalog.rs:70-83`、`:115`） | 3 套优先级链 + 企业独占（`config.ts:1231-1238`、`:1082-1096`） |
-| 传输类型 | 无 | stdio / streamable-http（`transport.ts:31-45`） | 6 种（stdio 有 Legacy 与 2026 两种分帧，另含 in-process、executor、事件流、HTTP） | 8 种（stdio / sse / sse-ide / http / ws / ws-ide / sdk / claudeai-proxy） |
-| stdio 子进程 | 无 | 由官方 SDK 起；只复用环境擦洗函数（`transport.ts:21-23`） | 由 `codex_utils_pty::Command` 起，独立进程组 + 仅 stdio 描述符（`stdio_server_launcher.rs:281-291`） | 由官方 SDK 的 `StdioClientTransport` 起，继承 `subprocessEnv()`（`client.ts:944-958`） |
-| 协议版本策略 | 无 | 交给 SDK 自动协商（`connection.ts:261-262`） | 显式两态开关 `McpProtocolMode`（`protocol_mode.rs:9-34`） | 完全不声明，交给 SDK 默认 |
-| client capabilities | 无 | 空 `{}`（`connection.ts:261`） | elicitation + 4 个受信扩展（`rmcp_client.rs:1100-1113`） | roots + elicitation（`client.ts:994-1000`） |
-| 工具命名 | 无 | `mcp__<server>__<tool>`（`tools.ts:82`） | `mcp__<server>__<tool>`（`mcp/mod.rs:83-87`、`tools.rs:22`） | `mcp__<server>__<tool>`（`mcpStringUtils.ts:50-52`） |
-| 名字长度上限 | 无 | 64（`tools.ts:48`） | 128（`tools.rs:226`） | 无 |
-| 描述截断 | 无 | 不截断（`tools.ts:134`） | namespace 描述 ≤ 512 KiB、agent plugin ≤ 1,000 B（`handlers/mcp.rs:48-49`） | 2,048 字符，只截送给模型的那份（`client.ts:218`、`:1789-1794`） |
-| 分页 | 无 | 交给 SDK 聚合（`tools.ts:123`） | 自建上限：100 页 / 2,048 条（`pagination.rs:9-11`） | **无**（不消费 cursor） |
-| 调用链归口 | 无 | 统一 `ctx.tools.register`（`tools.ts:150`） | 工具表 + 一等审批动作（`mcp_tool_exposure.rs:142`、`mcp_tool_call.rs:1536`） | 规则匹配层（`permissions.ts:238-269`） |
-| 凭据处理 | 无 | 静态 `env` / `headers`（`transport.ts:37`、`:43`） | keyring + 文件回退 + OAuth + 企业 EMA（`oauth.rs:92`、`mcp_ema.rs:29`） | SecureStorage + OAuth + XAA（`auth.ts:1376`、`xaa.ts:1-17`） |
-| 重连退避 | 无 | 500 ms 起、30 s 封顶、10 次（`connection.ts:41-46`） | 1 s 起、30 s 封顶，且只对内置 `codex_apps` 生效（`rmcp_client.rs:106-107`） | 1 s 起、30 s 封顶、5 次，且只对非 stdio / 非 sdk（`useManageMCPConnections.ts:88-90`、`:356`） |
-| 启动失败默认 | 无 | 不阻断（`index.ts:128`） | 不阻断，除非 `required`（`required.rs:15`） | 不阻断（置 `failed` 并清空工具） |
-| 反向 elicitation | 无 | 不支持 | 三层（标准 / form 扩展 / 设备验证） | 支持，走对话框 + hooks |
-| resources | 无 | 支持（三个共享工具） | 支持（含分页收集） | 支持（不支持订阅） |
-| prompts | 无 | 不支持 | 不支持（见 5.7） | 支持，转成 Command |
+| 本层的实体 | `McpServerConnection` + tool / resource definitions | Cordis 插件（`McpClient`）+ 作用域服务（`McpResourceRuntime`） | `McpConnectionSet`（连接集）+ `McpServerRegistration` / `ResolvedMcpCatalog`（登记项与解析后目录） | `MCPServerConnection`（5 态 union） |
+| 配置载体 | `mcp.json`、`.pi/mcp.json` 与 CLI 覆盖 | `cordis.yml` 的插件 `config`（每行一个 server，`index.ts:119-135`） | `config.toml` 的 `[mcp_servers]`（`config_toml.rs:290`） | `.mcp.json` 等 7 种 `ConfigScope`（`types.ts:10-20`） |
+| 来源仲裁 | server 配置 + project/user override + enable/disable | 无仲裁：一个插件实例一条连接 | 5 类来源 + 优先级枚举（`catalog.rs:70-83`、`:115`） | 3 套优先级链 + 企业独占（`config.ts:1231-1238`、`:1082-1096`） |
+| 传输类型 | stdio / HTTP（`runtime.ts:98-115`） | stdio / streamable-http（`transport.ts:31-45`） | 6 种（stdio 有 Legacy 与 2026 两种分帧，另含 in-process、executor、事件流、HTTP） | 8 种（stdio / sse / sse-ide / http / ws / ws-ide / sdk / claudeai-proxy） |
+| stdio 子进程 | 内置 MCP transport 管理；具体进程策略以当前 transport 实现为准 | 由官方 SDK 起；只复用环境擦洗函数（`transport.ts:21-23`） | 由 `codex_utils_pty::Command` 起，独立进程组 + 仅 stdio 描述符（`stdio_server_launcher.rs:281-291`） | 由官方 SDK 的 `StdioClientTransport` 起，继承 `subprocessEnv()`（`client.ts:944-958`） |
+| 协议版本策略 | 交给 `@earendil-works/pi-mcp` 协商 | 交给 SDK 自动协商（`connection.ts:261-262`） | 显式两态开关 `McpProtocolMode`（`protocol_mode.rs:9-34`） | 完全不声明，交给 SDK 默认 |
+| client capabilities | MCP SDK 默认能力，精确清单待补充源码复核 | 空 `{}`（`connection.ts:261`） | elicitation + 4 个受信扩展（`rmcp_client.rs:1100-1113`） | roots + elicitation（`client.ts:994-1000`） |
+| 工具命名 | `mcp__<server>__<tool>`，清洗、截断并追加 hash | `mcp__<server>__<tool>`（`tools.ts:82`） | `mcp__<server>__<tool>`（`mcp/mod.rs:83-87`、`tools.rs:22`） | `mcp__<server>__<tool>`（`mcpStringUtils.ts:50-52`） |
+| 名字长度上限 | 64（`tools.ts:48-92`） | 64（`tools.ts:48`） | 128（`tools.rs:226`） | 无 |
+| 描述截断 | 模型文本结果 20 KiB；完整结果落临时文件 | 不截断（`tools.ts:134`） | namespace 描述 ≤ 512 KiB、agent plugin ≤ 1,000 B（`handlers/mcp.rs:48-49`） | 2,048 字符，只截送给模型的那份（`client.ts:218`、`:1789-1794`） |
+| 分页 | resources / templates 支持 cursor 与聚合 | 交给 SDK 聚合（`tools.ts:123`） | 自建上限：100 页 / 2,048 条（`pagination.rs:9-11`） | **无**（不消费 cursor） |
+| 调用链归口 | 内置 MCP extension 注册为 pi tool，并支持 Code Mode / tool search | 统一 `ctx.tools.register`（`tools.ts:150`） | 工具表 + 一等审批动作（`mcp_tool_exposure.rs:142`、`mcp_tool_call.rs:1536`） | 规则匹配层（`permissions.ts:238-269`） |
+| 凭据处理 | OAuth credential store + headers/env | 静态 `env` / `headers`（`transport.ts:37`、`:43`） | keyring + 文件回退 + OAuth + 企业 EMA（`oauth.rs:92`、`mcp_ema.rs:29`） | SecureStorage + OAuth + XAA（`auth.ts:1376`、`xaa.ts:1-17`） |
+| 重连退避 | transient HTTP / disconnected 状态下懒重连；精确上限待补充源码复核 | 500 ms 起、30 s 封顶、10 次（`connection.ts:41-46`） | 1 s 起、30 s 封顶，且只对内置 `codex_apps` 生效（`rmcp_client.rs:106-107`） | 1 s 起、30 s 封顶、5 次，且只对非 stdio / 非 sdk（`useManageMCPConnections.ts:88-90`、`:356`） |
+| 启动失败默认 | 默认不阻断；`--no-mcp` 可完全关闭 | 不阻断（`index.ts:128`） | 不阻断，除非 `required`（`required.rs:15`） | 不阻断（置 `failed` 并清空工具） |
+| 反向 elicitation | 当前源码入口未纳入本轮锚点，标 `unverified` | 不支持 | 三层（标准 / form 扩展 / 设备验证） | 支持，走对话框 + hooks |
+| resources | 支持 list / templates / read 三个工具 | 支持（三个共享工具） | 支持（含分页收集） | 支持（不支持订阅） |
+| prompts | 当前未在本轮 pi 锚点中确认，标 `unverified` | 不支持 | 不支持（见 5.7） | 支持，转成 Command |
 
-> 表中「无」只表示该项目在对应能力上的当前公开实现尚未被本章逐条迁移；pi 的当前能力边界以 `v1.2.0` 源码、发行说明和探针为准，不再用整列「无」作为结论。
+> 表中 `unverified` 表示当前锁定源码或发行物尚未完成该行为的可重复验证，不等同于「不支持」。本表中的 pi MCP 结论来自 `v1.2.0` 固定提交，未验证项保留为 `unverified`。
 
 ---
 
 ## 四、逐项目实现
 
-### 4.1 pi —— 当前版本以 durable / Code Mode / extension 组成能力面
+### 4.1 pi —— 当前版本以 durable / Code Mode / 内置 MCP extension 组成能力面
 
-> 一句话定性：pi 当前应按 durable runtime、Code Mode、extension 和外部能力组合来分析；MCP 的具体连接、发现、权限和资源行为需要以 `v1.2.0` 当前证据重跑。
+> 一句话定性：pi 当前不是「没有 MCP」，而是把 MCP 做成 coding-agent 内置 extension，并与 durable runtime、Code Mode、tool search 和普通 tool pipeline 组合；仍需补齐完整调用链与边界条件的源码证据。
 
-#### 4.1.1 当前证据入口
+#### 4.1.1 当前源码入口
 
-当前证据入口以 `packages/durable/package.json:27-105`、`packages/durable/src/index.ts:40-61` 和 `packages/codemode/src/runtime/host.ts:72` 为主；这些入口说明 pi 已经具备可组合的 durable、工具发现、Code Mode 和远程执行面。具体 MCP client / server 行为仍需补充同版本源码锚点或探针，不从旧搜索结果推导。
+`v1.2.0` 明确包含 built-in MCP integration。`packages/coding-agent/src/extensions/mcp/runtime.ts:138-152` 定义 `McpServerConnection`、连接状态、工具列表、资源能力和 OAuth challenge；`tools.ts:78-92` 将外部工具规范化为 `mcp__<server>__<tool>`，并在 64 字符上限下追加 hash；`resources.ts:192-205` 暴露 resources / resource templates / read 的统一工具定义；`cli/args.ts:328` 提供 `--no-mcp`，因此 MCP 是否启用是运行时策略，而不是是否存在实现的问题。
 
-- `mcpServers` —— **0 命中**；
-- `ModelContextProtocol` —— **0 命中**；
-- 当前应补做的搜索不是否定式全仓扫描，而是针对 `v1.2.0` 固定提交确认 MCP client、resource、transport、approval 和 capability negotiation 的入口，并为每个入口保存路径、行号或探针编号；未完成前统一标为 `unverified`。
-- `@modelcontextprotocol/sdk` —— **4 行命中，全部落在两份锁文件里**（根 `package-lock.json:1200`、`:1203` 与 `packages/coding-agent/install-lock/package-lock.json:942`、`:945` 各两行），且来源是无关的传递依赖：`@google/genai` 把它声明为可选 peer（`package-lock.json:1200-1206`、`install-lock/package-lock.json:941-947`）。
+durable 与 Code Mode 仍是 pi 当前能力面的重要组成：`packages/durable/src/index.ts:40-61` 导出 `Harness`、`LiveDoc`、`TaskGraph` 和 `NestedCallDoc`，`packages/codemode/src/runtime/host.ts:68-79` 为每次脚本执行启动独立 QuickJS worker。两条能力面与 MCP 的关系需要通过 tool exposure 和 nested call 共同分析，不能再把 MCP 归入「扩展自实现」。
 
-`packages/coding-agent/src` 下与 MCP 相关的实质内容只有一条注释：
+#### 4.1.2 当前已确认边界
 
-`packages/coding-agent/src/utils/tool-result-images.ts:16-18`
-```ts
-* The `read` tool and `@file` CLI attachments run their images through `processImage`, but tools
-* that produce images themselves (extensions, MCP bridges, screenshot tools) hand back arbitrary
-* base64 payloads that go straight into session history and every subsequent provider request.
-```
+- **已确认**：内置 MCP client、stdio / HTTP transport 入口、工具命名与 64 字符限制、资源 list / template / read 工具、OAuth challenge 与 credential store、断连后的懒重连、`--no-mcp` 禁用路径。
+- **已确认**：MCP 工具可以通过普通 pi tool pipeline 暴露，并可通过 Code Mode / tool search 延迟触达；结果处理区分模型可见文本与完整结构化结果。
+- **仍需补齐源码证据**：不同配置作用域的最终覆盖顺序、server 身份变更后的缓存失效、OAuth 过期后的重试上限、审批与 MCP server 身份的完整绑定、资源数据跨 session 的持久化语义。
 
-因此，pi 的当前 MCP 结论暂记为 **`unverified`**，不再使用「没有 handler」或「零实现」作为事实。
+当前结论使用 `code` 与 `unverified` 两个状态分开表达：源码足以证明结构和入口的内容写成事实；依赖真实 server、凭据或多轮运行才能确认的行为保留为 `unverified`，不升格为实现保证。
 
-#### 4.1.2 当前待验证边界
-
-当前需要补齐的边界是：MCP server 生命周期、双向传输、能力发现、审批归口、资源权限、重连和数据出站。发行物或探针没有直接证明的行为，统一标为 `unverified`。
-
-当前版本不以单段 README 文案作为能力判定。需要使用当前固定提交、发行物输出或探针结果补齐本节的连接、资源和权限证据。
-
-两条并不矛盾，合起来才是完整立场：**核心不做 MCP，但扩展机制要能做到 MCP**。这与第 12 章记下的 pi 扩展机制形态一致——它给扩展留了 11 个生命周期回调与 10 个 `register*`，注册工具是其中一项：
+两条并不矛盾，合起来才是完整立场：**内置 MCP 负责标准连接与资源能力，扩展机制负责二次定制**。这与第 12 章记下的 pi 扩展机制形态一致——它给扩展留了 11 个生命周期回调与 10 个 `register*`，注册工具是其中一项：
 
 `packages/coding-agent/src/core/extensions/types.ts:1425-1428`
 ```ts
@@ -245,9 +235,9 @@ getAllRegisteredTools(): RegisteredTool[] {
 }
 ```
 
-#### 4.1.3 若要自己接：三个可用挂点与两个硬缺口
+#### 4.1.3 若要扩展：可用挂点与硬约束
 
-一个 pi 的 MCP 适配扩展需要的最小能力集，pi 都提供了对应挂点：
+一个 pi 的二次 MCP 适配扩展仍可使用以下挂点，但这些是扩展能力，不是内置 MCP 缺失的证明：
 
 | 需要的能力 | pi 的挂点 | 锚点 |
 |---|---|---|
@@ -260,7 +250,7 @@ getAllRegisteredTools(): RegisteredTool[] {
 
 但有两个硬缺口，都是读取这一层时最容易忽略的：
 
-**缺口一：`pi.exec` 不足以驱动 MCP 的 stdio 长连接。** 它的实现是一次性的——`stdio` 由 `["ignore", "pipe", "pipe"]` 构成，stdin 被丢弃，函数在收齐输出后 resolve，不返回常驻句柄：
+**约束一：`pi.exec` 不足以替代 MCP 的 stdio 长连接。** 它的实现是一次性的——`stdio` 由 `["ignore", "pipe", "pipe"]` 构成，stdin 被丢弃，函数在收齐输出后 resolve，不返回常驻句柄：
 
 `packages/coding-agent/src/core/exec.ts:41-45`
 ```ts
@@ -271,7 +261,7 @@ const proc = spawn(command, args, {
 });
 ```
 
-MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ignore"` 的 stdin 直接排除了这条路。因此 MCP 适配扩展必须绕过 `pi.exec`（`packages/coding-agent/src/core/tools/bash.ts:96` 走的是原生 `child_process.spawn`，且它是工具实现而非扩展 API）。**「扩展机制里有起子进程的能力」与「这个能力够用」是两件事**——这一条只有把两处实现都打开才能看出来。
+MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ignore"` 的 stdin 直接排除了这条路。因此自定义 MCP 适配扩展必须使用自己的持久 transport；内置 MCP 已经通过 `packages/coding-agent/src/extensions/mcp/runtime.ts` 处理这条路径。**「扩展机制里有起子进程的能力」与「这个能力够用」是两件事**。
 
 **缺口二：扩展改写工具入参之后不做重新校验。** 这一点 pi 自己在类型注释里写明了：
 
@@ -285,7 +275,7 @@ MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ign
  */
 ```
 
-这不是 MCP 特有的问题，但对 MCP 影响最大——因为 MCP 工具的 schema 来自外部、参数校验本来就靠在 pi 里补。第 12 章已把这条记为「全系列唯一一处明示的校验缺口」，本章补上它的**后果面**：一个走扩展接入的 MCP 工具，其参数在改写后没有任何一层会重新校验，责任完全落在扩展自己身上。
+这不是 MCP 特有的问题，但对自定义扩展接入的 MCP 影响最大——因为 MCP 工具的 schema 来自外部、参数校验本来就靠在 pi 里补。内置 MCP 与外部扩展都必须把参数改写后的重新校验当作扩展责任，不能把普通 `tool_call` hook 当成完整的安全边界。
 
 #### 4.1.4 包机制：替代路径的最后一环
 
@@ -336,9 +326,9 @@ return manifest;
 Extensions are auto-discovered from trusted locations. Project-local `.pi/extensions` entries load only after the project is trusted.
 ```
 
-一个佐证：pi 自己的测试夹具里就出现过第三方 MCP 适配包的 npm 规格串 `npm:pi-mcp-adapter`（`packages/coding-agent/test/settings-manager-bug.test.ts:45`、`:52-53`）。也就是说「pi + MCP」这条路线在工程上是存在的，只是**不在 pi 的代码里**。
+一个佐证：当前源码已经有独立的 `packages/coding-agent/src/extensions/mcp/` 目录，并在 CLI、工具定义、资源定义和连接 runtime 之间形成完整调用链。因此当前应区分「内置 MCP」与「第三方 MCP 扩展」，不能再用第三方适配包推导 pi 没有内置实现。
 
-**小结**：pi 的选择是把「能力从哪来」这个问题从内核里拿掉，改成一个生态问题。它的收益在第 5 章与第 12 章已经体现——工具表是静态的、扩展面是纯进程内的、没有外部进程协议要维护；代价是它无法控制接入质量，也没有一个统一的位置回答「这个能力是谁给的、受谁的管」。
+**小结**：pi 当前选择的是「内置 MCP 基础能力 + extension / Code Mode 可组合扩展」。收益是连接、资源、OAuth 和结果适配已有实现；代价是治理面更复杂，尤其要验证配置来源、server 身份、凭据作用域、资源出站和工具暴露策略是否始终一致。
 
 ### 4.2 deepseek-harness —— 一个插件一条连接，把协商交给 SDK
 
@@ -1751,13 +1741,15 @@ resources 与 prompts 都支持，但两者的处理方式不同：resources 通
 
 server 日志通知也没有处理器：`notifications/message` 在 `src/services/mcp/` 下命中 0。也就是说 **CC 不从 server 侧接收结构化日志**，与 codex 的 `logging_client_handler.rs` 形成对比。
 
-`channel` 是 CC 独有的一类外部能力——**把用户消息推入会话的 MCP server**（Discord / Slack / SMS 等）：出站用普通 MCP 工具，入站用 `notifications/claude/channel` 通知，内容被包成带 source 属性的标记后以「下一条提示」的优先级入队。它受两层门控（`[code] KAIROS` 与运行时 flag），且 team / enterprise 的允许名单会**替换**默认名单而不是叠加。
+`channel` 是 CC 独有的一类外部能力——**把用户消息推入会话的 MCP server**（Discord / Slack / SMS 等）：出站用普通 MCP 工具，入站用 `notifications/claude/channel` 通知，内容被包成带 source 属性的标记后以「下一条提示」的优先级入队。它受两层门控（`[inference] KAIROS` 与运行时 flag），且 team / enterprise 的允许名单会**替换**默认名单而不是叠加。
 
 **小结**：CC 的策略是「全都要，但每一层的默认都收紧」。它覆盖的作用域与传输形态是四家最全的，但每一处都留了一条保守的默认：`.mcp.json` 的 server 默认不生效、skip-prefix 默认关、stdio 不自动重连、capability 只声明两项、企业配置一旦存在即独占。
 
 ---
 
 ## 五、横向对比矩阵
+
+> **当前基线说明（2026-10-15）**：本矩阵的 pi 列已按 `v1.2.0` 内置 MCP extension 重标。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
 
 一次外部工具调用要连穿四层，其中只有「注册」与「判定」两处是本层与其他层的接口。把这四个接口画出来，本章与其他章的接缝就清楚了。
 
@@ -1786,39 +1778,39 @@ flowchart TD
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 是否有本层 | **无**（0 行） | 有（1,426 行实现） | 有（59,175 行） | 有（16,250 行） | **1/4 不做** |
-| 配置载体 | 无（核心 settings 无 `mcp` 字段） | Cordis 插件 `config` | `config.toml` `[mcp_servers]` | `.mcp.json` + 全局状态 + 托管文件 | 0/4 一致 |
-| 作用域层数 | 无 | 1（插件条目） | 多层配置源 × 5 类注册 | **7 种** | 0/4 一致 |
-| 是否支持企业独占 | 无 | 无 | 部分（EMA 与企业托管认证） | **是**（托管文件存在即独占） | 1/4 |
-| 是否内置 registry | 无 | 无 | 无（仅内置一个 `codex_apps`） | 有官方 URL 白名单（只供遥测） | 3/4 无 |
+| 是否有本层 | **有**（内置 MCP extension） | 有（1,426 行实现） | 有（59,175 行） | 有（16,250 行） | **4/4 有接入证据** |
+| 配置载体 | `mcp.json` / `.pi/mcp.json` + CLI 覆盖 | Cordis 插件 `config` | `config.toml` `[mcp_servers]` | `.mcp.json` + 全局状态 + 托管文件 | 0/4 一致 |
+| 作用域层数 | 当前源码 / unverified | 1（插件条目） | 多层配置源 × 5 类注册 | **7 种** | 0/4 一致 |
+| 是否支持企业独占 | 当前源码 / unverified | 无 | 部分（EMA 与企业托管认证） | **是**（托管文件存在即独占） | 1/4 |
+| 是否内置 registry | 当前源码 / unverified | 无 | 无（仅内置一个 `codex_apps`） | 有官方 URL 白名单（只供遥测） | 3/4 无 |
 
-**共识度小结**：四家在「有没有一个中心化的 server 注册表」上高度一致（三家都明确没有），但在「配置分几层」上完全分化。**分层的数量与产品形态强相关**：dsh 面向「一个 profile 一套装配」，所以一层足够；codex 面向「多种插件来源并存」，所以要有仲裁；CC 面向「团队与企业同时用」，所以要七层加独占规则。
+**共识度小结**：在当前已直接核验的 dsh、codex、CC 路径中，都没有一个统一的中心化 server registry；pi 的 registry 状态暂保留为 `unverified`。在「配置分几层」上四家完全分化。**分层的数量与产品形态强相关**：dsh 面向「一个 profile 一套装配」，所以一层足够；codex 面向「多种插件来源并存」，所以要有仲裁；CC 面向「团队与企业同时用」，所以要七层加独占规则。
 
 ### 5.2 传输与握手
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 传输种类数 | 无 | 2 | 6 | **8** | 0/3 一致 |
-| stdio 子进程由谁起 | 无 | 官方 SDK | 自建（`codex_utils_pty`，独立进程组） | 官方 SDK | 2/3 交 SDK |
-| 父环境传递 | 无 | 黑名单擦洗 | **白名单重建**（11 项） | 继承 + server 覆盖 | 0/3 一致 |
-| 是否走沙箱 | 无 | 否（需自管） | 否（但独立进程组） | 否 | **3/3 否** |
-| 协议版本策略 | 无 | 交 SDK 自动 | **显式两态开关**，默认旧版 | 不声明，交 SDK 默认 | 2/3 交 SDK |
-| client capabilities | 无 | 空 `{}` | elicitation + 受信扩展 | roots + elicitation | **3/3 不声明 sampling** |
-| 连接超时 | 无 | 继承 SDK | 30 s | 30 s | 2/2 一致 |
+| 传输种类数 | 当前源码 / unverified | 2 | 6 | **8** | 0/3 一致 |
+| stdio 子进程由谁起 | 当前源码 / unverified | 官方 SDK | 自建（`codex_utils_pty`，独立进程组） | 官方 SDK | 2/3 交 SDK |
+| 父环境传递 | 当前源码 / unverified | 黑名单擦洗 | **白名单重建**（11 项） | 继承 + server 覆盖 | 0/3 一致 |
+| 是否走沙箱 | 当前源码 / unverified | 否（需自管） | 否（但独立进程组） | 否 | **3/3 否** |
+| 协议版本策略 | 当前源码 / unverified | 交 SDK 自动 | **显式两态开关**，默认旧版 | 不声明，交 SDK 默认 | 2/3 交 SDK |
+| client capabilities | 当前源码 / unverified | 空 `{}` | elicitation + 受信扩展 | roots + elicitation | **3/3 不声明 sampling** |
+| 连接超时 | 当前源码 / unverified | 继承 SDK | 30 s | 30 s | 2/2 一致 |
 
-**共识度小结**：三条真正的共识——**不走沙箱**、**不声明 sampling**、**连接超时 30 秒**。第一条最值得注意：三家都选择让 MCP server 运行在宿主沙箱之外。这不是疏忽——codex 的本地 stdio 路径与 executor 路径都显式传 `sandbox: None`，说明这是有意识的决定：**server 是用户自己配置的可信外部程序，不是模型生成的命令**。这个前提一旦不成立（比如配置来自不可信来源），整个信任模型就失效——这是 7.4 的第一条反例。
+**共识度小结**：在当前已核验的 dsh、codex、CC 路径中，三条共识是**不走沙箱**、**不声明 sampling**、**连接超时约 30 秒**。pi 的对应 transport 与超时行为本轮不做无证据外推，保留为 `unverified`。这不是疏忽——codex 的本地 stdio 路径与 executor 路径都显式传 `sandbox: None`，说明这是有意识的决定：**server 是用户自己配置的可信外部程序，不是模型生成的命令**。这个前提一旦不成立（比如配置来自不可信来源），整个信任模型就失效——这是 7.4 的第一条反例。
 
 ### 5.3 工具发现、命名与上限
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 命名格式 | 无 | `mcp__s__t` | `mcp__s__t` | `mcp__s__t` | **3/3 一致** |
-| 名字长度上限 | 无 | 64 | 128 | 无 | 0/3 一致 |
-| 超限处理 | 无 | 截断 + 12 位 sha256 | 截断 + 12 位 sha1 | 无（不设限） | 2/2 同形 |
-| 描述截断 | 无 | **不截断** | namespace 512 KiB / plugin 1 KB | 2,048 字符（只截模型视角） | 0/3 一致 |
-| 分页 | 无 | 交 SDK 聚合 | **客户端收全**（100 页 / 2,048 条上限） | **不翻页** | 0/3 一致 |
-| 列表变化响应 | 无 | SDK 回调 + 串行换代 | 记日志，不驱动重载 | capability 声明才启用热更新 | 0/3 一致 |
-| 同名冲突 | 无 | 同 server 内同名即错 | 三层去重 + 追加哈希 | 精确名 + server 级 + 通配 | 0/3 一致 |
+| 命名格式 | 当前源码 / unverified | `mcp__s__t` | `mcp__s__t` | `mcp__s__t` | **3/3 一致** |
+| 名字长度上限 | 当前源码 / unverified | 64 | 128 | 当前源码 / unverified | 0/3 一致 |
+| 超限处理 | 当前源码 / unverified | 截断 + 12 位 sha256 | 截断 + 12 位 sha1 | 无（不设限） | 2/2 同形 |
+| 描述截断 | 当前源码 / unverified | **不截断** | namespace 512 KiB / plugin 1 KB | 2,048 字符（只截模型视角） | 0/3 一致 |
+| 分页 | 当前源码 / unverified | 交 SDK 聚合 | **客户端收全**（100 页 / 2,048 条上限） | **不翻页** | 0/3 一致 |
+| 列表变化响应 | 当前源码 / unverified | SDK 回调 + 串行换代 | 记日志，不驱动重载 | capability 声明才启用热更新 | 0/3 一致 |
+| 同名冲突 | 当前源码 / unverified | 同 server 内同名即错 | 三层去重 + 追加哈希 | 精确名 + server 级 + 通配 | 0/3 一致 |
 
 **共识度小结**：命名格式是本章**唯一四家形态一致**（三家里三家一致）的地方。**这恰恰反证了它是一条被生态收敛出来的约定**——`mcp__` 前缀最初是 CC 的私有实现，现在三家都用，说明它在「可读性」与「可解析性」之间找到了稳定解。而上限与截断完全分化，因为这三组数字分别受各自的**下游模型契约**约束：dsh 的 64 来自函数名契约、codex 的 128 来自线格式、CC 不设限因为它沿用宿主工具的同一条路径。
 
@@ -1828,40 +1820,40 @@ flowchart TD
 |---|---|---|---|---|---|
 | 进入工具表的方式 | 扩展 `registerTool` | `ctx.tools.register` | external handler 注册 | 运行时构造后并入工具列表 | **3/3 同一张表** |
 | 与内置工具的抽象关系 | 两条类型路径（字面量联合 vs `string`） | 同一 `ToolDefinition` | 同一 `ToolRegistry` | 同一 `Tool` 类型 | 3/4 同质 |
-| 权限判定归口 | 无 | 统一 `tools/pre-execute` 审批流水 | **专用审批动作** `McpToolCall` | 统一规则匹配函数 | **3/3 同一套判定** |
-| 判定时可否看到 server 身份 | 无 | 部分（工具名里） | **是**（含连接器与账号邮箱） | 部分（工具名里） | 1/3 |
-| 自动放行条件 | 无 | 由审批策略包决定 | **显式函数建模** | 由通用规则决定 | 1/3 |
-| 「不问就拒」的行为 | 无 | fail-closed（无审批通道即拒） | **fail-closed**（策略 Never 即拒） | 由 deny 规则决定 | 2/2 fail-closed |
-| 注册时的体积预算 | 无 | 无 | **有**（`fits_agent_budget`） | 有（描述截断） | 2/3 有 |
+| 权限判定归口 | 当前源码 / unverified | 统一 `tools/pre-execute` 审批流水 | **专用审批动作** `McpToolCall` | 统一规则匹配函数 | **3/3 同一套判定** |
+| 判定时可否看到 server 身份 | 当前源码 / unverified | 部分（工具名里） | **是**（含连接器与账号邮箱） | 部分（工具名里） | 1/3 |
+| 自动放行条件 | 当前源码 / unverified | 由审批策略包决定 | **显式函数建模** | 由通用规则决定 | 1/3 |
+| 「不问就拒」的行为 | 当前源码 / unverified | fail-closed（无审批通道即拒） | **fail-closed**（策略 Never 即拒） | 由 deny 规则决定 | 2/2 fail-closed |
+| 注册时的体积预算 | 当前源码 / unverified | 无 | **有**（`fits_agent_budget`） | 有（描述截断） | 2/3 有 |
 
-**共识度小结**：**「外部工具复用同一套判定链」是四家中三家的一致答案**，但实现层面有三种做法——统一注册表（dsh）、专用动作类型（codex）、统一规则函数（CC）。三者都达到了目的，差别在**可观测性**：codex 的专用动作能把 server 名与凭据身份送进审批界面，另两家的用户只能看到一个 `mcp__server__tool` 名字。**这一条是本层最值得抄的设计**（见 7.2）。
+**共识度小结**：**「外部工具复用既有工具 / 权限链」已在 dsh、codex、CC 三家得到直接证据，pi 已确认进入普通 tool pipeline，但完整审批归因仍需补齐源码证据**。实现层面至少有四种形态——统一注册表（dsh）、专用动作类型（codex）、统一规则函数（CC）、内置 extension + tool pipeline（pi）。codex 的专用动作能把 server 名与凭据身份送进审批界面，pi / dsh / CC 的完整可观测性仍需按各自路径验证。
 
 ### 5.5 凭据与授权
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 静态 header / env | 无 | 支持 | 支持 | 支持 | 2/2 一致 |
-| OAuth | 无 | **无** | 有（含企业 EMA） | 有（含 XAA） | 2/3 有 |
-| token 存储 | 无 | 无 | keyring，回退文件 | keychain，回退 0600 明文 | 2/2 平台分支 |
-| 存储模式可配 | 无 | 无 | **是**（Auto / Keyring / File） | 否 | 1/2 |
-| 按 server 隔离 | 无 | 无 | 按 server + 环境 | 按 server + **配置哈希** | 1/2 更严 |
-| 本地命令产出 header | 无 | 无 | 有（10 s / 64 KiB 限） | 有（10 s / 需工作区信任） | 2/2 同形 |
-| 企业授权协议 | 无 | 无 | EMA（IdP → ID-JAG → token） | XAA（同形，另一次弹窗缓存） | 2/2 同形 |
+| 静态 header / env | 当前源码 / unverified | 支持 | 支持 | 支持 | 2/2 一致 |
+| OAuth | 当前源码 / unverified | **无** | 有（含企业 EMA） | 有（含 XAA） | 2/3 有 |
+| token 存储 | 当前源码 / unverified | 无 | keyring，回退文件 | keychain，回退 0600 明文 | 2/2 平台分支 |
+| 存储模式可配 | 当前源码 / unverified | 无 | **是**（Auto / Keyring / File） | 否 | 1/2 |
+| 按 server 隔离 | 当前源码 / unverified | 无 | 按 server + 环境 | 按 server + **配置哈希** | 1/2 更严 |
+| 本地命令产出 header | 当前源码 / unverified | 无 | 有（10 s / 64 KiB 限） | 有（10 s / 需工作区信任） | 2/2 同形 |
+| 企业授权协议 | 当前源码 / unverified | 无 | EMA（IdP → ID-JAG → token） | XAA（同形，另一次弹窗缓存） | 2/2 同形 |
 
-**共识度小结**：**「本地命令可以参与鉴权，但它的输出按不可信输入处理」是 codex 与 CC 的一致设计**（都限时 10 秒；codex 另限长 64 KiB，CC 另加工作区信任检查）。两家的企业授权协议也是同形的两段交换——**这说明企业场景的需求已经收敛，差异只在两个独立实现之间**。dsh 与 pi 在这一节整体缺席，原因是它们都没有凭据存储设施（第 1 章同样缺席），这是三层共同缺一块的连锁效应。
+**共识度小结**：**「本地命令可以参与鉴权，但它的输出按不可信输入处理」是 codex 与 CC 的一致设计**（都限时 10 秒；codex 另限长 64 KiB，CC 另加工作区信任检查）。pi 当前已确认存在 OAuth credential store 与 server login 入口，但本轮尚未验证它是否支持企业授权协议；dsh 当前维持静态 `env` / `headers` 路径。企业授权与 token 隔离不能再用“pi 没有凭据层”概括，必须按 `code` / `probe` 分层记录。
 
 ### 5.6 生命周期与降级
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 启动失败是否阻断 | 无 | 否（可配 `failOnStartupError`） | 否（除非 `required`） | 否 | **3/3 不阻断** |
-| 失败是否重试 | 无 | 是（默认开） | 是（仅 `codex_apps` 有退避） | 是（仅非 stdio / sdk） | 2/3 有覆盖缺口 |
-| 退避初值 / 上限 | 无 | 500 ms / 30 s | 1 s / 30 s | 1 s / 30 s | 2/3 上限一致 |
-| 尝试次数上限 | 无 | 10 | 无显式次数（按指数封顶） | 5 | 0/3 一致 |
-| 稳定窗重置预算 | 无 | **有**（以最长退避为窗） | 无 | 无 | **1/3 独有** |
-| 放弃后的动作 | 无 | **注销工具 + 清空 instructions** | 保留上次工具目录 | 置 `failed` + 清空工具表，状态留给 UI | 2/3 清空工具 |
-| 工具表热更新 | 无 | `list_changed` 串行换代 | 不驱动重载 | capability 声明后启用 | 0/3 一致 |
-| 单 server 失败是否影响其他 | 无 | 否 | 否（并发启动，逐个报告） | 否（批量分批，本地并发 3 / 远端 20） | **3/3 隔离** |
+| 启动失败是否阻断 | 当前源码 / unverified | 否（可配 `failOnStartupError`） | 否（除非 `required`） | 否 | **3/3 不阻断** |
+| 失败是否重试 | 当前源码 / unverified | 是（默认开） | 是（仅 `codex_apps` 有退避） | 是（仅非 stdio / sdk） | 2/3 有覆盖缺口 |
+| 退避初值 / 上限 | 当前源码 / unverified | 500 ms / 30 s | 1 s / 30 s | 1 s / 30 s | 2/3 上限一致 |
+| 尝试次数上限 | 当前源码 / unverified | 10 | 无显式次数（按指数封顶） | 5 | 0/3 一致 |
+| 稳定窗重置预算 | 当前源码 / unverified | **有**（以最长退避为窗） | 当前源码 / unverified | 无 | **1/3 独有** |
+| 放弃后的动作 | 当前源码 / unverified | **注销工具 + 清空 instructions** | 保留上次工具目录 | 置 `failed` + 清空工具表，状态留给 UI | 2/3 清空工具 |
+| 工具表热更新 | 当前源码 / unverified | `list_changed` 串行换代 | 不驱动重载 | capability 声明后启用 | 0/3 一致 |
+| 单 server 失败是否影响其他 | 当前源码 / unverified | 否 | 否（并发启动，逐个报告） | 否（批量分批，本地并发 3 / 远端 20） | **3/3 隔离** |
 
 **共识度小结**：**「外部能力失败只影响自己」是本章最硬的一条共识**——三家都做到了启动失败不阻断、失败互相隔离。这一点与内核层的设计原则直接对应：主循环不能因为一个可选子系统而不可用。三家唯一的分歧在「放弃之后留不留一份旧工具目录」：codex 保留（可用性优先）、dsh 与 CC 清空（一致性优先）。
 
@@ -1869,13 +1861,13 @@ flowchart TD
 
 | 能力 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| resources 读取 | 无 | 支持（3 个共享工具，cursor 透传） | 支持（含 template，客户端收全分页） | 支持（2 个工具，只挂一次） | **3/3 支持** |
-| resources 订阅 | 无 | **不支持** | 不支持 | **不支持**（只读能力标记） | **3/3 不支持** |
-| prompts | 无 | **不支持** | 不支持 | 支持（转成 Command） | 1/3 |
-| elicitation | 无 | **不支持** | 支持（三层：标准 / form / 设备验证） | 支持（hooks + 对话框） | 2/3 |
-| sampling | 无 | 不支持 | 不支持 | 不支持 | **3/3 不支持** |
-| server 日志 | 无 | 不支持 | 支持（映射到 tracing） | **不支持** | 1/3 |
-| 链路追踪传播 | 无 | 不支持 | 支持（W3C traceparent 进 `_meta`） | 不支持 | 1/3 |
+| resources 读取 | 当前源码 / unverified | 支持（3 个共享工具，cursor 透传） | 支持（含 template，客户端收全分页） | 支持（2 个工具，只挂一次） | **3/3 支持** |
+| resources 订阅 | 当前源码 / unverified | **不支持** | 不支持 | **不支持**（只读能力标记） | **3/3 不支持** |
+| prompts | 当前源码 / unverified | **不支持** | 不支持 | 支持（转成 Command） | 1/3 |
+| elicitation | 当前源码 / unverified | **不支持** | 支持（三层：标准 / form / 设备验证） | 支持（hooks + 对话框） | 2/3 |
+| sampling | 当前源码 / unverified | 不支持 | 不支持 | 不支持 | **3/3 不支持** |
+| server 日志 | 当前源码 / unverified | 不支持 | 支持（映射到 tracing） | **不支持** | 1/3 |
+| 链路追踪传播 | 当前源码 / unverified | 不支持 | 支持（W3C traceparent 进 `_meta`） | 不支持 | 1/3 |
 
 **共识度小结**：两条整齐的共识——**`resources` 读取都做、`resources` 订阅都不做、`sampling` 都不做**。订阅缺席的原因三家一致（长连接推送需要贯穿到应用层的通知模型，四家都没有把它做进内核）；sampling 缺席的原因是安全模型（server 反向消耗宿主模型额度）。**「支持读取、不支持订阅」是一个被生态收敛出的最小集**——它覆盖了「把外部文档喂给模型」这个主用例，同时避开了推送式状态同步的复杂度。
 
@@ -1887,9 +1879,9 @@ flowchart TD
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 默认行为 | 无 | 记日志继续，不注册工具 | 记入 `failed` 清单并发事件 | 置 `failed`，清空该 server 工具 |
-| 何时升级为阻断 | 无 | `failOnStartupError: true` | `required = true` | 无此开关 |
-| 是否自动重试 | 无 | 是 | 是（后台 `reconnect_failed_startup`） | 是（非 stdio / sdk） |
+| 默认行为 | 当前源码 / unverified | 记日志继续，不注册工具 | 记入 `failed` 清单并发事件 | 置 `failed`，清空该 server 工具 |
+| 何时升级为阻断 | 当前源码 / unverified | `failOnStartupError: true` | `required = true` | 无此开关 |
+| 是否自动重试 | 当前源码 / unverified | 是 | 是（后台 `reconnect_failed_startup`） | 是（非 stdio / sdk） |
 | 源码依据 | — | `index.ts:128`、`:200-201` | `connection_manager.rs:790-807`、`required.rs:15` | `useManageMCPConnections.ts:356`、`:466` |
 
 > **设计理由**：三家都把「外部能力缺席」与「内核故障」分开处理，因为二者的可恢复性完全不同——前者重试即可，后者必须停机。codex 还给「必须启动」留了显式出口（`required`），并且这个出口是可解释的：「这个 server 是必需能力」是一个配置声明，不是一个隐含假设。
@@ -1898,11 +1890,11 @@ flowchart TD
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 退避 | 无 | 500 ms 起、指数、30 s 封顶 | 1 s 起、指数、30 s 封顶，最多 5 次指数 | 1 s 起、指数、30 s 封顶 |
-| 尝试上限 | 无 | 10 次 | 无显式次数（指数封顶） | 5 次 |
-| 预算重置 | 无 | **连接存活超过最长退避即清零** | 无 | 无 |
-| 放弃后 | 无 | 注销工具、清空 instructions | 保留上次目录 | 置 `failed`，等用户手动重连 |
-| 覆盖范围缺口 | 无 | 无 | **只覆盖 `codex_apps`** | **不覆盖 stdio / sdk** |
+| 退避 | 当前源码 / unverified | 500 ms 起、指数、30 s 封顶 | 1 s 起、指数、30 s 封顶，最多 5 次指数 | 1 s 起、指数、30 s 封顶 |
+| 尝试上限 | 当前源码 / unverified | 10 次 | 无显式次数（指数封顶） | 5 次 |
+| 预算重置 | 当前源码 / unverified | **连接存活超过最长退避即清零** | 当前源码 / unverified | 无 |
+| 放弃后 | 当前源码 / unverified | 注销工具、清空 instructions | 保留上次目录 | 置 `failed`，等用户手动重连 |
+| 覆盖范围缺口 | 当前源码 / unverified | 无 | **只覆盖 `codex_apps`** | **不覆盖 stdio / sdk** |
 | 源码依据 | — | `connection.ts:211-245`、`:41-46` | `rmcp_client.rs:278-283` | `useManageMCPConnections.ts:88-90`、`:447-450` |
 | 依据（缺口） | — | — | `rmcp_client.rs:106-107` 的常量名带 `CODEX_APPS_` 前缀 | `useManageMCPConnections.ts:356` |
 
@@ -1925,7 +1917,7 @@ flowchart TD
 |---|---|---|---|---|
 | 单条描述 | 无限制 | **不截断** | 不截断（截 namespace） | 截到 2,048 字符 |
 | 截断的作用面 | — | — | 整个 namespace 说明 ≤ 512 KiB | 只截模型视角，UI 看原文 |
-| schema 体积 | 无治理 | 无 | 注册时 `fits_agent_budget` | 无 |
+| schema 体积 | 无治理 | 当前源码 / unverified | 注册时 `fits_agent_budget` | 当前源码 / unverified |
 | 依据 | — | `tools.ts:134` | `handlers/mcp.rs:48-49`、`:506`、`mcp_tool_exposure.rs:142` | `client.ts:218`、`:1786-1794` |
 
 > **设计理由**：**「外部 schema 是体积膨胀的主要来源」是四家共同的现实**，但从不同位置治理。CC 治理「送进模型的文本」（截 description）；codex 治理「注册进工具表的条目」（算总预算）；dsh 完全不治理，把责任推给配置者（不想要就别装）。**第三种做法在内核小的项目里成立，在前两种项目里不成立**——因为前者有 profile 概念、后两者要服务任意第三方 server。
@@ -1934,9 +1926,9 @@ flowchart TD
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 刷新时机 | 无 | 无 OAuth | 握手前刷新，且**耗时不计入握手预算** | 请求前按需刷新 |
-| 授权服务器校验 | 无 | 无 | 存 `issuer` 防混淆；`www_authenticate.rs` 解析 `insufficient_scope` | step-up 检测包一层 fetch |
-| 失效的传播 | 无 | 无 | 以 `notifications/codex/authChanged` 转发（不含凭据） | `needs-auth` 状态 + 菜单里的 Authenticate |
+| 刷新时机 | 当前源码 / unverified | 无 OAuth | 握手前刷新，且**耗时不计入握手预算** | 请求前按需刷新 |
+| 授权服务器校验 | 当前源码 / unverified | 无 | 存 `issuer` 防混淆；`www_authenticate.rs` 解析 `insufficient_scope` | step-up 检测包一层 fetch |
+| 失效的传播 | 当前源码 / unverified | 无 | 以 `notifications/codex/authChanged` 转发（不含凭据） | `needs-auth` 状态 + 菜单里的 Authenticate |
 | 源码依据 | — | — | `streamable_http_retry.rs:67-74`、`oauth.rs:96-106`、`auth_changes.rs:14-15` | `auth.ts:1354`、`types.ts:221` |
 
 > **设计理由**：两家的处理共同指向一条规则——**token 刷新必须与「握手超时」解耦**。codex 把刷新耗时从握手预算里排除（否则一个慢的授权服务器会让连接判定为失败），CC 用 step-up 检测把 403 在 SDK 的授权流程之前捕获（否则 403 会被误判成普通错误）。**这两处细节都属于「只有真的接过 OAuth 才会写出来」的类别**。
@@ -1945,9 +1937,9 @@ flowchart TD
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 是否区分崩溃循环与偶发断开 | 无 | **是**（稳定窗） | 部分（退避封顶） | 部分（尝试次数 + 传输类型） |
-| 耗尽预算后 | 无 | 注销工具，清空 instructions，写 error 日志 | 保留目录，等下次刷新 | 置 `failed`，等用户操作 |
-| 测试是否覆盖 | 无 | 是（`reconnect.spec.ts` 的崩溃循环与稳定窗用例） | 部分 | 部分 |
+| 是否区分崩溃循环与偶发断开 | 当前源码 / unverified | **是**（稳定窗） | 部分（退避封顶） | 部分（尝试次数 + 传输类型） |
+| 耗尽预算后 | 当前源码 / unverified | 注销工具，清空 instructions，写 error 日志 | 保留目录，等下次刷新 | 置 `failed`，等用户操作 |
+| 测试是否覆盖 | 当前源码 / unverified | 是（`reconnect.spec.ts` 的崩溃循环与稳定窗用例） | 部分 | 部分 |
 
 > **设计理由**：dsh 在这一节做到了四家最完整——它把「崩溃循环」当作一个独立故障类来测，且给出了可解释的判据（连接存活时长 vs 最长退避间隔）。其余两家靠预算耗尽兜住，能止损但不能区分故障性质。**区分故障性质的价值在于日志质量**：一个「十次全是瞬断」的记录与一个「十次全是崩溃」的记录，运维处置完全不同。
 
@@ -1955,8 +1947,8 @@ flowchart TD
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 是否响应 `list_changed` | 无 | 是（串行换代，先拉后换） | 记日志，**不驱动重载** | 是（仅 capability 声明后） |
-| 换代表时是否可能半残 | 无 | 不会（整代回滚） | 不适用 | 不会（整体替换 tools 数组） |
+| 是否响应 `list_changed` | 当前源码 / unverified | 是（串行换代，先拉后换） | 记日志，**不驱动重载** | 是（仅 capability 声明后） |
+| 换代表时是否可能半残 | 当前源码 / unverified | 不会（整代回滚） | 不适用 | 不会（整体替换 tools 数组） |
 | 依据 | — | `tools.ts:119-160`、`connection.ts:263-268` | `logging_client_handler.rs:86-88` | `useManageMCPConnections.ts:618`、`:667`、`:705` |
 
 > **设计理由**：三家都选择**整表替换**而不是增量打补丁。原因是工具表是模型可见面的输入，一次请求里它必须是自洽快照——增量更新会让「同名工具的参数 schema 在这一轮变了」这种事泄漏到上下文里。dsh 的两阶段与 CC 的整体替换是同一个不变式的两种写法。
@@ -1967,16 +1959,16 @@ flowchart TD
 
 ### 7.1 共识（四家一致，可直接采纳）
 
-1. **命名统一用 `mcp__<server>__<tool>`**（对应 5.3）。三家形态一致、逐字相同，说明这是被生态收敛出来的约定。要照抄的不是前缀本身，而是它带来的两个性质：**工具名自带来源信息**、**前缀可被规则表达消费**（CC 的 `mcp__server` 与 `mcp__server__*` 两级规则就建立在这上面）。
-2. **外部能力失败不得阻断内核**（对应 6.1）。要照抄的是三件事：失败降级为事件而不是错误、按 server 隔离、保留一个显式的「必需」出口。只做前两件会让「确实需要这个 server」的场景没有表达方式。
-3. **`resources` 支持读取、不支持订阅；`sampling` 一律不支持**（对应 5.7）。这是一个被三家独立收敛出的最小集，覆盖了主用例（把外部文档喂给模型），同时避开了推送式状态同步的复杂度，并挡住了 server 反向消耗模型额度的路径。
-4. **不把父进程环境整体传给 stdio server**（对应 5.2）。三家都做了这件事，只是黑名单与白名单的选择不同。要照抄的是**这件事必须做**，而不是某一种做法。
+1. **命名统一用 `mcp__<server>__<tool>`**（对应 5.3）。四家当前入口都采用或映射到这一形态，说明这是被生态收敛出来的约定。要照抄的不是前缀本身，而是它带来的两个性质：**工具名自带来源信息**、**前缀可被规则表达消费**（CC 的 `mcp__server` 与 `mcp__server__*` 两级规则就建立在这上面）。
+2. **外部能力失败不得阻断内核**（对应 6.1）。四家当前证据都支持这一默认方向；要照抄的是三件事：失败降级为事件或工具结果、按 server 隔离、保留一个显式的「必需」出口。只做前两件会让「确实需要这个 server」的场景没有表达方式。
+3. **`resources` 支持读取、不支持订阅；`sampling` 一律不支持**（对应 5.7）。dsh、codex、CC 已形成这一最小集；pi 当前已确认 resources 读取，但 sampling 与订阅仍应保持 `unverified`，不能提前写成四家共识。
+4. **不把父进程环境整体传给 stdio server**（对应 5.2）。dsh、codex、CC 都有直接证据，pi 的环境传递策略暂待补充源码复核。要照抄的是**这件事必须做**，而不是某一种做法。
 
 ### 7.2 推荐（多数做对，值得抄）
 
-5. **给 MCP 工具调用建一个专用的审批动作，并把 server 身份写进去**（对应 5.4）。codex 的 `ApprovalAction::McpToolCall` 带了 server 名、工具名、参数、连接器身份与已连账号邮箱（`mcp_tool_call.rs:1536-1545`）。理由不是「更好看」而是**审批的正确性依赖归因**：用户要判断「要不要放行这次调用」，必须知道它是谁发起的、用了谁的凭据。其余两家只给一个 `mcp__server__tool` 名字，信息量差一个量级。
+5. **给 MCP 工具调用建一个专用的审批动作，并把 server 身份写进去**（对应 5.4）。codex 的 `ApprovalAction::McpToolCall` 带了 server 名、工具名、参数、连接器身份与已连账号邮箱（`mcp_tool_call.rs:1536-1545`）。理由不是「更好看」而是**审批的正确性依赖归因**：用户要判断「要不要放行这次调用」，必须知道它是谁发起的、用了谁的凭据。pi、dsh 与 CC 当前至少暴露工具名级别的身份，完整审批字段仍应分别核验。
 6. **「策略说不问」但「这次必须问」时，必须拒绝**（对应 5.4）。codex 的实现是一句直白的 `ReviewDecision::denied`（`mcp_tool_call.rs:1610-1613`），dsh 在无审批通道时 fail-closed。**外部能力是这个规则最需要的地方**——因为它的风险面来自内核之外。
-7. **拒绝时的失败信息要能被模型利用**。三家都把失败物化成工具结果而不是抛异常（第 4 章已记），本层要补的是**拒绝理由要写明是哪个 server 的哪个工具**——CC 的 `MCPTool` passthrough 消息与 dsh 的 `mcp-client(<serverName>): ...` 前缀都在做这件事，这个前缀在故障排查时的价值很高。
+7. **拒绝时的失败信息要能被模型利用**。dsh、codex、CC 已有把失败物化为工具结果或结构化错误的直接证据；pi 当前源码也有 MCP tool result 适配入口，但错误归因和模型可见字段仍需补充源码证据。拒绝理由应写明 server 与 tool 身份，这个前缀在故障排查时的价值很高。
 8. **工具表换代用整表替换 + 失败整代回滚**（对应 6.7、6.3）。dsh 的两阶段实现（`tools.ts:119-160`）把「新代构建完成前不碰注册表」与「注册失败全部撤销」写成了显式注释。**收益是不变式可陈述**：模型侧要么看到全套，要么一个都不看到。
 9. **重连预算要用稳定窗区分瞬断与崩溃循环**（对应 6.6）。dsh 的判据是「连接存活时长是否超过最长退避间隔」（`connection.ts:220-222`）。这一条的成本极低（一行判断），收益是**故障性质的日志质量**。
 10. **本地命令参与鉴权时，把它的输出当不可信输入**（对应 5.5）。codex 与 CC 都限时 10 秒；codex 另限长 64 KiB，CC 另要求工作区信任。**「允许外部命令参与鉴权」与「信任它的输出」是两件事**，两家都把这两件事分开了。

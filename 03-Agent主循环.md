@@ -4,7 +4,7 @@ title: "第 3 章 · Agent 主循环"
 nav_order: 1
 parent: "第二部分 · 内核区"
 permalink: /ch/03/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,9 @@ review_priority: P1
 
 # 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
-> **当前基线补充（2026-10-14）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
+本章结论与源码证据：[pi.agent-loop]({{ site.baseurl }}/appendix/claims/#claim.pi.agent-loop) · [dsh.plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) · [codex.turn-entry]({{ site.baseurl }}/appendix/claims/#claim.codex.turn-entry)。其余分析须结合对应来源逐条复核。
+
+> **当前基线补充（2026-10-15）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
 
 **本章回答什么** —— 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。
 
@@ -31,6 +33,8 @@ review_priority: P1
 > - **deepseek-harness** —— `packages/core/agent-loop/src/agent.ts`（TypeScript，事件溯源 + turn/step 状态机）
 > - **codex** —— `codex-rs/core/src/session/turn.rs`（Rust，async 采样循环 + 内建压缩）
 > - **Claude-Code** —— `src/query.ts` + `src/QueryEngine.ts`（TypeScript，async 生成器 + 显式 `next: State`）
+>
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -596,7 +600,7 @@ if (streamingFallbackOccured) {
 |---|---|---|---|---|
 | 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:1611`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
 
-> **设计理由**（`[code]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
+> **设计理由**（`[inference]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
 
 ### 6.4 用户中断 / 取消
 
@@ -604,7 +608,7 @@ if (streamingFallbackOccured) {
 |---|---|---|---|---|
 | 做法 | `AbortSignal` 层层传递，`:572/610/617/638/732/751` 六处检查；保留 partialMessage | 分类（user/parent/hook/disposed），写入 `turn/end`；保留已交付文本为 `interrupted: true` | `CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:243`）；已完成 lifecycle 不重写 | 5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对 |
 
-> **设计理由**（`[code]`）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
+> **设计理由**（`[inference]`）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
 
 ### 6.5 流中断（idle watchdog）与 fallback
 
@@ -612,7 +616,7 @@ if (streamingFallbackOccured) {
 |---|---|---|---|---|
 | 做法 | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | `claude.ts:2310-2334` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:712-741`） |
 
-> **设计理由**（`[code]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
+> **设计理由**（`[inference]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
 
 ### 6.6 空转 / 无限循环防护
 
@@ -621,7 +625,7 @@ if (streamingFallbackOccured) {
 | 机制 | 全批 terminate 才停 | `turnEnds && inbox.nextStep.length===0` | `guardian_budget_compacted` 每 step 限一次压缩 | `hasAttemptedReactiveCompact`（`:1157`/`:1292-1297`）+ `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`，检查 `:260-265`，计数 `:341-349`） |
 | 源码依据 | `shouldTerminateToolBatch` `:685` | `agent.ts:312` | `turn.rs:422/535/737-750` | — |
 
-> **设计理由**（`[code]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
+> **设计理由**（`[inference]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
 
 
 ### 6.7 工具失败与兄弟失败
@@ -630,7 +634,7 @@ if (streamingFallbackOccured) {
 |---|---|---|---|---|
 | 做法 | prepare/execute 全 catch → 错误 toolResult，**零逃逸**（`:703`/`:773`/`:816`） | 调度器失败**不伪造结果**，抛第一个失败（`tool-calls.ts:219-236` 注释 `[code]`：避免假结果造成死循环） | payload 类型级错误升级为 `Fatal`，其余 `RespondToModel` | 四条错误→tool_result 路径（未知工具 `toolExecution.ts:369-411`、zod 失败 `:616-680`、validateInput `:687-733`、执行抛错 `:1691-1737`）；**Bash 出错会取消兄弟工具**（`StreamingToolExecutor.ts:354-364`），Read/WebFetch 不会 |
 
-> **设计理由**（`[code]`）：CC 的「Bash 失败级联取消兄弟」反映了实际使用模式——shell 命令之间常有隐含依赖，一个失败后继续跑其余命令通常无意义且会产生误导性输出。
+> **设计理由**（`[inference]`）：CC 的「Bash 失败级联取消兄弟」反映了实际使用模式——shell 命令之间常有隐含依赖，一个失败后继续跑其余命令通常无意义且会产生误导性输出。
 
 ### 6.8 预算耗尽（turn / token / USD）
 

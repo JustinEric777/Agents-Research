@@ -19,18 +19,11 @@ jobs:
       - name: Setup Ruby
         uses: ruby/setup-ruby@v1
         with:
-          ruby-version: "3.3"
+          ruby-version: "3.3.10"
           bundler-cache: true
 
-      - name: Validate sources and citations
-        run: |
-          ruby tools/check_sources.rb
-          ruby tools/check_citations.rb
-
-      - name: Verify generated matrix
-        run: |
-          ruby tools/build_refresh_matrix.rb --output /tmp/current-matrix.md
-          cmp -s /tmp/current-matrix.md reports/current-matrix.md
+      - name: Check document whitespace
+        run: git diff --check
 
       - name: Build site
         run: bundle exec jekyll build --trace

@@ -4,7 +4,7 @@ title: "第 7 章 · 消息 / 事件 / Session"
 nav_order: 5
 parent: "第二部分 · 内核区"
 permalink: /ch/07/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,13 +12,15 @@ review_priority: P0
 
 # 第 7 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
 
+本章结论与源码证据：[pi.durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [pi.nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) · [dsh.session-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-contract) · [dsh.session-surface]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-surface) · [dsh.session-format]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-format) · [codex.message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint)。其余分析须结合对应来源逐条复核。
+
 **本章回答什么** —— 一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建；这是 L3–L6 全部设计差异的**根源层**。
 
 **四家分歧在哪** —— 四个项目在这里给出了四种互不兼容的世界观：**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
-> **当前基线补充（2026-10-14）** —— 事实源不再只比较「消息怎样存」。pi `v1.2.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:40-61`）；dsh `dsh-v0.2.1-alpha.2` 继续以 append-only session log 与 surface 投影分离；codex `rust-v0.163.0-alpha.11` 的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.299` 以发行产物和探针为证据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
+> **当前基线补充（2026-10-15）** —— 事实源不再只比较「消息怎样存」。pi `v1.2.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:40-61`）；dsh `dsh-v0.2.1-alpha.3` 继续以 append-only session log 与 surface 投影分离；codex `rust-v0.163.0-alpha.13` 的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.299` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
@@ -33,6 +35,8 @@ review_priority: P0
 > - **Claude-Code** —— `src/types/message.ts` + `src/types/ids.ts` + `src/utils/messages.ts`（规范化与配对）+ `src/utils/sessionStorage.ts`（消息链落盘）
 >
 > **易混点**：CC 的 `src/history.ts` 是**用户输入的 prompt/命令历史**（Up 箭头复用、Ctrl+R 搜索，存 `~/.claude/history.jsonl`），与会话消息无关；会话消息落在 `src/utils/sessionStorage.ts`。
+>
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -513,7 +517,7 @@ normalizeMessagesForAPI()
 | 机制 | `parentId` 存在性校验；缺失时抛 `SessionInvariantError` | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `response_id`/`window_ids` 随元数据持久化 | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 |
 | 源码依据 | `session.ts` | `surface.ts:410` | `CompactedHistoryMetadata` | `sessionStorage.ts:2088-2090` |
 
-> **设计理由**（`[code]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
+> **设计理由**（`[inference]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
 
 
 ### 6.3 消息被撤销

@@ -6,32 +6,35 @@
 
 **pi**、**dsh**（deepseek-harness）、**codex**、**CC**（Claude-Code）四个 Agent 项目的**代码级横向对比研究**。按 Agent 运行时的架构层次逐层深入，每层产出一篇对比分析，每篇沿同一条**七问链**推进——先界定范围，再逐维对比，最后落到可执行的设计结论（见第四节）。
 
-> **当前基线（2026-10-14）**：四个项目的版本、提交、发行产物和章节优先级统一记录在 [`sources.lock.json`](sources.lock.json) 与 [当前版本与结构复核](https://justineric777.github.io/Agents-Research/refresh/)；阅读结论时先看证据等级和验证方式。
+> **当前基线（2026-10-15）**：四个项目的版本、提交、发行产物和章节优先级统一记录在 [`sources.lock.json`](sources.lock.json) 与 [当前版本与结构复核](https://justineric777.github.io/Agents-Research/refresh/)；阅读结论时先看证据等级和验证方式。
 
 全文按**三部分**组织：**第一部分 · 启动区**（循环之前，第 1–2 章）、**第二部分 · 内核区**（一轮循环及其子系统，第 3–12 章）、**第三部分 · 外围区**（内核之外，第 13–17 章）。**章号即层码**——第 N 章就是第 N 层（`LN`）：正文跨章引用写「第 N 章」，指代架构位置写「`LN`」。
 
-所有断言均标注 `文件:行号`，可回到源码逐条核验。
+代码级引用提供 `文件:行号`；当前登记结论可通过证据图核验，推断单独标注。
 
 ---
 
 ## 一、研究对象
 
-| 代号 | 语言 / 分发 | 当前版本 / 产物 | 一句话定位 |
-|---|---|---|---|
-| **pi** | TypeScript / Node | `v1.2.0` | durable runtime + coding-agent harness |
-| **dsh** | TypeScript / Node | `dsh-v0.2.1-alpha.2` | profile/bundle + 事件溯源运行时 |
-| **codex** | Rust / tokio | `rust-v0.163.0-alpha.11` | multi-agent + provider 原生协议 + 强沙箱 |
-| **CC** | 平台二进制 / npm | `v2.1.299` | 产品化任务、权限与结构化 I/O |
+| 代号 | 语言 / 分发 | 一句话定位 |
+|---|---|---|
+| **pi** | TypeScript / Node | durable runtime + coding-agent harness |
+| **dsh** | TypeScript / Node | profile/bundle + 事件溯源运行时 |
+| **codex** | Rust / tokio | multi-agent + provider 原生协议 + 强沙箱 |
+| **CC** | 平台二进制 / npm | 产品化任务、权限与结构化 I/O |
+
+版本与提交以[当前来源与版本](https://justineric777.github.io/Agents-Research/appendix/sources/)为准。
 
 **证据等级约定**（贯穿全系列）：
 
 - `[code]` —— 官方源码，可直接引用
 - `[release]` —— 官方发行物、npm 包或帮助文本
-- `[probe]` —— 固定输入、环境和输出的黑盒验证
 - `[inference]` —— 明确标记的设计推断，不能写成源码事实
 - 附加限定：`[code]` 之下的**源码注释**与 `feature()` **门控路径**，引用处须写明「注释给出」或「还原版可见 ≠ 发布版启用」——这是 `[code]` 级引用的硬约束，不是另立一级。
 
-> pi / dsh / codex 使用官方源码。**CC 使用当前官方发行物和黑盒探针**，无法直接验证的行为不得升级为源码级结论。
+> pi / dsh / codex 使用官方源码；CC 使用当前发行物身份和公开资料。结论分别标明实现、类型声明、源码注释或推断的证明范围。
+
+关键结论、源码入口和设计建议见[当前结论与源码证据](https://justineric777.github.io/Agents-Research/appendix/claims/)；阅读时结合[源码复核矩阵](https://justineric777.github.io/Agents-Research/appendix/experiments/)核对适用范围和证据边界。
 
 ---
 
@@ -102,8 +105,8 @@
 - **[总览与导航](https://justineric777.github.io/Agents-Research/overview/)**（仓库内即 `00-总览与导航.md`）—— 结构地图与索引：四项目档案卡、模块地图（架构层次 × 四项目源码入口）、核心术语对照表、报告索引、阅读路径建议、跨项目源码锚点速查。
 - **三个分区入口页**（站点侧栏的三个分区）：**[第一部分 · 启动区](https://justineric777.github.io/Agents-Research/startup/)**（第 1–2 章）· **[第二部分 · 内核区](https://justineric777.github.io/Agents-Research/core/)**（第 3–12 章）· **[第三部分 · 外围区](https://justineric777.github.io/Agents-Research/peripheral/)**（第 13–17 章）。
 - 本 README 只做「门面与读法」——**项目档案卡、术语表与锚点表以 `00` 为准**，避免两处维护同一份信息。
-- **[版本更新与结构复核](https://justineric777.github.io/Agents-Research/refresh/)**——截至 2026-10-14 的版本基线、17 层增量结论、证据可靠性、遗漏项与下一轮重跑顺序。
-- **横切附录**——[证据与新鲜度](https://justineric777.github.io/Agents-Research/appendix/evidence/)、[持久化与所有权](https://justineric777.github.io/Agents-Research/appendix/durability/)、[安全与兼容性](https://justineric777.github.io/Agents-Research/appendix/security/)、[验证实验矩阵](https://justineric777.github.io/Agents-Research/appendix/experiments/)。
+- **[版本更新与结构复核](https://justineric777.github.io/Agents-Research/refresh/)**——当前版本的架构定位、逐层结论和证据边界。
+- **横切附录**——[证据与新鲜度](https://justineric777.github.io/Agents-Research/appendix/evidence/)、[持久化与所有权](https://justineric777.github.io/Agents-Research/appendix/durability/)、[安全与兼容性](https://justineric777.github.io/Agents-Research/appendix/security/)、[源码复核矩阵](https://justineric777.github.io/Agents-Research/appendix/experiments/)。
 
 ---
 

@@ -4,7 +4,7 @@ title: "第 9 章 · 任务与子 Agent"
 nav_order: 7
 parent: "第二部分 · 内核区"
 permalink: /ch/09/
-reviewed_at: 2026-10-14
+reviewed_at: 2026-10-15
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,9 +12,11 @@ review_priority: P0
 
 # 第 9 章：任务与子 Agent —— 把工作交给另一个 Agent
 
+本章结论与源码证据：[pi.durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [pi.nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) · [pi.codemode-worker]({{ site.baseurl }}/appendix/claims/#claim.pi.codemode-worker) · [dsh.agent-team-board]({{ site.baseurl }}/appendix/claims/#claim.dsh.agent-team-board) · [codex.multi-agent-session]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-session) · [codex.multi-agent-tools]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-tools) · [codex.message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint)。其余分析须结合对应来源逐条复核。
+
 **本章回答什么** —— 一个 Agent 如何把工作委派给「另一个 Agent」，以及被委派者如何被创建、驱动、通信、回收。
 
-> **当前基线补充（2026-10-14）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 只能以发行行为和探针确认。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
+> **当前基线补充（2026-10-15）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
 
 **四家分歧在哪** —— **这一层的分歧是四家中最大的**：子 Agent 的本体是另一个操作系统进程、一个可被驱动的会话、线程图上的一个节点，还是一个一等任务对象——四种答案互不兼容，且各自推导出完全不同的上下文继承、深度限制与结果回灌策略。
 
