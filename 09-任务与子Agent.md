@@ -25,7 +25,7 @@ review_priority: P0
 > **跨层联动**：10 —— 见 2.3 与第 10 章 6.7。子 Agent 的权限不是新开一条判定链，而是**继承与收窄**：本层决定「子 Agent 有没有自己的会话与工具池」，第 10 章 6.7 决定「父的授权怎么传下去」，同一件事在两层各出现一次。另有一处向外的联动：**14** —— 见第 14 章 5.2，长跑的子 Agent 同时是 L9 的对象与 L14 的对象，两章结论互补而不重叠。
 >
 > **分析对象**：
-> - **pi** —— `packages/agent/src/harness/session/{types,session}.ts` + `harness/runtime/lane.ts`（Branch 游标与 lane 串行化）+ `packages/coding-agent/examples/extensions/subagent/index.ts`（子 Agent 是示例扩展，内核无此概念）
+> - **pi** —— `packages/durable/src/session/{session,transaction,forks}.ts`（会话、事务与 fork）+ `packages/durable/src/harness/scheduler.ts`（任务串行化；原 `lane.ts` 已删）+ `packages/coding-agent/examples/extensions/subagent/index.ts`（子 Agent 是示例扩展，内核无此概念）
 > - **deepseek-harness** —— `packages/subagent/subagent/src/{index,types,child-agent,depth,continuation}.ts` + `subagent-{in-process-driver,fork-in-process,spawn-in-process,acp,claude-code,codex}/src/*`
 > - **codex** —— `codex-rs/core/src/agent/*` + `core/src/tools/handlers/multi_agents*.rs` + `agent-graph-store/src/*` + `ext/agent-message-board/src/*`
 > - **Claude-Code** —— `src/Task.ts` + `src/tasks/*` + `src/tools/AgentTool/*` + `src/tools/Task{Output,Stop,Update}Tool/*`

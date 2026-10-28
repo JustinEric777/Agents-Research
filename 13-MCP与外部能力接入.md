@@ -239,12 +239,12 @@ getAllRegisteredTools(): RegisteredTool[] {
 
 | 需要的能力 | pi 的挂点 | 锚点 |
 |---|---|---|
-| 注册动态工具（每个 MCP tool 一个） | `pi.registerTool(...)` | `extensions/types.ts:1426` |
-| 改写工具入参 | `on("tool_call", ...)`，`event.input` 可原地改 | `extensions/types.ts:1026` |
-| 改写工具结果 | `on("tool_result", ...)` | `extensions/types.ts:1417` |
-| 起子进程 | `pi.exec(command, args, options)` | `extensions/types.ts:1515` |
-| 访问配置 | `registerFlag` / `getFlag` | `extensions/types.ts:1447` |
-| 会话内持久状态 | `appendEntry<T>(customType, data?)` | `extensions/types.ts:1499` |
+| 注册动态工具（每个 MCP tool 一个） | `pi.registerTool(...)` | `core/extensions/types.ts:1671` |
+| 改写工具入参 | `on("tool_call", ...)`，`event.input` 可原地改 | `core/extensions/types.ts:1254` |
+| 改写工具结果 | `on("tool_result", ...)` | `core/extensions/types.ts:1662` |
+| 起子进程 | `pi.exec(command, args, options)` | `core/extensions/types.ts:1763` |
+| 访问配置 | `registerFlag` / `getFlag` | `core/extensions/types.ts:1692` / `:1708` |
+| 会话内持久状态 | `appendEntry<T>(customType, data?)` | `core/extensions/types.ts:1747` |
 
 但有两个硬缺口，都是读取这一层时最容易忽略的：
 

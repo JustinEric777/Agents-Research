@@ -58,7 +58,9 @@
         "packages/coding-agent/src/core/system-prompt.ts",
         "packages/durable/src/tasks.ts",
         "packages/coding-agent/src/modes/rpc/rpc-types.ts",
-        "packages/coding-agent/src/modes/interactive/interactive-mode.ts"
+        "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
+        "packages/coding-agent/src/extensions/codemode/tool.ts",
+        "packages/coding-agent/src/extensions/tool-search/tool.ts"
       ]
     },
     "dsh": {

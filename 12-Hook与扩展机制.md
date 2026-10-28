@@ -53,7 +53,7 @@ review_priority: P1
 
 5. **设计成熟度体现在「明确不做什么」上**
 
-    - **pi** —— **唯一的反例**——它的扩展改写工具输入之后**不做重新校验**（`extensions/types.ts:1026` 的注释直说了这一点），这是本章唯一一处明示的缺口
+    - **pi** —— **唯一的反例**——它的扩展改写工具输入之后**不做重新校验**（`core/extensions/types.ts:1254` 的注释直说了这一点），这是本章唯一一处明示的缺口
     - **dsh** —— 有一份「永不支持」清单
     - **codex** —— 显式拒绝 `updatedMCPToolOutput` 与 `updatedPermissions`
     - **CC** —— 保证 hook 的 `allow` **不越过** settings 的 deny 规则
@@ -176,7 +176,7 @@ beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promi
 
 #### 4.1.2 外壳的 36 个事件与 10 个 register
 
-外壳把内核回调接到自己的事件总线上（`transformContext` → `emitContext`，`sdk.ts:390-393`；`beforeToolCall`/`afterToolCall` → `emitToolCall`/`emitToolResult`，`agent-session.ts:530-584`），对外暴露 `ExtensionAPI`（`extensions/types.ts:1349-1624`）。它的 `on()` 有 **36 个重载**（`types.ts:1354-1419`），可按粒度分五组：
+外壳把内核回调接到自己的事件总线上（`transformContext` → `emitContext`，`sdk.ts:390-393`；`beforeToolCall`/`afterToolCall` → `emitToolCall`/`emitToolResult`，`agent-session.ts:530-584`），对外暴露 `ExtensionAPI`（`core/extensions/types.ts:1592-1987`）。它的 `on()` 有 **36 个重载**（`types.ts:1354-1419`），可按粒度分五组：
 
 | 粒度 | 事件 | 能力 |
 |---|---|---|
