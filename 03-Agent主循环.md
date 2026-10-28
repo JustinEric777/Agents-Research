@@ -4,7 +4,7 @@ title: "第 3 章 · Agent 主循环"
 nav_order: 1
 parent: "第二部分 · 内核区"
 permalink: /ch/03/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,9 +12,7 @@ review_priority: P1
 
 # 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
-本章结论与源码证据：[pi.agent-loop]({{ site.baseurl }}/appendix/claims/#claim.pi.agent-loop) · [dsh.plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) · [codex.turn-entry]({{ site.baseurl }}/appendix/claims/#claim.codex.turn-entry)。其余分析须结合对应来源逐条复核。
-
-> **当前基线补充（2026-10-15）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
+> **当前基线补充（2026-10-27）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
 
 **本章回答什么** —— 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。
 
@@ -34,7 +32,7 @@ review_priority: P1
 > - **codex** —— `codex-rs/core/src/session/turn.rs`（Rust，async 采样循环 + 内建压缩）
 > - **Claude-Code** —— `src/query.ts` + `src/QueryEngine.ts`（TypeScript，async 生成器 + 显式 `next: State`）
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -151,7 +149,6 @@ review_priority: P1
 ```
 
 **关键**：L3 是唯一同时触碰 L4/L6/L7/L8 的层次。压缩在哪一步被触发（L3 内 vs L3 外），直接决定了这个项目的可恢复性与复杂度。
-
 
 ## 三、概念对齐表
 
@@ -627,7 +624,6 @@ if (streamingFallbackOccured) {
 
 > **设计理由**（`[inference]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
 
-
 ### 6.7 工具失败与兄弟失败
 
 | 项 | pi | dsh | codex | CC |
@@ -644,7 +640,6 @@ if (streamingFallbackOccured) {
 | 源码依据 | — | — | `run_compact_task_inner` | maxTurns `query.ts:1705-1712`；token `tokenBudget.ts:45`；USD `QueryEngine.ts:972-1002` |
 
 > **设计理由**（`[inference]`）：只有 CC 做 USD 预算，因为它作为商业产品必须给用户设成本上限；maxTurns 是防失控的兜底；token budget 反而是「**鼓励模型多干活**」的正向机制——这与另外三家「限制」的语义相反。
-
 
 ---
 
@@ -696,7 +691,7 @@ if (streamingFallbackOccured) {
 | `packages/agent/src/agent-loop.ts` | 251 / 285 | `finishTurn` 两处调用 |
 | `packages/agent/src/agent-loop.ts` | 380 / 475 / 505 | `streamAssistantResponse`、截断失败物化、`executeToolCalls` |
 | `packages/agent/src/types.ts` | 260 / 274 / 443 | `finishTurn` / `prepareNextTurn` 类型、`AgentTool` 契约 |
-| `packages/agent/src/harness/messages.ts` | 19 / 40 / 47 | `BashExecutionMessage` / `BranchSummaryMessage` / `CompactionSummaryMessage` |
+| `packages/coding-agent/src/core/messages.ts` | 29 / 55 / 62 | `BashExecutionMessage` / `BranchSummaryMessage` / `CompactionSummaryMessage` |
 
 ### deepseek-harness
 
@@ -739,4 +734,14 @@ if (streamingFallbackOccured) {
 | `src/services/compact/autoCompact.ts` | 62-65 / 70 / 260-265 / 341-349 | 缓冲常量、熔断阈值、检查、计数 |
 | `src/utils/context.ts` | 25 | `ESCALATED_MAX_TOKENS` |
 | `src/services/api/withRetry.ts` | 52 / 54 / 170 / 335-351 / 696 | 重试常量、retry 入口、降级、判定 |
-| `src/utils/StreamingToolExecutor.ts` | 76 / 129 / 140-151 / 210 / 354-364 / 412-440 | 流式执行器（见 第 4 章） |
+| `src/services/tools/StreamingToolExecutor.ts` | 76 / 129 / 140-151 / 210 / 354-364 / 412-440 | 流式执行器（见 第 4 章） |
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [agent-loop]({{ site.baseurl }}/appendix/claims/#claim.pi.agent-loop) |
+| dsh | [plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) |
+| codex | [turn-entry]({{ site.baseurl }}/appendix/claims/#claim.codex.turn-entry) |

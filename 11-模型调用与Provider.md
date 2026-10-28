@@ -4,7 +4,7 @@ title: "第 11 章 · 模型调用与 Provider"
 nav_order: 9
 parent: "第二部分 · 内核区"
 permalink: /ch/11/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,9 +12,7 @@ review_priority: P1
 
 # 第 11 章：模型调用与 Provider 抽象 —— 把 N 种线协议归一成一套事件词汇表
 
-本章结论与源码证据：[pi.models-provider]({{ site.baseurl }}/appendix/claims/#claim.pi.models-provider) · [codex.auth-modes]({{ site.baseurl }}/appendix/claims/#claim.codex.auth-modes) · [dsh.model-discovery-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.model-discovery-contract)。其余分析须结合对应来源逐条复核。
-
-> **当前基线补充（2026-10-15）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
+> **当前基线补充（2026-10-27）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
 
 **本章回答什么** —— 前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。
 
@@ -38,7 +36,7 @@ review_priority: P1
 >
 > **门控提示**：CC 在本层大量能力由 `feature()` 编译开关门控，逐文件清单见附录。
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -178,13 +176,22 @@ export type ProviderId = KnownProvider | string;
 ```
 
 ```ts
-// packages/ai/src/types.ts:982 —— 模型（具体哪个）
-export interface Model<TApi extends Api> {
-    id: string; name: string; api: TApi; provider: ProviderId; baseUrl: string;
-    reasoning: boolean; input: ("text" | "image")[];
-    cost: ModelCost; promptCache?: ModelPromptCache;
-    contextWindow: number; maxTokens: number;
+// packages/ai/src/types.ts:833-847 —— 公共字段抽到 BaseModel，聊天模型再叠加自己的能力
+export interface BaseModel<TApi extends string> {
+	id: string;
+	name: string;
+	api: TApi;
+	provider: ProviderId;
+	baseUrl: string;
+	input: ModelInputModality[];
+	/** Provider input limits and cache-safe preprocessing metadata. */
+	inputLimits?: ModelInputLimits;
+	cost: ModelCost;
+	headers?: Record<string, string>;
 }
+
+/** Chat model: usable with `stream()` and friends. */
+export interface Model<TApi extends Api> extends BaseModel<TApi> {
 ```
 
 **关键设计**：`api` 与 `provider` 解耦，所以「同一个 provider 走不同协议」或「不同 provider 共用同一协议」都能表达。`Model` 自带 `baseUrl`，为后面的凭据级端点覆盖留了钩子（4.1.4）。
@@ -236,14 +243,14 @@ flowchart TB
 
 | 步骤 | 位置 |
 |---|---|
-| 选模型（harness） | `packages/agent/src/harness/runtime/drive/generation.ts:74` |
-| 组装（工具 + 上下文） | `generation.ts:68` `prepareGeneration()`，`:90` 构造 `Tool[]`，`:117` 应用 `before_request` hook |
-| 消息转换 | `packages/agent/src/harness/execution/assistant.ts:146` |
-| 并发闸门 + 发起 | `generation.ts:216` `drive.gate.admit(() => lane.models.streamSimple(...))` |
-| 凭据注入 | `packages/ai/src/models.ts:648` `applyAuth()`，`:671` 覆盖 `baseUrl` |
-| 适配器循环 | `packages/ai/src/api/anthropic-messages.ts:601` `for await (const event of iterateAnthropicEvents(...))` |
-| 消费侧 | `assistant.ts:108` 区分 `start` / `isUpdateEvent` → `observer.start/update` |
-| 帧编码（可恢复） | `packages/agent/src/harness/runtime/drive/response.ts:70` `frameEncoder.encode(event)` |
+| 选模型（harness） | `packages/durable/src/harness/generation.ts:135-139`：`runtime.models.getModel(provider, modelId)`，取不到即 `failNoModel` |
+| 组装（系统提示词分节） | `generation.ts:155-176`：`runtime.context` → `replaySections` → `planSystemEntries` |
+| 消息转换 | 交给 ai 包的 provider 适配器：`generation.ts:484` 只传 `{ messages: [...messages] }` |
+| 发起 | `generation.ts:484` `runtime.models.streamSimple(model, …)`（v1.4.0 已无 `drive.gate.admit`，并发由 Session 行与 task 调度器保证） |
+| 凭据注入 | `packages/ai/src/models.ts:856` `applyAuth()`，`:879` 用 `auth.baseUrl` 覆盖 `requestModel.baseUrl` |
+| 适配器循环 | `packages/ai/src/api/anthropic-messages.ts:530` `iterateAnthropicEvents()`，`:696` 处消费 |
+| 消费侧 | `generation.ts:485-491`：只在 partial 有内容时更新 `pending`，按 `progress.partialIntervalMs` 节流 |
+| 帧编码（可恢复） | `generation.ts:459-482` `flush()`：同步拷贝 partial → 单次在途提交 → 收尾等在途完成（取代旧版 `frameEncoder.encode`） |
 
 #### 4.1.4 鉴权：三层回退 + 8 种订阅登录
 
@@ -285,33 +292,33 @@ const maxRetries = options.maxRetries ?? 0;   // ← 默认 0
 文件头注释解释了原因（`provider-retry.ts:100`）：适配器必须以 `maxRetries: 0` 调用底层 SDK，**因为取消信号由自己掌控**。真正生效的重试在 harness 层：
 
 ```ts
-// packages/agent/src/harness/config.ts:4
-export const DEFAULT_RETRY_POLICY: RetryPolicy = { enabled: true, maxRetries: 3, baseDelayMs: 1_000, maxAgentDelayMs: DEFAULT_MAX_AGENT_RETRY_DELAY_MS };
+// packages/durable/src/harness/agent.ts:20-25
+export const DEFAULT_RETRY_POLICY: ConversationRetryPolicy = {
+	enabled: true,
+	maxRetries: 3,
+	baseDelayMs: 2000,
+	maxAgentDelayMs: 60000,
+};
 ```
 
-决策点是一个**显式状态机**（`assistant.effect_pending` → `assistant.retry_wait`）：
+决策点不是一个内存里的状态机，而是**一次落库的休眠**——重试被表达成「这次 generation 先睡到 `until`」：
 
 ```ts
-// packages/agent/src/harness/runtime/drive/response.ts:276-295 —— if/else 链中的 error 分支
-if (response.stopReason === "error") {
-    if (
-        current.at === "assistant.effect_pending" &&
-        (options.recovery === true || isRetryableAssistantError(response)) &&
-        current.attempt < current.generationContext.retryPolicy.maxAttempts
-    ) {
-        settled = {
-            ...scope,
-            at: "assistant.retry_wait",
-            generationContext: current.generationContext,
-            nextAttempt: current.attempt + 1,
-            notBefore: retryNotBefore(current.generationContext.retryPolicy, current.attempt),
-            errorMessage: response.errorMessage ?? "Assistant request failed",
-        };
-    } else {
-        failure = providerError(source, response);
-    }
-}
+// packages/durable/src/harness/generation.ts:559-568 —— classify() 里的 error 分支
+const policy = settings.retry;
+// An overflow is never retried: only a compaction can make the next request fit.
+const retry =
+	message.stopReason === "error" &&
+	!overflow &&
+	isRetryableAssistantError(message) &&
+	policy.enabled &&
+	attempt <= policy.maxRetries;
+const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
 ```
+
+拿到 `until` 之后，同一次提交里既追加 assistant 消息、又把任务状态写成 `sleeping`（`generation.ts:569-580`）。**这让「等 2 秒再试」变成「睡 2 秒再试」**：进程在这期间重启也不会丢——重启后仍是那条 `sleeping` 记录，到期即被唤醒（见 第 14 章 4.1.4）。旧版的 `assistant.effect_pending → assistant.retry_wait` 内存状态机已随 `runtime/drive/**` 一起删除。
+
+另一个细节是**溢出永不重试**：`overflow` 为真时直接转去压上下文（`generation.ts:544-558`），因为只有压缩才能让下一次请求放得下。
 
 请求级重试若被显式打开，判定优先看服务端提示：
 
@@ -498,7 +505,7 @@ listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream()
 **并且 dsh 给上游提交了性能修复**：
 
 ```diff
-# patches/@earendil-works__pi-ai@0.85.1.patch
+# patches/@earendil-works__pi-ai@1.1.0.patch:8
 # 在 4 个适配器里删掉「每 delta 全量重解析参数 JSON」
 -                            block.arguments = parseStreamingJson(block.partialJson);
 # 命中：anthropic-messages.js / bedrock-converse-stream.js / mistral-conversations.js / openai-completions.js
@@ -1214,7 +1221,6 @@ return expiresWithBuffer >= expiresAt
 
 > **设计理由**（`[inference]`）：CC 的注释写明「宁可空输入走下游校验，也不让半截 JSON 崩掉整轮」。**四家在此高度一致**——这是流式工具调用的共同现实：JSON 是增量拼出来的，任何时刻都可能不完整。
 
-
 ### 6.3 限流（429）：谁负责退避
 
 | 项 | pi | dsh | codex | CC |
@@ -1223,7 +1229,6 @@ return expiresWithBuffer >= expiresAt
 | 源码依据 | `provider-retry.ts:23`；`utils/retry.ts:7-9` | `retry-policy.ts:20`；`llm-retry/src/index.ts:227` | `model-provider-info/src/lib.rs:445`；`sse/responses.rs:692-719` | `withRetry.ts:696`、`:732-751` |
 
 > **设计理由**（`[inference]`）：codex 的 `retry_429 = false` 是最有信息量的一个选择——它明确避免**双重退避**（传输层 + 业务层各等一次 = 等两倍）。**若服务端给了等待时长，客户端就不该再自己算一遍。**
-
 
 ### 6.4 流式中断
 
@@ -1234,7 +1239,6 @@ return expiresWithBuffer >= expiresAt
 
 > **设计理由**（`[inference]`）：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
 
-
 ### 6.5 usage 缺失
 
 | 项 | pi | dsh | codex | CC |
@@ -1243,7 +1247,6 @@ return expiresWithBuffer >= expiresAt
 | 源码依据 | `anthropic-messages.ts:763-765`；`openai-completions.ts:569-571` | `token-meter/src/index.ts:176-180` | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` | `claude.ts:2928`、`:2932-2945` |
 
 > **设计理由**（`[inference]`）：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
-
 
 ### 6.6 provider 不支持某能力：三种态度
 
@@ -1254,7 +1257,6 @@ return expiresWithBuffer >= expiresAt
 
 > **设计理由**：dsh 的选择最值得记——README 与源码注释都写明「以 capability 显式拒绝而非静默丢弃」。**静默降级会让模型收到一个它以为完整的上下文**（图片变占位文本后，模型可能基于「[image omitted]」编造内容）。三种态度都合理，但「静默降级」是唯一会让用户误判的。
 
-
 ### 6.7 模型不存在 / 未知模型
 
 | 项 | pi | dsh | codex | CC |
@@ -1263,7 +1265,6 @@ return expiresWithBuffer >= expiresAt
 | 源码依据 | `models.ts` | `llm-pi-ai/src/index.ts:189-205`；`llm/src/index.ts:149` | `models-manager/src/manager.rs:789-800` | `modelCost.ts:144`、`:166` |
 
 > **设计理由**（`[inference]`）：这一组的差异揭示了两类失败观。codex/CC 选择「**继续跑但留痕**」，dsh 选择「**直接失败**」。dsh 的理由在凭据那条已经写过：静默猜错比启动失败代价更高。**注意 codex 的 `used_fallback_model_metadata` 其实是折中——既继续跑，又把不确定性写进数据结构**，这是四家里最精细的处理。
-
 
 ### 6.8 鉴权失效（401）
 
@@ -1334,8 +1335,8 @@ return expiresWithBuffer >= expiresAt
 | `packages/ai/src/utils/provider-retry.ts` | 请求级重试与 `retry-after` 解析 | 126 |
 | `packages/ai/src/utils/overflow.ts` | 跨 20+ provider 的上下文溢出检测 | 188 |
 | `packages/ai/src/auth/resolve.ts` | 凭据解析与 OAuth 双检锁刷新 | 206 |
-| `packages/agent/src/harness/runtime/drive/response.ts` | 响应分类落库：溢出压缩、重试调度、deferred、usage 行写入 | 485 |
-| `packages/agent/src/harness/runtime/drive/generation.ts` | 生成准备与 `models.streamSimple` 调用 | 302 |
+| `packages/durable/src/harness/generation.ts` | 响应分类落库：溢出压缩（`:542-546`）、重试调度（`:559-576`）、deferred（`:511-518`）、usage 行 | 774 |
+| `packages/durable/src/harness/generation.ts` | 生成准备（`:133-176`）与 `models.streamSimple` 调用（`:484`） | 774 |
 | `packages/coding-agent/src/core/provider-composer.ts` | models.json / 扩展 provider 组合、apiKey / baseUrl / headers 三层覆盖 | 611 |
 
 ### deepseek-harness
@@ -1403,3 +1404,13 @@ return expiresWithBuffer >= expiresAt
 | `src/utils/model/modelAllowlist.ts` | 170 | `availableModels` 白名单匹配（企业管控） |
 
 **本章范围的门控清单**：`claude.ts` — `TRANSCRIPT_CLASSIFIER`(`:105`/`:1413`/`:1661`)、`ANTI_DISTILLATION_CC`(`:303`)、`CONNECTOR_TEXT`(`:661`/`:2067`/`:2129`)、`CACHED_MICROCOMPACT`(`:1190`/`:1432`/`:2834`/`:2970`/`:3024`)、`PROMPT_CACHE_BREAK_DETECTION`(`:1460`/`:2383`)；`withRetry.ts` — `BASH_CLASSIFIER`(`:81`)、`UNATTENDED_RETRY`(`:101`)；`query.ts` — `REACTIVE_COMPACT` / `CONTEXT_COLLAPSE` / `CACHED_MICROCOMPACT` / `CHICAGO_MCP` / `TOKEN_BUDGET` / `HISTORY_SNIP` / `BG_SESSIONS` / `TEMPLATES` / `EXPERIMENTAL_SKILL_SEARCH`；`QueryEngine.ts` — `COORDINATOR_MODE`(`:115`)、`HISTORY_SNIP`(`:122`/`:125`/`:1276`)。
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [models-provider]({{ site.baseurl }}/appendix/claims/#claim.pi.models-provider) |
+| dsh | [model-discovery-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.model-discovery-contract) |
+| codex | [auth-modes]({{ site.baseurl }}/appendix/claims/#claim.codex.auth-modes) |

@@ -1,13 +1,15 @@
 {
   "schema_version": 2,
-  "checked_at": "2026-10-15",
+  "checked_at": "2026-10-27",
   "baseline": "current",
   "projects": {
     "pi": {
       "repository": "https://github.com/earendil-works/pi",
-      "ref": "v1.2.0",
-      "commit": "06a466935536f8c9bcacb2d5efc0fc021be1bdff",
+      "ref": "v1.4.0",
+      "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
       "source_kind": "official_git_tag",
+      "previous_ref": "v1.2.0",
+      "commits_since_previous_ref": 144,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -30,6 +32,7 @@
       ],
       "focus": [
         "durable runtime",
+        "chord runtime",
         "nested tool calls",
         "Code Mode",
         "MCP",
@@ -38,8 +41,11 @@
       "local_repo": "../pi",
       "focus_files": [
         "packages/durable/src/index.ts",
+        "packages/durable/src/entries.ts",
+        "packages/chord/src/index.ts",
         "packages/coding-agent/src/core/nested-tool-calls.ts",
         "packages/coding-agent/src/cli/args.ts",
+        "packages/mcp/src/index.ts",
         "packages/coding-agent/src/extensions/mcp/index.ts",
         "packages/coding-agent/src/extensions/mcp/runtime.ts",
         "packages/coding-agent/src/extensions/mcp/tools.ts",
@@ -57,9 +63,11 @@
     },
     "dsh": {
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
-      "ref": "dsh-v0.2.1-alpha.3",
-      "commit": "2fbf4359b82fb94c03dcce0b831660d87f12ea5c",
-      "source_kind": "official_git_tag",
+      "ref": "origin/master",
+      "commit": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
+      "source_kind": "official_git_branch_tip",
+      "last_tag": "dsh-v0.2.1-alpha.3",
+      "commits_since_last_tag": 16,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -85,6 +93,8 @@
         "session format v4",
         "Agent Teams",
         "plugin lifecycle",
+        "schedule host storage",
+        "experimental hooks",
         "ACP and SDK"
       ],
       "local_repo": "../deepseek-harness",
@@ -93,8 +103,13 @@
         "packages/core/session/src/types.ts",
         "packages/core/session/src/surface.ts",
         "packages/session/session-format/src/types.ts",
+        "packages/session/session-format-v3-to-v4/src/validation.ts",
         "packages/jobs/jobs-local/src/index.ts",
+        "packages/schedule/schedule/src/storage.ts",
         "packages/experimental/agent-team/src/task-board.ts",
+        "packages/experimental/hook-protocol/src/runner.ts",
+        "packages/experimental/hooks-codex/src/index.ts",
+        "packages/experimental/webhook/src/index.ts",
         "packages/mcp/mcp-client/src/index.ts",
         "packages/acp/acp/src/index.ts",
         "packages/sdk/protocol/src/types.ts",
@@ -105,9 +120,11 @@
     },
     "codex": {
       "repository": "https://github.com/openai/codex",
-      "ref": "rust-v0.163.0-alpha.13",
-      "commit": "de2b65246c4de715f86e48dae454a09d88d277f2",
-      "source_kind": "official_git_tag",
+      "ref": "origin/main",
+      "commit": "bb64b894fd67158be0f874872e6d7bfe717e7368",
+      "source_kind": "official_git_branch_tip",
+      "last_tag": "rust-v0.163.0-alpha.13",
+      "commits_since_last_tag": 40,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -130,6 +147,7 @@
       ],
       "focus": [
         "app-server v2",
+        "websocket auth",
         "multi-agent",
         "Guardian",
         "MCP resources",
@@ -139,11 +157,16 @@
       "focus_files": [
         "codex-rs/app-server-protocol/src/protocol/common.rs",
         "codex-rs/app-server-protocol/src/protocol/v2/mcp.rs",
+        "codex-rs/websocket-auth/src/lib.rs",
         "codex-rs/agent-message-board-client/src/client.rs",
         "codex-rs/core/src/guardian/review.rs",
         "codex-rs/core/src/session/multi_agents.rs",
         "codex-rs/core/src/tools/handlers/mcp_resource.rs",
         "codex-rs/core/src/tools/handlers/multi_agents.rs",
+        "codex-rs/core/src/mcp_tool_call.rs",
+        "codex-rs/rmcp-client/src/stdio_server_launcher.rs",
+        "codex-rs/rmcp-client/src/oauth.rs",
+        "codex-rs/rmcp-client/src/oauth/telemetry.rs",
         "codex-rs/app-server-daemon/src/diagnostics.rs",
         "codex-rs/core/src/context_manager/history.rs",
         "codex-rs/app-server-daemon/src/telemetry.rs",
@@ -151,14 +174,17 @@
         "codex-rs/core/src/tools/registry.rs",
         "codex-rs/core/src/hook_runtime.rs",
         "codex-rs/core/src/unified_exec/process.rs",
+        "codex-rs/config/src/key_aliases.rs",
+        "codex-rs/login/src/auth/storage.rs",
         "codex-rs/tui/src/chatwidget.rs"
       ]
     },
     "claude_code": {
       "repository": "https://github.com/anthropics/claude-code",
-      "ref": "v2.1.299",
-      "artifact": "@anthropic-ai/claude-code@2.1.299",
+      "ref": "v2.1.311",
+      "artifact": "@anthropic-ai/claude-code@2.1.311",
       "source_kind": "official_release_and_npm_binary_package",
+      "previous_ref": "v2.1.299",
       "evidence": "release_metadata",
       "layers": [
         1,

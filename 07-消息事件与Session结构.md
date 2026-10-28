@@ -4,7 +4,7 @@ title: "第 7 章 · 消息 / 事件 / Session"
 nav_order: 5
 parent: "第二部分 · 内核区"
 permalink: /ch/07/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,15 +12,13 @@ review_priority: P0
 
 # 第 7 章：消息 / 事件 / Session —— 一段对话的事实源长什么样
 
-本章结论与源码证据：[pi.durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [pi.nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) · [dsh.session-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-contract) · [dsh.session-surface]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-surface) · [dsh.session-format]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-format) · [codex.message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint)。其余分析须结合对应来源逐条复核。
-
 **本章回答什么** —— 一段 Agent 对话的事实源到底是什么、由什么单元构成、如何被拆分与重建；这是 L3–L6 全部设计差异的**根源层**。
 
-**四家分歧在哪** —— 四个项目在这里给出了四种互不兼容的世界观：**可分支文档树、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。
+**四家分歧在哪** —— 四个项目在这里给出了四种互不兼容的世界观：**不可变条目日志 + 可移动上下文窗口、可审计事件流、provider 原生 item 数组、带父指针的消息 DAG**。
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
-> **当前基线补充（2026-10-15）** —— 事实源不再只比较「消息怎样存」。pi `v1.2.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:40-61`）；dsh `dsh-v0.2.1-alpha.3` 继续以 append-only session log 与 surface 投影分离；codex `rust-v0.163.0-alpha.13` 的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.299` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
+> **当前基线补充（2026-10-22）** —— 事实源不再只比较「消息怎样存」。pi `v1.4.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-55`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`571902028a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`bb64b894fd`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.311` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
@@ -29,14 +27,14 @@ review_priority: P0
 > **跨层联动**：06 —— 见 2.3 与第 6 章 6.5。压缩与提示词组装争用同一个资源（前缀）：第 2 章的全部缓存策略都以「前缀稳定」为前提，而压缩的本职就是重写前缀。这条线在第 6 章 6.5 有完整展开；本章只负责给出「前缀」这个对象本身的定义——什么算一段消息、什么算一次替换。
 >
 > **分析对象**：
-> - **pi** —— `packages/agent/src/harness/session/types.ts`（Entry/Branch）+ `packages/ai/src/types.ts`（Message）+ `harness/messages.ts`（宿主消息）
+> - **pi** —— `packages/durable/src/types.ts`（`EntryRecord` / `ContextEdit`）+ `packages/durable/src/entries.ts`（六种 entry kind）+ `packages/durable/src/harness/context.ts`（上下文派生）+ `packages/ai/src/types.ts`（Message）
 > - **deepseek-harness** —— `packages/core/session/src/{types,surface}.ts` + `packages/llm/llm/src/{message,types}.ts`
 > - **codex** —— `codex-rs/protocol/src/{items,models}.rs` + `core/src/context_manager/history.rs` + `core/src/state/session.rs`
 > - **Claude-Code** —— `src/types/message.ts` + `src/types/ids.ts` + `src/utils/messages.ts`（规范化与配对）+ `src/utils/sessionStorage.ts`（消息链落盘）
 >
 > **易混点**：CC 的 `src/history.ts` 是**用户输入的 prompt/命令历史**（Up 箭头复用、Ctrl+R 搜索，存 `~/.claude/history.jsonl`），与会话消息无关；会话消息落在 `src/utils/sessionStorage.ts`。
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.299` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -44,12 +42,12 @@ review_priority: P0
 
 1. **四种世界观**
 
-    - **pi** —— 是**可分支文档树**（Entry 是树节点，Branch 是游标）
+    - **pi** —— 是**不可变条目日志 + 可移动上下文窗口**（条目只追加，`head` 定起点，`edits` 叠覆盖）
     - **dsh** —— 是**可审计事件流**（append-only 日志为唯一事实源，消息从事件 derive）
     - **codex** —— 是**provider 原生 item 数组**（`ResponseItem` 直出 API，零转换）
     - **CC** —— 是**带父指针的消息 DAG**（`uuid` + `parentUuid`，写入时线性、读取时从 leaf 回溯）
 
-2. **只有 dsh 有独立的「事实源 vs 视图」分离**：`surfaceOp: 'replace'` 让模型可见序列可被替换（压缩用），而日志永远保留被替换前的全部事件。pi/codex/CC 都是「历史即事实」。
+2. **只有 dsh 与 pi 把「事实源」与「模型可见序列」拆成了两层，但机制不同**：dsh 用 `surfaceOp: 'replace'` 换掉一个投影视图，日志保留全部事件；pi 让条目永远不可变，靠 `head`（窗口起点）+ `edits`（`omit` / `replace`）在读取时重算视图（`context.ts:123-147`）。codex 与 CC 都是「历史即事实」。
 
 3. **只有 dsh 与 CC 把「不是模型可见消息」的记录也结构化保留**：dsh 的 `assistant/attempt`（失败的模型尝试）、`request/header`（log-only 事件）；CC 的 `ProgressMessage`/`HookResultMessage`/`TombstoneMessage`（判别联合的独立成员，而不是塞进某条消息的字段）。
 
@@ -76,9 +74,9 @@ review_priority: P0
 
 | 边界问题 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 事实源 | 树（Entry + Branch） | append-only 日志 + surface | `ResponseItem` 数组（Arc COW） | 消息 DAG（`parentUuid`） |
-| 模型可见 == 记录？ | 是 | **否**（surface 可替换） | 是 | 是（但可用墓碑撤销） |
-| 顺序标识 | `seq`（单调）+ `parentId` | `seq`（连续 branded） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` + 文件行序 |
+| 事实源 | 条目日志（不可变）+ `head` / `edits` 覆盖层 | append-only 日志 + surface | `ResponseItem` 数组（Arc COW） | 消息 DAG（`parentUuid`） |
+| 模型可见 == 记录？ | **否**（`head` 定起点、`edits` 可覆盖） | **否**（surface 可替换） | 是 | 是（但可用墓碑撤销） |
+| 顺序标识 | `EntryId`（存储层单调铸） | `seq`（连续 branded） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` + 文件行序 |
 | 转换成本 | 有（`convertToLlm`） | 有（`deriveEventMessage`） | **零**（直接 serde） | 中（`normalizeMessagesForAPI`） |
 
 ---
@@ -97,7 +95,7 @@ review_priority: P0
 
 | 项目 | 事实源形态 | 一句话命名 | 结构示意 |
 |---|---|---|---|
-| pi | `Entry` 是树节点 · `Branch` 是游标 | 可分支文档树 | `[e1]─[e2]─[e3]`（分支 A）· `└─[e4]`（分支 B） |
+| pi | 条目只追加；`head` 定窗口起点，`edits` 叠覆盖 | 不可变日志 + 可移动窗口 | `[e1]─[e2]─[e3]─[e4]`；`head→e2` 后视图只剩 `e2…e4` |
 | dsh | 日志是唯一事实源，消息由事件 `derive` | 可审计事件流 | `log ──fold──▶ surface`（可替换视图） |
 | codex | `ResponseItem[]` 直接就是 provider 格式 | 原生 item 数组 | `[message, reasoning, function_call, …]` |
 | CC | `uuid` + `parentUuid`，写入线性、读取回溯 | 带父指针的消息 DAG | `msg1 ─▶ msg2 ─▶ msg3 ─▶ leaf` |
@@ -122,7 +120,6 @@ review_priority: P0
   └──────────┘ └──────────┘ └──────────┘ └──────────┘
 ```
 
-
 ## 三、概念对齐表
 
 | 概念 | pi | dsh | codex | CC |
@@ -130,14 +127,14 @@ review_priority: P0
 | 消息联合类型 | `Message`（4 成员）`ai/types.ts:553` | `Message`（role map）`llm/message.ts:196` | `ResponseItem`（enum）`models.rs:1011` | `Message`（9 成员）`types/message.ts:124-134` |
 | 消息基类 | `AgentMessage` `agent/types.ts:370` | `MessageBase`（id + content + **source**） | 各 enum 变体自带字段 | `MessageBase`（uuid/parentUuid/…）`message.ts:6-17` |
 | 内容块 | `TextContent`/`ThinkingContent`/`ToolCall`/`ImageContent` `ai/types.ts:364-386` | `ContentBlockMap` 声明合并 `llm/types.ts:138` | `ContentItem` 4 变体 `models.rs:878` | 复用 Anthropic API 的 block 结构 |
-| 溯源字段 | 隐式（entry 位置） | **显式 `source`** `llm/message.ts:136` | 隐式（role） | `origin?` + `sourceToolAssistantUUID` |
-| 语义轴 | ✗ | **`ContextForm`** `llm/message.ts:55` | `MessagePhase`（commentary/final_answer） | `isMeta` / `isVirtual` / `isCompactSummary` |
-| 事件/条目 | `Entry`（4 型）`session/types.ts:64` | `SessionEvent`（声明合并）`types.ts:493` | `TurnItem`（20+ 型，UI/协议视图）`items.rs:46` | `Message` 联合即事件（无独立日志） |
-| 顺序标识 | `seq` + `parentId` | `seq`（branded，连续） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` |
-| Session 头 | `JsonlStorageHeader` `jsonl/types.ts:7` | `SessionHeader` `types.ts:94` | —（rollout 元数据） | `sessionId` + 项目目录 |
-| 分支 | `Branch` `session/types.ts:521` | `session/end-seed` 继承标记 | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 |
-| 未知类型策略 | 无（union 硬编码） | **`ignorable` 守卫** `types.ts:511` | serde tag 失败即错 | 宽松影子类型（`[key:string]: unknown`） |
-| 删除标记 | ✗（树不可变） | ✗（用 `surfaceOp.replace`） | ✗（重写 history） | **`TombstoneMessage`** `message.ts:82-84` |
+| 溯源字段 | `byTaskId`：哪次 durable 工作写的 `types.ts:441-442` | **显式 `source`** `llm/message.ts:136` | 隐式（role） | `origin?` + `sourceToolAssistantUUID` |
+| 语义轴 | `model` / `data` 双载荷 `types.ts:428-443` | **`ContextForm`** `llm/message.ts:55` | `MessagePhase`（commentary/final_answer） | `isMeta` / `isVirtual` / `isCompactSummary` |
+| 事件/条目 | `EntryRecord` + 6 种 kind `entries.ts:14-34` | `SessionEvent`（声明合并）`types.ts:493` | `TurnItem`（20+ 型，UI/协议视图）`items.rs:46` | `Message` 联合即事件（无独立日志） |
+| 顺序标识 | `EntryId`（存储层铸，单调） | `seq`（branded，连续） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` |
+| Session 头 | 提交标记 `MainMarker` `storage/jsonl/storage.ts:43-48` | `SessionHeader` `types.ts:94` | —（rollout 元数据） | `sessionId` + 项目目录 |
+| 分支 | **无条目级分支**；会话级 `ConversationRecord.parent` `types.ts:400-403` | `session/end-seed` 继承标记 | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 |
+| 未知类型策略 | kind 是字符串；未知 kind 照常保留、只是没有 `is()` 窄化 | **`ignorable` 守卫** `types.ts:511` | serde tag 失败即错 | 宽松影子类型（`[key:string]: unknown`） |
+| 删除标记 | 用 `edits: omit` 从视图移出 | ✗（用 `surfaceOp.replace`） | ✗（重写 history） | **`TombstoneMessage`** `message.ts:82-84` |
 | 协议转换 | `convertToLlm` + adapter | `deriveEventMessage` 纯函数 | **无转换** | `normalizeMessagesForAPI` `messages.ts:1989` |
 
 ---
@@ -160,49 +157,108 @@ review_priority: P0
 
 **图 7-1**：事实源与视图的分离。其余三家都是「历史即事实」——压缩会真的改写历史；只有 dsh 让压缩变成一次「换视图」操作，从而零成本获得回滚能力。
 
-### 4.1 pi —— 树 + 分支游标
+### 4.1 pi —— 不可变条目日志 + 可移动的上下文窗口
 
-#### 4.1.1 Entry：既是存储单元又是树节点
+> 一句话定性：pi 的 transcript 是一条**只追加的条目日志**，而「模型此刻看到哪一段」由两个可变的东西决定——一个 `head` 标记（窗口起点）与一组 `edits`（对既有条目的 `omit` / `replace` 覆盖）。历史只进不改，视图随时可换。
 
+#### 4.1.1 EntryRecord：一条不可变的条目，两份互不干扰的载荷
+
+每条 entry 只有身份、kind，以及**分开的两份载荷**——`model` 给模型看，`data` 给应用看：
+
+`packages/durable/src/types.ts:428-443`
 ```ts
-// packages/agent/src/harness/session/types.ts:16
-type EntryType = "message" | "compaction" | "branch_summary" | "custom";
-// :18 EntryBase { id; parentId; seq; timestamp; type; customType? }
-// :64
-export type Entry = MessageEntry | CompactionEntry | BranchSummaryEntry | CustomEntry;
-// :27 / :33 / :43 / :52  四型定义
-export interface CompactionEntry extends EntryBase { /* 摘要 + retainedTail */ }
+export type EntryRecord = {
+	readonly id: EntryId;
+	readonly conversationId: ConversationId;
+	/** Application-defined entry discriminator. */
+	readonly kind: string;
+	/** Messages contributed to model context; absent for display or bookkeeping entries. */
+	readonly model?: readonly Message[];
+	/** JSON payload consumed by views, extensions, or bookkeeping logic. */
+	readonly data?: JsonValue;
+	/** First entry in the active context selected by this entry. */
+	readonly head?: EntryId;
+	/** Context-only overrides of earlier visible entries. */
+	readonly edits?: readonly ContextEdit[];
+	/** Task that appended this entry, when it was produced by durable work. */
+	readonly byTaskId?: TaskId;
+};
 ```
 
-`parentId` 构成树，`seq` 是单调序号（供范围扫描）。**事件与消息合一**——pi 没有独立的「事件日志」，每条消息、每个压缩、每个分支摘要都是一个 entry。
+「语义 / 展示分离」在这里是**字段级**的：同一条 entry 可以既有 `model`（进入模型上下文）又有 `data`（给 UI 或扩展消费），也可以两者只有其一。`pi.compaction` 就是这样——`model` 放包装后的摘要，`data` 放压缩原因。
 
-#### 4.1.2 Branch：树上的游标
+#### 4.1.2 六种内建 kind，靠 `defineEntry` 而不是继承
 
+kind 是运行期字符串判别，类型窄化靠一个 `is()` 守卫，不引入任何类层次：
+
+`packages/durable/src/entries.ts:6-12`
 ```ts
-// packages/agent/src/harness/session/types.ts:521
-export interface Branch { ... }
-// packages/agent/src/harness/session/session.ts:63/95/109/146  create/open/list/fork
-// :300 scanBranch / :349 branch / :355 createBranch / :416 getBranchTip / :422 appendToBranch
+export function defineEntry<D extends JsonValue = never>(kind: string): Entry<D> {
+	if (typeof kind !== "string" || kind.length === 0) throw new TypeError("Entry kind must be a non-empty string");
+	return {
+		kind,
+		is: (entry: EntryRecord | undefined): entry is TypedEntry<D> => entry !== undefined && entry.kind === kind,
+	};
+}
 ```
 
-#### 4.1.3 消息：`Message`（LLM 层）与 `AgentMessage`（agent 层）
+六个实例覆盖了对话所需的全部记录（`entries.ts:14-34`）：`pi.user`、`pi.assistant`、`pi.system`、`pi.tool-result`、`pi.reset`、`pi.compaction`。新增一种 kind 不需要改核心——`EntryRecord.kind` 本来就是字符串，扩展只要 `defineEntry` 出自己的 token。
+
+#### 4.1.3 上下文窗口：`head` + `edits` 就是「视图」
+
+这是 pi 本层最值得记的一处设计。模型可见序列不是「把所有条目摊平」，而是**先定边界、再叠覆盖**：
+
+`packages/durable/src/harness/context.ts:123-129`
+```ts
+/**
+ * Derive the active transcript and model context of one conversation within captured bounds.
+ *
+ * H = newest visible head marker; the range runs from `H.head` (or transcript start) through the tail. Per target,
+ * the newest edit in the range wins. Context entries are H followed by the range's non-head entries.
+ */
+export async function deriveContext(
+```
+
+边界只需两次 O(1) 读就能固定（`context.ts:13-16` 的 `ContextBounds = { head, tail }`，`context.ts:24` 的 `captureContextBounds`），之后才下线扫描条目——**因为 tail 及以下的条目已经不可变**，扫描期间不会被改写。
+
+覆盖层只有两种动作，且都只影响模型上下文、不触碰记录本身：
+
+`packages/durable/src/types.ts:412-425`
+```ts
+export type ContextEdit = {
+	/** Entry whose model messages are omitted or replaced. */
+	readonly target: EntryId;
+} & (
+	| {
+			readonly action: "omit";
+			readonly messages?: never;
+	  }
+	| {
+			readonly action: "replace";
+			/** Messages contributed instead of the target entry's model messages. */
+			readonly messages: readonly Message[];
+	  }
+);
+```
+
+于是「压缩」在这一层变成三件事的组合，而不是一次重写：追加一条 `pi.compaction`（它的 `head` 指向第一个被保留的条目），需要个别修正时再加一条带 `edits` 的条目。
+
+> **与上一版的差别值得单独说一句**：旧实现里的 `parentId` 树 + `Branch` 游标已经不在最新代码中——`packages/agent/src/harness/session/**` 整个目录被删除，职责移入 `packages/durable`。现在的模型**没有父子边、也没有分支摘要**，取而代之的是「一条直线 + 可移动的起点 + 覆盖层」。所谓「离开主干探索」不再是数据结构能力，只能靠开一段新会话来获得。
+
+#### 4.1.4 消息层：`Message`（LLM 层）与 `AgentMessage`（agent 层）
 
 ```ts
-// packages/ai/src/types.ts:553
+// packages/ai/src/types.ts:652
 export type Message = SystemMessage | UserMessage | AssistantMessage | ToolResultMessage;
-// :364 / :370 / :380 / :386 / :539
-TextContent / ThinkingContent / ImageContent / ToolCall / ToolResultMessage
-// packages/agent/src/types.ts:370
+// packages/ai/src/types.ts:554
+export interface SystemMessage {
+// packages/agent/src/types.ts:374
 export type AgentMessage = Message | CustomAgentMessages[keyof CustomAgentMessages];
 ```
 
-**SystemMessage 是「增量变更」载体**（pi 独有）：`sections?: Record<string, string | null>`（命名段落，后续消息按名替换/删除）+ `toolsAdded`/`toolsRemoved`（工具集变更，见 第 5 章）。
+**`SystemMessage` 是「增量变更」载体**（pi 独有）：`sections?: Record<string, string | null>` 让后续消息按名替换或删除命名段落，`toolsAdded` / `toolsRemoved` 声明工具集在这一点的变化（见 第 5 章）。这意味着「系统提示可以中途改」是数据模型自带的，不需要重发整段提示。
 
-宿主消息（不进 `ai` 包）在 `harness/messages.ts`：`BashExecutionMessage`（`:19`）、`BranchSummaryMessage`（`:40`）、`CompactionSummaryMessage`（`:47`）。
-
-#### 4.1.4 独有能力：并行探索
-
-树模型允许「离开主干去探索」——`BranchSummaryEntry` 在离开分支前生成摘要，回树时恢复（详见 第 6 章 4.1.6）。**dsh（线性日志）与 codex（单线回滚）与 CC（消息 DAG 但无分支摘要）都没有这个语义**。
+宿主侧曾经单独存在的 `BashExecutionMessage` / `BranchSummaryMessage` / `CompactionSummaryMessage` 也已消失：前者归入 `pi.tool-result` 的 `data`，后两者归入 `pi.compaction` 与 `pi.reset`。
 
 ---
 
@@ -449,36 +505,36 @@ normalizeMessagesForAPI()
 | 联合成员数 | 4（+ 声明合并） | role map（+ 声明合并） | enum（含 4 内容块） | **9** | 0/4 |
 | 身份载体 | entry `id`（存储层） | `MessageId`（消息自带） | 无（Vec 位置） | `uuid`（消息自带） | 2/4 自带 |
 | 溯源 | 隐式 | **显式 `source`** | 隐式（role） | `origin` + `sourceToolAssistantUUID` | 1/4 |
-| 语义/展示分离 | 无 | **`ContextForm`** | `MessagePhase` | `isMeta`/`isVirtual`（弱） | 1/4 |
-| 非展示类消息 | 无（靠 role） | `assistant/attempt` 等 log-only | HookPrompt 等 TurnItem | **Progress/HookResult/Tombstone 独立成员** | 1/4 |
+| 语义/展示分离 | **`model` / `data` 双载荷** | **`ContextForm`** | `MessagePhase` | `isMeta`/`isVirtual`（弱） | **2/4** |
+| 非展示类消息 | ✓ 只有 `data`、没有 `model` 的条目 | `assistant/attempt` 等 log-only | HookPrompt 等 TurnItem | **Progress/HookResult/Tombstone 独立成员** | 1/4 |
 
 ### 5.2 事件/记录体系
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 记录模型 | 树节点（消息即条目） | **事件日志** | item 数组 | 消息联合即记录 | 0/4 |
-| 类型扩展 | custom entry + projector | **声明合并 map** | serde enum + Extension | 宽松影子类型 + `[key:string]:unknown` | 0/4 |
+| 记录模型 | **不可变条目日志**（消息即条目） | **事件日志** | item 数组 | 消息联合即记录 | **1/4 同为「条目 + 投影」** |
+| 类型扩展 | `defineEntry` 自定义 kind + `data` 载荷（`entries.ts:6-12`） | **声明合并 map** | serde enum + Extension | 宽松影子类型 + `[key:string]:unknown` | 0/4 |
 | 失败尝试落盘 | ✗ | ✓ `assistant/attempt` | ✓ rollout | ✗ | 2/4 |
-| 删除/撤销语义 | 树不可变 | `surfaceOp.replace` | 重写 history | **`TombstoneMessage`** | 0/4 |
+| 删除/撤销语义 | **`edits` 的 `omit` / `replace`** | `surfaceOp.replace` | 重写 history | **`TombstoneMessage`** | **1/4 同取向**：pi 与 dsh 都不删记录，只改视图 |
 
 ### 5.3 Session 状态持有
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 核心持有 | 存储抽象 + 分支游标 | 日志句柄 + surface | `SessionState` + `ContextManager` | 消息数组 + transcript 落盘 | 0/4 |
-| 写并发控制 | `mutate` 互斥屏障 | append-only + 锁 | `Mutex<SessionState>` | 进程内队列 + 定时 drain | 0/4 |
+| 核心持有 | `Storage` 抽象 + 上下文边界（`head` / `tail`） | 日志句柄 + surface | `SessionState` + `ContextManager` | 消息数组 + transcript 落盘 | 0/4 |
+| 写并发控制 | 单提交队列串行（`#enqueue`，`session.ts:896`） | append-only + 锁 | `Mutex<SessionState>` | 进程内队列 + 定时 drain | 0/4 |
 | 只读共享 | ✗ | 日志可重放 | **`Arc<Vec>` COW** | ✗ | 1/4 |
-| 重写管理 | `storageVersion` | 格式版本 + 迁移包链 | **三版本号** | `logicalParentUuid` + preservedSegment | 0/4 |
-| 会话配置落盘 | storageVersion / fork lineage | **`agentPreset`/`delegationDepth`** | 部分 | `sessionId` + 项目目录 | 1/4 |
+| 重写管理 | 迁移脚本链 + `FORMAT_VERSION`（`storage/sqlite/migrations.ts:11`、`storage/jsonl/storage.ts:29`） | 格式版本 + 迁移包链 | **三版本号** | `logicalParentUuid` + preservedSegment | 0/4 |
+| 会话配置落盘 | `ConversationRecord`（含 `parent` / `owner` 边，`types.ts:396-409`） | **`agentPreset`/`delegationDepth`** | 部分 | `sessionId` + 项目目录 | 1/4 |
 
 ### 5.4 分支与回放
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 分支模型 | **Branch 树**（fork 子树/整树） | seed 继承（`session/end-seed`） | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 | 0/4 |
-| 分支摘要 | **✓ `branch_summary`** | ✗ | ✗ | ✗ | 1/4 |
-| 并行探索语义 | **✓ 独有** | ✗ | ✗ | ✗ | 1/4 |
-| 回放 | 从 tip 沿 parent 链收集 | **`foldSurface` 全量折叠** | rollout 重建 | `buildConversationChain` 回溯 | 2/4 |
+| 分支模型 | **无条目级分支**，只有会话级 `parent` 边（`types.ts:400-403`） | seed 继承（`session/end-seed`） | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 | 0/4 |
+| 分支摘要 | ✗（`pi.compaction` 只压主线） | ✗ | ✗ | ✗ | **0/4** |
+| 并行探索语义 | ✗（只能另开一段会话） | ✗ | ✗ | ✗ | **0/4** |
+| 回放 | `head`→`tail` 范围扫描 + 每个 target 取范围内最新 edit（`context.ts:144-155`） | **`foldSurface` 全量折叠** | rollout 重建 | `buildConversationChain` 回溯 | 2/4 |
 
 ### 5.5 协议转换
 
@@ -493,10 +549,10 @@ normalizeMessagesForAPI()
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 未知类型 | 编译期 union | **`ignorable` 守卫（fail-closed）** | serde 失败即错 | 宽松类型（静默容忍） | 1/4 |
-| 序号完整性 | `seq` 单调 | **branded 连续 seq** | Vec 位置 | 文件行序 + uuid | 1/4 |
-| 悬空引用 | `findTurnStartIndex` 抛 `SessionInvariantError` | `sourceEventSeqs` 校验 | `response_id` 元数据 | `buildConversationChain` 截断 + 环检测 | 4/4 有检测 |
-| 损坏恢复 | 抛错 | 合成 closer（第 8 章） | 跳过 + 计数 | 静默 try/catch + 部分链 | 0/4 |
+| 未知类型 | kind 为字符串；未知 kind 保留但不窄化 | **`ignorable` 守卫（fail-closed）** | serde 失败即错 | 宽松类型（静默容忍） | 1/4 |
+| 序号完整性 | `EntryId` 单调（存储层铸） | **branded 连续 seq** | Vec 位置 | 文件行序 + uuid | 1/4 |
+| 悬空引用 | 范围内找不到 `target` 的 `edits` 被静默忽略（`context.ts:144-147`） | `sourceEventSeqs` 校验 | `response_id` 元数据 | `buildConversationChain` 截断 + 环检测 | 4/4 有检测 |
+| 损坏恢复 | 截断到最后一个完整换行（第 8 章） | 合成 closer（第 8 章） | 跳过 + 计数 | 静默 try/catch + 部分链 | 0/4 |
 
 ---
 
@@ -514,17 +570,16 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 机制 | `parentId` 存在性校验；缺失时抛 `SessionInvariantError` | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `response_id`/`window_ids` 随元数据持久化 | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 |
-| 源码依据 | `session.ts` | `surface.ts:410` | `CompactedHistoryMetadata` | `sessionStorage.ts:2088-2090` |
+| 机制 | `edits` 的 `target` 不在可见范围时被忽略；`head` 指向越界则视图为空 | `sourceEventSeqs` 必须覆盖被替换节点；`tool/result` 必须配对 `tool/call` | `response_id`/`window_ids` 随元数据持久化 | `buildConversationChain` 遇 undefined 即**截断链**（已知故障类「chain truncation」）；`recoverOrphanedParallelToolResults`（`:2118`）修分叉 |
+| 源码依据 | `context.ts:144-147` | `surface.ts:410` | `CompactedHistoryMetadata` | `sessionStorage.ts:2088-2090` |
 
 > **设计理由**（`[inference]` CC）：截断是「宁可多加载也不丢历史」的反面——它选择截断；而 `applyPreservedSegmentRelinks` 在链断裂时记 `tengu_relink_walk_broken` 后**整体 no-op**（`:1888-1902`），这才体现「宁可多加载也不丢历史」。
-
 
 ### 6.3 消息被撤销
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | 不用删除，用 `surfaceOp.replace` 把区间从「视图」中移出，日志保留 | **/**：无法撤销（pi 树不可变；codex 靠重写 history + 版本号递增） | `TombstoneMessage` 广播 + 磁盘 `removeMessageByUuid` truncate（`:871-951`）；**>50MB 直接放弃**（不重写大文件） |
+| 做法 | **不删记录**：追加一条带 `edits: [{ action: "omit", target }]` 的条目，把目标从模型上下文移出，日志原样保留（`types.ts:412-425`） | 不用删除，用 `surfaceOp.replace` 把区间从「视图」中移出，日志保留 | **/**：无法撤销（codex 靠重写 history + 版本号递增） | `TombstoneMessage` 广播 + 磁盘 `removeMessageByUuid` truncate（`:871-951`）；**>50MB 直接放弃**（不重写大文件） |
 
 > **设计理由**（`[inference]` CC）：大文件整写代价过高，宁可保留被撤销的消息（多几条历史）也不阻塞用户。
 
@@ -536,12 +591,11 @@ normalizeMessagesForAPI()
 
 > **设计理由**（`[inference]`）：CC 需要独立兜底，因为它的消息可能来自历史文件（可能被手工编辑、可能来自旧版本、可能因压缩留下残片）。pi/dsh 的配对在写入时就保证了。
 
-
 ### 6.5 分支/继承边界的识别
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | `parentId` 链（数据层） | `session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
+| 做法 | 会话级 `parent` 边（`types.ts:400-403`）；条目层无继承边 | `session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
 
 > **设计理由**（`[inference]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
 
@@ -549,17 +603,17 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | `CompactionEntry` 进树（`retainedTail` 自包含） | `surfaceOp: { op: 'replace', startSeq, endSeq }` ——视图替换，日志保留 | 重写 `history` + `history_version` 自增；`review_history` 保留旧 transcript 供 guardian 审查 | `compact_boundary` 系统消息 + `preservedSegment`（`headUuid`/`anchorUuid`/`tailUuid`）+ 加载时 `applyPreservedSegmentRelinks` 重连（`:1839`），并**物理裁剪** boundary 之前的未保留消息（`:1944-1955`） |
+| 做法 | 追加 `pi.compaction`，其 `head` 指向第一个被保留的条目；被压内容仍在日志里，只是不再进入视图（`entries.ts:34`、`context.ts:257-265`） | `surfaceOp: { op: 'replace', startSeq, endSeq }` ——视图替换，日志保留 | 重写 `history` + `history_version` 自增；`review_history` 保留旧 transcript 供 guardian 审查 | `compact_boundary` 系统消息 + `preservedSegment`（`headUuid`/`anchorUuid`/`tailUuid`）+ 加载时 `applyPreservedSegmentRelinks` 重连（`:1839`），并**物理裁剪** boundary 之前的未保留消息（`:1944-1955`） |
 
-> **设计理由**：压缩在本层的本质是让「模型看到的历史 ≠ 记录下来的历史」。四家的实现按**是否保留原日志**分成两档：dsh 只改 surface 投影（日志完整保留），pi 把 compaction 做成树上的 entry（保留结构但被压内容已销毁），codex 重写 history 并递增版本号，CC 用 boundary 消息 + `preservedSegment` 重连并物理裁剪。分档依据是**这个项目是否需要「回放一次真实的过去」**——dsh 需要（可审计），其余三家只需要「继续对话」。
+> **设计理由**：压缩在本层的本质是让「模型看到的历史 ≠ 记录下来的历史」。四家的实现按**是否保留原日志**分成两档：dsh 只改 surface 投影（日志完整保留），pi 追加一条 `pi.compaction` 并把窗口起点挪过去（条目全留，只是不再可见），codex 重写 `history` 并递增版本号，CC 用 boundary 消息 + `preservedSegment` 重连并物理裁剪。分档依据是**这个项目是否需要「回放一次真实的过去」**——dsh 与 pi 需要（可审计、可换起点），codex 与 CC 只需要「继续对话」。
 
 ### 6.7 resume 已压缩会话
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | `newestCompactionIndex` 检测已有更新的压缩 entry 即跳过（见 第 6 章） | `foldSurface` 折叠出不变量 | `InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章） | `findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`） |
+| 做法 | `findLatestHeadMarker` 直接取最新 head 标记，压缩边界由它决定、无需比对下标（`types.ts:1013`、`context.ts:267-271`） | `foldSurface` 折叠出不变量 | `InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章） | `findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`） |
 
-> **设计理由**：这里的分歧是「谁来负责不重复压缩」。pi 用 `newestCompactionIndex` 检测并跳过，codex 用 `InitialHistory::Resumed` 回填，dsh 直接折叠 surface 得出不变量，CC 的处理最完整——它不仅要「切对段」，还要**防止刚打开就再次触发自动压缩**。这个坑源于旧 token 计数在加载之后不再成立。
+> **设计理由**：这里的分歧是「谁来负责不重复压缩」。pi 用 `findLatestHeadMarker` 取到最新窗口起点，天然不会重复压缩已压过的段，codex 用 `InitialHistory::Resumed` 回填，dsh 直接折叠 surface 得出不变量，CC 的处理最完整——它不仅要「切对段」，还要**防止刚打开就再次触发自动压缩**。这个坑源于旧 token 计数在加载之后不再成立。
 
 ### 6.8 会话配置与历史不匹配
 
@@ -595,8 +649,8 @@ normalizeMessagesForAPI()
 
 ### 7.3 权衡（各有代价，按场景选）
 
-1. **四种世界观怎么选**：框架/多消费者 → dsh 式事件溯源；轻量嵌入 → pi 式树；深度绑定单一 provider → codex 式原生 item；交互式产品 + 已有 provider 协议 → CC 式消息 DAG。
-2. **树（pi）vs 日志（dsh）**：树的独有价值是**并行探索**（branch_summary）；日志的独有价值是**可审计与可替换**。若产品不需要「离开主干探索」，树的分支能力就是冗余复杂度。
+1. **四种世界观怎么选**：框架/多消费者 → dsh 式事件溯源；轻量嵌入、又要能事后改视图 → pi 式不可变日志 + 覆盖层；深度绑定单一 provider → codex 式原生 item；交互式产品 + 已有 provider 协议 → CC 式消息 DAG。
+2. **不可变日志 + 覆盖层（pi）vs 可替换投影（dsh）**：两者都能做到「历史不动、视图可变」，差别在**可变的东西存在哪**——pi 把变化写成新的条目（`head` / `edits`），dsh 把它写成一次 surface 操作。前者天然带版本历史（每次覆盖都是一条新记录，可回溯到任一时刻的视图），后者天然带「一次替换影响一个区间」的表达力。若产品需要「让用户看到某条消息被谁、在什么时候隐藏了」，pi 的形状更自然。
 3. **宽松类型（CC）vs 严格类型（dsh）**：宽松让旧版本能打开新版本的数据，代价是编译期保障丧失（CC 的 `[key: string]: unknown` 让大量字段无法被类型检查）。
 4. **序号 vs 父指针**：序号便于范围扫描与压缩区间表达（dsh/pi）；父指针天然支持分叉（CC）。**两者并存成本不高，建议都有**。
 
@@ -616,11 +670,12 @@ normalizeMessagesForAPI()
 
 | 文件 | 行号 | 用途 |
 |---|---|---|
-| `packages/agent/src/harness/session/types.ts` | 16 / 18 / 27 / 33 / 43 / 52 / 64 / 521 | `EntryType` / `EntryBase` / 四型 Entry / `Entry` 联合 / `Branch` |
-| `packages/agent/src/harness/session/session.ts` | 63 / 95 / 109 / 146 / 300 / 349 / 355 / 416 / 422 | 建/开/列/fork / `scanBranch` / `branch` / `createBranch` / tip / append |
-| `packages/ai/src/types.ts` | 364 / 370 / 380 / 386 / 539 / 553 | 内容块 / `ToolResultMessage` / `Message` 联合 |
-| `packages/agent/src/types.ts` | 370 | `AgentMessage` |
-| `packages/agent/src/harness/messages.ts` | 19 / 40 / 47 | `BashExecutionMessage` / `BranchSummaryMessage` / `CompactionSummaryMessage` |
+| `packages/durable/src/types.ts` | 412-425 / 428-443 / 1013 | `ContextEdit`（`omit` / `replace`）/ `EntryRecord` / `findLatestHeadMarker` |
+| `packages/durable/src/entries.ts` | 6-12 / 14-34 | `defineEntry` 与六种内建 kind |
+| `packages/durable/src/harness/context.ts` | 13-16 / 24 / 123-129 / 144-155 / 257 | `ContextBounds` / `captureContextBounds` / `deriveContext` / `deriveRange` / `activeEntries` |
+| `packages/durable/src/session/session.ts` | 213 / 237 / 896 | `commit` / `commitWith` / `#enqueue` 提交串行 |
+| `packages/ai/src/types.ts` | 422 / 428 / 438 / 444 / 554 / 633 / 652 | 内容块 / `SystemMessage` / `ToolResultMessage` / `Message` 联合 |
+| `packages/agent/src/types.ts` | 374 | `AgentMessage` |
 
 ### deepseek-harness
 
@@ -662,3 +717,13 @@ normalizeMessagesForAPI()
 | `src/query.ts` | 713-724 | 墓碑产生 |
 | `src/QueryEngine.ts` | 758-760 | 墓碑 skip |
 | `src/services/api/claude.ts` | 1301 | `ensureToolResultPairing` 调用点 |
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) |
+| dsh | [session-contract]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-contract) · [session-surface]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-surface) · [session-format]({{ site.baseurl }}/appendix/claims/#claim.dsh.session-format) |
+| codex | [message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint) |

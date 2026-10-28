@@ -4,7 +4,7 @@ title: "第 12 章 · Hook 与扩展机制"
 nav_order: 10
 parent: "第二部分 · 内核区"
 permalink: /ch/12/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,9 +12,7 @@ review_priority: P1
 
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
-本章结论与源码证据：[pi.mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [dsh.plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) · [codex.pre-tool-hooks]({{ site.baseurl }}/appendix/claims/#claim.codex.pre-tool-hooks)。其余分析须结合对应来源逐条复核。
-
-> **当前基线补充（2026-10-15）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
+> **当前基线补充（2026-10-27）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
 
 **本章回答什么** —— 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。
 
@@ -30,7 +28,7 @@ review_priority: P1
 >
 > **分析对象**：
 > - **pi** —— `packages/agent/src/{types,agent,agent-loop}.ts`（内核 11 个生命周期回调）+ `packages/coding-agent/src/core/extensions/{types,loader,runner}.ts`（外壳 36 个事件 + 10 个 `register*`）
-> - **deepseek-harness** —— `vendor/cordis/src/{events,registry}.ts`（插件与 5 种调度模式）+ `packages/hooks/hook-protocol/src/*` + `hooks/hooks-{claude-code,codex}/src/*`（协议兼容层）+ `extensions/cordis-host-runner/src/*`
+> - **deepseek-harness** —— `vendor/cordis/src/{events,registry}.ts`（插件与 5 种调度模式）+ `packages/experimental/hook-protocol/src/*` + `experimental/hooks-{claude-code,codex}/src/*`（协议兼容层）+ `extensions/cordis-host-runner/src/*`
 > - **codex** —— `codex-rs/hooks/src/*`（进程外）+ `config/src/hook_config.rs` + `core/src/hook_runtime.rs` + `ext/extension-api/src/*`（进程内）+ `app-server/src/extensions.rs`
 > - **Claude-Code** —— `src/utils/hooks.ts` + `src/entrypoints/sdk/core{Types,Schemas}.ts`（`HOOK_EVENTS` 27 项）+ `src/services/tools/toolHooks.ts` + `src/utils/plugins/*` + `src/skills/loadSkillsDir.ts`
 >
@@ -255,7 +253,7 @@ dependency injection, scoped services, lifecycle-managed cleanup, and optional
 configuration-driven loading.
 ```
 
-插件是函数或含 `apply(ctx, config)` 的对象，元数据包括 `name` / `Config` / `inject` / `provide` / `intercept`（`vendor/cordis/src/registry.ts:92`）。`inject` 决定插件何时可启动，effect / listener / service 随所属 fiber 销毁一起移除——**「插件卸载即无残留」是框架级保证**，而不是各插件自觉遵守。
+插件是函数或含 `apply(ctx, config)` 的对象，元数据包括 `name` / `Config` / `inject` / `provide` / `intercept`（`vendor/cordis/src/registry.ts:100-111` 的 `Plugin.Base`）。`inject` 决定插件何时可启动，effect / listener / service 随所属 fiber 销毁一起移除——**「插件卸载即无残留」是框架级保证**，而不是各插件自觉遵守。
 
 #### 4.2.2 五种调度模式就是全部语义
 
@@ -297,7 +295,7 @@ export type DispatchMode = 'emit' | 'parallel' | 'serial' | 'bail' | 'waterfall'
 **注意 `next()` 的语义**：listener 拿到的是「继续链」而不是「下一个 listener」，因此它可以**先调 `next()` 拿到下游结果、再在结果上叠加自己的贡献**。dsh 的 CC hook 桥就是这么做的：
 
 ```ts
-// packages/hooks/hooks-claude-code/src/index.ts:232
+// packages/experimental/hooks-claude-code/src/index.ts:232
 // Delegate so later listeners may still rewrite or reject, then prepend our
 // context only to a downstream enter decision.
 const downstream = await next()
@@ -341,18 +339,18 @@ dsh 自己声明的事件（`packages/core/agent/src/runtime-types.ts` 与 `pack
 
 | dsh 拦截点（模式） | CC 事件 | codex 事件 | CC 挂载 | codex 挂载 |
 |---|---|---|---|---|
-| `agent/created`（serial） | SessionStart | SessionStart | `hooks-claude-code/src/index.ts:209` | `hooks-codex/src/index.ts:191` |
-| `agent/pre-step`（waterfall） | UserPromptSubmit | UserPromptSubmit | `:225` | `:205` |
-| `tools/pre-execute`（waterfall） | PreToolUse | PreToolUse | `:244` | `:231` |
-| `tools/post-execute`（waterfall） | PostToolUse | PostToolUse | `:253` | `:240` |
-| `agent/turn-stopping`（serial） | Stop | Stop | `:276` | `:266` |
+| `agent/created`（serial） | SessionStart | SessionStart | `hooks-claude-code/src/index.ts:209` | `hooks-codex/src/index.ts:188` |
+| `agent/pre-step`（waterfall） | UserPromptSubmit | UserPromptSubmit | `:225` | `:202` |
+| `tools/pre-execute`（waterfall） | PreToolUse | PreToolUse | `:244` | `:228` |
+| `tools/post-execute`（waterfall） | PostToolUse | PostToolUse | `:253` | `:237` |
+| `agent/turn-stopping`（serial） | Stop | Stop | `:276` | `:263` |
 | `subagent/start`（emit） | SubagentStart | — | `:287` | — |
 | `subagent/end`（emit） | SubagentStop | — | `:297` | — |
 
 **配置侧只认一个子集**，且是硬编码白名单：
 
 ```ts
-// packages/hooks/hooks-claude-code/src/config.ts:11
+// packages/experimental/hooks-claude-code/src/config.ts:11
 const CLAUDE_EVENTS = [
   'SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse',
   'Stop', 'SubagentStart', 'SubagentStop',
@@ -360,7 +358,7 @@ const CLAUDE_EVENTS = [
 ```
 
 ```ts
-// packages/hooks/hooks-codex/src/config.ts:11
+// packages/experimental/hooks-codex/src/config.ts:11
 export const CODEX_EVENTS = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserPromptSubmit', 'Stop'] as const
 ```
 
@@ -369,7 +367,7 @@ export const CODEX_EVENTS = ['PreToolUse', 'PostToolUse', 'SessionStart', 'UserP
 两方言的差异也用参数收敛，而不是分叉代码。唯一分叉轴是 matcher 语义：
 
 ```ts
-// packages/hooks/hook-protocol/src/matcher.ts:57
+// packages/experimental/hook-protocol/src/matcher.ts:57
 export function matchesMatcher(matcher: string | undefined, query: string, mode: MatcherMode): boolean {
   if (isMatchAll(matcher)) return true
   const pattern = matcher as string
@@ -380,14 +378,14 @@ export function matchesMatcher(matcher: string | undefined, query: string, mode:
 }
 ```
 
-CC 侧还额外支持变量替换（`${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}`，`config.ts:57`）、stdin 加尾换行、注入 `CLAUDE_PROJECT_DIR` 环境变量；codex 侧不加尾换行、无变量替换、改为在 payload 里带 `model` / `permission_mode`（`hooks-codex/src/index.ts:297`）。
+CC 侧还额外支持变量替换（`${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}`，`config.ts:57`）、stdin 加尾换行、注入 `CLAUDE_PROJECT_DIR` 环境变量；codex 侧不加尾换行、无变量替换、改为在 payload 里带 `model` / `permission_mode`（`hooks-codex/src/index.ts:294-302`）。
 
 **dsh 自己新增、两方言都没有的三件事**：
 
 1. **决策通道折叠**：把两套不同的决策表达折叠成单一枚举，再按 most-restrictive 合并：
 
 ```ts
-// packages/hooks/hook-protocol/src/merge.ts:35
+// packages/experimental/hook-protocol/src/merge.ts:35
 function rank(decision: HookOutput['decision']): number {
   switch (decision) {
     case 'deny': case 'block': return 3
@@ -400,16 +398,16 @@ function rank(decision: HookOutput['decision']): number {
 
 2. **事件名守卫**：`hookSpecificOutput.hookEventName` 与当前触发点不符时，丢弃该 block 的事件级字段（`codec.ts:122`）——防止扩展把 A 事件的输出错用在 B 事件上。
 
-3. **hook 调用的持久化审计**：`hook/invoked` + `hook/result` 按 `handlerId` 配对写入会话日志（`events.ts:75`、`:92`），且被不变式约束为「必须在 open turn 内」（`invariant.ts:37`）。
+3. **hook 调用的持久化审计**：`hook/invoked` + `hook/result` 按 `handlerId` 配对写入会话日志（`events.ts:75`、`:92`）。旧版还有一份 `invariant.ts` 专门断言「必须在 open turn 内」；最新代码在 `refactor: remove runtime invariant plugins`（`f028f25667`）里**把运行时不变式插件整体移除**，改为让 `turn` / `point` / `handlerId` 三个字段进载荷、由数据自证归属（`events.ts:76-82`），事件类型本身交由 `session-format-v3-to-v4` 统一迁移（`extension-identities.ts:27-28`）。
 
 #### 4.2.5 扩展加载：静态装配 + 运行时动态定义
 
 **静态面**：profile 位于 `$DSH_HOME/profiles/<name>`，bundle 通过 `dsh.bundle.patch` 指向 patch 文件；patch 支持 `insert` 新增行与按 id 整体替换 config（`packages/bundle/base/cordis.patch.yml:1` 的注释写明「后写覆盖」）。
 
-**运行时段**：`DynamicCordisRunnerService` 提供 `define` / `run` / `stop` / `undefine`（`cordis-host-runner/src/index.ts:129/156/253/461/215`），在 `node:vm` 里求值扩展源码，并检查返回值类型：
+**运行时段**：`DynamicCordisRunnerService` 提供 `define` / `undefine` / `run` / `stop` 四件事（`cordis-host-runner/src/index.ts:169/228/266/474`），在 `node:vm` 里求值扩展源码，并检查返回值类型：
 
 ```ts
-// packages/extensions/cordis-host-runner/src/index.ts:902-907
+// packages/extensions/cordis-host-runner/src/index.ts:918-923
 const evaluated = await evaluateHostCode(sandbox, hostCode, plugin.pluginId, this.resolved.vmTimeoutMs)
 if (!isPlugin(evaluated)) {
   throw new Error(evaluated === undefined
@@ -418,11 +416,12 @@ if (!isPlugin(evaluated)) {
 }
 ```
 
-沙箱的 `ctx` 是**白名单 façade**（`guard.ts:631` 列出允许的动词：`effect` / `on` / `once` / `provide` / timer 系列），Node 原生 `require` / `setTimeout` / `fetch` 被 trap 重定向到 `ctx.fs` / `ctx.web` / `ctx.bash`。但——**作者明确写了它不是安全边界**：
+沙箱的 `ctx` 是**白名单 façade**（`guard.ts:636` 的 `CTX_VERBS` 只放行 `effect` / `on` / `once` / `provide` 与八个 timer 动词），Node 原生 `require` / `setTimeout` / `fetch` 被 trap 重定向到 `ctx.fs` / `ctx.web` / `ctx.bash`。但——**作者明确写了它不是安全边界**：
 
 ```text
 packages/extensions/cordis-host-runner/src/sandbox.ts:2-7
-（注释声明该沙箱是"教学/一致性"用途，不是安全隔离）
+This keeps cooperative packages inspectable and disposable but
+is not containment: host-realm helper functions remain an escape route.
 ```
 配套的 README 要求把它「当 bash 访问看待」（`cordis-host-runner/README.md:54`）。
 
@@ -433,7 +432,7 @@ packages/extensions/cordis-host-runner/src/sandbox.ts:2-7
 dsh 在错误处理上是四家中最系统的，核心原则写在文件里：**「Never throw into the loop」**——钩子不能拖垮调用它的那一轮：
 
 ```ts
-// packages/hooks/hook-protocol/src/runner.ts:86-101
+// packages/experimental/hook-protocol/src/runner.ts:86-105
 try {
   const result = await (await bash.execute(bash.resolve(request))).result()
   // ShellRunResult.exitCode is `number | null` (null = died by signal); the
@@ -466,7 +465,7 @@ try {
 - **有界降级而非伪造能力**：CC 侧 `updatedInput` 只解析不生效（只 warn，`hooks-claude-code/src/index.ts:181`）；codex 侧 PreToolUse 只支持 `deny`。设计原则写在类型定义里：
 
 ```ts
-// packages/hooks/hook-protocol/src/types.ts:81
+// packages/experimental/hook-protocol/src/types.ts:85
  * is OPTIONAL because a hook may exercise any subset; the bridge decides which
  * fields are meaningful for its hook point and which it ignores (faithful-but-
  * degraded — e.g. Codex ignores `allow`/`ask`).
@@ -826,7 +825,6 @@ flowchart TD
 
 > **四家的分歧点很清晰**：dsh / CC / codex 都选择「钩子是增强，坏了不该影响主流程」；pi 只在**工具级**选择相反方向。两种都自洽，但要注意 pi 的规则是**按事件类型**区分的——这要求扩展作者记住「哪个事件的异常会阻断」。
 
-
 ### 6.2 扩展改写输入之后谁复核
 
 | 项 | pi | dsh | codex | CC |
@@ -877,7 +875,7 @@ flowchart TD
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | —（无跨实现兼容问题） | **有界降级 + 显式告警**：CC 的 `updatedInput` 只 warn 不生效；codex 只支持 `deny` | **显式拒绝**未实现的 handler 类型（`prompt` / `agent` 解析后跳过并记原因） | 类型层面就是联合，不存在的字段无法表达 |
-| 源码依据 | — | `hooks-claude-code/src/index.ts:181`、`hook-protocol/src/types.ts:81` | `engine/discovery.rs:635-643` | `types/hooks.ts:70-164` |
+| 源码依据 | — | `hooks-claude-code/src/index.ts:181`、`hook-protocol/src/types.ts:85` | `engine/discovery.rs:635-643` | `types/hooks.ts:70-164` |
 
 > **设计理由**：**dsh**：「宁可显式降级也不伪造能力」；**codex**：配置能解析不代表能执行，必须让人看见差距；**CC**：用 schema 消除歧义
 
@@ -968,16 +966,15 @@ flowchart TD
 |---|---|---|
 | `vendor/cordis/src/events.ts` | 13 / 24 / 165-183 / 194-234 | `isBailed` / **5 种调度模式定义** / `dispatch` / `serial` 与 `waterfall` 实现 |
 | `vendor/cordis/src/registry.ts` | 92 | 插件元数据（`name`/`Config`/`inject`/`provide`/`intercept`） |
-| `packages/hooks/hook-protocol/src/types.ts` | 8 / 10 / 59 / 81 | `hook/*` 事件 / turn 包围约束 / 超时单位 / **有界降级原则** |
-| `packages/hooks/hook-protocol/src/runner.ts` | 20 / 74 / 96-99 | 默认超时 600s / 超时解析 / **永不抛进循环** |
-| `packages/hooks/hook-protocol/src/codec.ts` | 11 / 32 / 66 / 71-80 / 122 | exit 2 语义 / 顶层 decision 约束 / 解码 / 非法输入降级 / **事件名守卫** |
-| `packages/hooks/hook-protocol/src/merge.ts` | 35 / 91 | **rank 折叠（deny>ask>allow）** / reason 合并 |
-| `packages/hooks/hook-protocol/src/detached.ts` | 26 / 53 | detached 说明 / **abort + drain** |
-| `packages/hooks/hook-protocol/src/invariant.ts` | 37 | `hook/*` 必须在 open turn 内 |
-| `packages/hooks/hooks-claude-code/src/config.ts` | 11 / 57 | **CC 7 事件白名单** / 变量替换 |
-| `packages/hooks/hooks-claude-code/src/index.ts` | 119 / 149-195 / 209-297 | 配置失败不注册 / 匹配与执行 / **7 个挂载点** |
-| `packages/hooks/hooks-codex/src/config.ts` | 11 | **codex 5 事件白名单** |
-| `packages/hooks/hooks-codex/src/index.ts` | 191-266 / 297 | 挂载点 / payload 差异 |
+| `packages/experimental/hook-protocol/src/types.ts` | 8 / 10 / 59 / 81 | `hook/*` 事件 / turn 包围约束 / 超时单位 / **有界降级原则** |
+| `packages/experimental/hook-protocol/src/runner.ts` | 20 / 74 / 96-99 | 默认超时 600s / 超时解析 / **永不抛进循环** |
+| `packages/experimental/hook-protocol/src/codec.ts` | 11 / 32 / 66 / 71-80 / 122 | exit 2 语义 / 顶层 decision 约束 / 解码 / 非法输入降级 / **事件名守卫** |
+| `packages/experimental/hook-protocol/src/merge.ts` | 35 / 91 | **rank 折叠（deny>ask>allow）** / reason 合并 |
+| `packages/experimental/hook-protocol/src/detached.ts` | 26 / 53 | detached 说明 / **abort + drain** |
+| `packages/experimental/hooks-claude-code/src/config.ts` | 11 / 57 | **CC 7 事件白名单** / 变量替换 |
+| `packages/experimental/hooks-claude-code/src/index.ts` | 119 / 149-195 / 209-297 | 配置失败不注册 / 匹配与执行 / **7 个挂载点** |
+| `packages/experimental/hooks-codex/src/config.ts` | 11 | **codex 5 事件白名单** |
+| `packages/experimental/hooks-codex/src/index.ts` | 188-263 / 294-302 | 挂载点 / payload 差异 |
 | `packages/core/agent/src/runtime-types.ts` | 248 / 309 / 364 | `agent/created` / `agent/pre-step` / `agent/turn-stopping`（含模式注释） |
 | `packages/core/tools/src/index.ts` | 142-176 / 1490 | 工具级拦截点定义 / waterfall 派发 |
 | `packages/extensions/cordis-host-runner/src/index.ts` | 129 / 156-461 / 902-907 | 动态运行器 / define-run-stop-undefine / vm 求值 |
@@ -1037,3 +1034,13 @@ flowchart TD
 ---
 
 *本章所有断言均经 `grep -n` / Read 实测核验；CC 的实现均标注门控状态。*
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) |
+| dsh | [plugin-architecture]({{ site.baseurl }}/appendix/claims/#claim.dsh.plugin-architecture) |
+| codex | [pre-tool-hooks]({{ site.baseurl }}/appendix/claims/#claim.codex.pre-tool-hooks) |

@@ -4,7 +4,7 @@ title: "第 9 章 · 任务与子 Agent"
 nav_order: 7
 parent: "第二部分 · 内核区"
 permalink: /ch/09/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,11 +12,9 @@ review_priority: P0
 
 # 第 9 章：任务与子 Agent —— 把工作交给另一个 Agent
 
-本章结论与源码证据：[pi.durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [pi.nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) · [pi.codemode-worker]({{ site.baseurl }}/appendix/claims/#claim.pi.codemode-worker) · [dsh.agent-team-board]({{ site.baseurl }}/appendix/claims/#claim.dsh.agent-team-board) · [codex.multi-agent-session]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-session) · [codex.multi-agent-tools]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-tools) · [codex.message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint)。其余分析须结合对应来源逐条复核。
-
 **本章回答什么** —— 一个 Agent 如何把工作委派给「另一个 Agent」，以及被委派者如何被创建、驱动、通信、回收。
 
-> **当前基线补充（2026-10-15）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
+> **当前基线补充（2026-10-27）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
 
 **四家分歧在哪** —— **这一层的分歧是四家中最大的**：子 Agent 的本体是另一个操作系统进程、一个可被驱动的会话、线程图上的一个节点，还是一个一等任务对象——四种答案互不兼容，且各自推导出完全不同的上下文继承、深度限制与结果回灌策略。
 
@@ -157,103 +155,105 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 **表 9-1**：四种本体论。后面所有维度（上下文继承、深度限制、结果回灌、回收方式）都是从这一句话推导出来的。
 
-### 4.1 pi —— 两套正交机制，内核没有子 Agent
+### 4.1 pi —— 内核没有子 Agent，也没有分支
 
-> **关键结论**：pi 有**两套互不相干**的机制——`Branch` 是「回到历史某点」的游标（同 session 内串行切换、不产生新实例、不隔离上下文），**不是子 Agent**；真正的子 Agent 由**扩展层 spawn 一个新进程**承担。
+> **关键结论**：最新代码里 pi 的 `Branch` / `Lane` / `branch_summary` 已全部消失（`packages/agent/src/harness/**` 与 `packages/agent/src/runtime/**` 一并删除）。内核现在只保留两种**不是子 Agent** 的父子关系——**会话级的 `parent` / `owner` 边**与**任务级的嵌套工具调用**。真正的子 Agent 仍由扩展层 spawn 一个新进程承担。
 
-#### 4.1.1 内核的 `Branch` / `Lane`：游标 + 视图，不产生新 Agent
+#### 4.1.1 内核里仅存的两种父子边
 
-`Branch` 本身**不含历史**，历史在 `Entry` 的 `parentId` 链上；「当前活跃分支」由一个标量 tip 指定：
+会话记录上只有两条边，都不产生新 Agent：
 
+`packages/durable/src/types.ts:396-409`
 ```ts
-// packages/agent/src/harness/session/types.ts:521-528
-export interface Branch {
-    readonly name: string;
-    getTipId(context: Context): Promise<string | null>;
-    findEntries(query: BranchScan | undefined, context: Context): Promise<Entry[]>;
-    findEntry(query: BranchScan | undefined, context: Context): Promise<Entry | undefined>;
-    appendMessage(message: AgentMessage, context: Context): Promise<string>;
-    appendCustomEntry(customType: string, data: JsonValue | undefined, context: Context): Promise<string>;
-}
+export type ConversationRecord = {
+	readonly id: ConversationId;
+	/** Fork source and inclusive parent entry through which history is inherited. */
+	readonly parent?: {
+		readonly conversationId: ConversationId;
+		readonly at: EntryId;
+	};
+	/** Creator edge used for attribution, subtree abort, and subtree idle waits. */
+	readonly owner?: {
+		readonly conversationId: ConversationId;
+		readonly taskId: TaskId;
+	};
+};
 ```
 
+| 边 | 什么时候写 | 它回答的问题 |
+|---|---|---|
+| `parent` | fork 一段会话时写一次 | 「从哪条会话的哪条 entry 起继承历史」——**一次性继承边**，不是可来回移动的游标 |
+| `owner` | 会话被某个任务创建时 | 「谁负责给它收尾」——用于归因、子树取消、子树空闲等待，不决定「谁在跑」 |
+
+于是「分支」这件事退化成了「另开一段会话」。这是与上一版最实质的差别：**pi 现在没有「在同一个 session 内切换分支」这个概念**，也就没有「离开主干探索再回来」的语义。
+
+#### 4.1.2 任务级的「子工作」：嵌套工具调用
+
+真正的父子**任务**拓扑在 `ToolTask` 里。一次工具调用可以发起嵌套调用，被发起的那次调用是一个独立的 `ToolTask`，以 `parent` 字段挂成子任务：
+
+`packages/durable/src/harness/tool.ts:62-73`
 ```ts
-// packages/agent/src/harness/session/values.ts:158
-export const branchTip = (branch: string) => value<string | null>("pi.branch.tip", branch);
+export type ToolTaskInput =
+	| { kind: "model"; assistant: EntryId; callId: string }
+	| {
+			kind: "nested";
+			parent: TaskId;
+			parentCallId: string;
+			key: string;
+			call: ToolCall;
+			/** `false`: commit no running output, details, or diagnostics to the slot; the result still gets them. */
+			progress?: false;
+	  };
 ```
 
-创建分支**不复制历史**，只写一条 `branchTip(name) = at` 的指针：
+结果不回写进父任务的记录，而是**每次嵌套调用一份文档**：
 
+`packages/durable/src/harness/tool.ts:106-113`
 ```ts
-// packages/agent/src/harness/session/session.ts:355-368
-async createBranch(name: string, at: string | null, context: Context): Promise<Branch> {
-    this.assertOpen();
-    this.assertValidBranchName(name);
-    await this.mutate(async (mutator) => {
-        if ((await mutator.getValue(branchTip(name), context)) !== undefined) {
-            throw new SessionBranchExistsError(name);
-        }
-        if (at !== null && !(await mutator.getEntries([at], context)).has(at)) {
-            throw new SessionUnknownTargetError(at);
-        }
-        await mutator.commit([setValueWrite(branchTip(name), at)], context);
-    }, context);
-    return this.getOrCreateBranchObject(name);
-}
+export const NestedCallDoc = defineDocFamily<NestedCallState, null>({
+	kind: "pi.tool.nested-call",
+	version: 1,
+	scope: "task",
+	family: true,
+	initial: () => ({}),
+	// The document retires with its task.
+	checkpointWhen: () => false,
+});
 ```
 
-**关键结论：同 session 内是串行切换，不支持并行驱动多分支。** 依据：每条 lane 命令都排在同一条 session mutation line 上（`packages/agent/src/harness/runtime/lane.ts:328-368` → `session.ts:243-270` 的 `beginMutation` 串行化）；单 lane 还有 `LaneBusy` 拒绝并发 operation（`lane.ts:575-587`）。应用层只驱动固定的 `"main"` lane。
+`scope: "task"` + `family: true` 的含义是「按调用 key 一文档一份」。父任务重跑时按 `key` 找回已发起过的调用并校验参数一致（`tool.ts:745-757`），因此**重放不会重复发起**。这套机制比「分支摘要」精细得多，但它的适用范围只有「一次工具调用内部」，不能拿来当子 Agent。
 
-分支的「探索结果回收」靠 `branch_summary`：当**带 `summarize` 的导航**离开分支时，计算 old/new 路径的最近公共祖先，把被放弃的那段压成摘要，写成 `branch_summary` entry 挂在返回点上：
+#### 4.1.3 真正的子 Agent：扩展层 spawn 独立进程
 
-```ts
-// packages/agent/src/harness/runtime/drive/structural.ts:260-298（节选）
-if (outcome.kind === "compaction") {
-    ...
-} else if (outcome.kind === "branch_summary") {
-    const boundary = navigationBoundary(current.task);
-    const entry: NewEntry<BranchSummaryEntry> = {
-        id: outcome.resultEntryId,
-        parentId: boundary.targetId,
-        type: "branch_summary",
-        fromId: meta.sourceTipId,
-        summary: outcome.result.summary,
-        details: { readFiles: outcome.result.readFiles, modifiedFiles: outcome.result.modifiedFiles },
-    };
-    writes.push(setValue(branchTip(lane.name), boundary.targetId));
-    ...
-    writes.push(insertEntry(entry), setValue(branchTip(lane.name), outcome.resultEntryId));
-}
-```
-
-#### 4.1.2 真正的子 Agent：扩展层 spawn 独立进程
-
-唯一示例位于 `packages/coding-agent/examples/extensions/subagent`，其自述第一句就是「**Spawns a separate `pi` process** for each subagent invocation, giving it an isolated context window」。
+唯一示例在 `packages/coding-agent/examples/extensions/subagent`，自述第一句是「**Spawns a separate `pi` process** for each subagent invocation, giving it an isolated context window」：
 
 ```ts
-// packages/coding-agent/examples/extensions/subagent/index.ts:300-307, 344-350（节选）
+// packages/coding-agent/examples/extensions/subagent/index.ts:298-301
 const args: string[] = ["--mode", "json", "-p", "--no-session"];
 const inheritsDispatchConfig = !agent.model;
 const model = agent.model ?? dispatchDefaults.model;
 if (model) args.push("--model", model);
-...
+```
+
+```ts
+// packages/coding-agent/examples/extensions/subagent/index.ts:344-348
 const proc = spawn(invocation.command, invocation.args, {
-    cwd: cwd ?? defaultCwd,
-    shell: false,
-    stdio: ["ignore", "pipe", "pipe"],
+	cwd: cwd ?? defaultCwd,
+	shell: false,
+	stdio: ["ignore", "pipe", "pipe"],
 });
 ```
 
-- **隔离来自新进程，不是分支树**：`--no-session` 意味着连 session 都不落盘。
-- **结果解析**：逐行读 stdout 的 JSONL 事件流，抽取 `message_end` / `tool_result_end`（`index.ts:353-388`）。
-- **三种编排模式**：single / parallel / chain（`index.ts:8-10, 471-721`），并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:33-34`），用 `mapWithConcurrencyLimit` 调度（`index.ts:219-237, 645`）。
+- **隔离来自新进程，不是会话结构**：`--no-session` 意味着连会话都不落盘。
+- **结果解析**：逐行读 stdout 的 JSONL 事件流，抽取 `message_end`（`index.ts:360`）与 `tool_result_end`（`index.ts:382`）。
+- **三种编排模式**：single / parallel / chain；并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:34-35`），用 `mapWithConcurrencyLimit` 调度（`index.ts:643`）。
 - **Agent 定义**从 `~/.pi/agent/agents/*.md`（带 frontmatter）发现。
 
-#### 4.1.3 内核确实没有子 Agent 概念
+#### 4.1.4 内核确实没有子 Agent 概念
 
-在 `packages/` 内 grep `subagent|delegate|spawn`：**`packages/agent` 零命中**。所有命中都是无关物（chord 服务容器的 `spawn<T>`、`child_process.spawn` 工具调用、session 文件的 `newSession`）。
+在 `packages/durable/src` 与 `packages/agent/src` 全目录搜索 `subagent`：**零命中**，所有命中都在示例扩展里。
 
-**pi 的答案**：内核只提供「会话树 + 游标」这一原语；「子 Agent」是**扩展作者用进程 + 事件流自己搭的东西**。这是四家中唯一的「框架不做、留给扩展」路线。
+**pi 的答案**：内核只提供「会话 + 任务」两种原语；「子 Agent」是**扩展作者用进程 + 事件流自己搭的东西**。这是四家中唯一的「框架不做、留给扩展」路线。
 
 ---
 
@@ -381,7 +381,7 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 
 「可续子 Agent」 = **一个持久 Session + 至多一个进程内 Activation**。关联靠 session header 的 `parentSession` + `origin:'subagent'` + `delegationDepth`，父侧追加 `subagent/catalog` 事件、子侧追加 `subagent/descriptor`。
 
-cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/continuation.ts:406-456`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
+cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/manager.ts:906`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
 
 descriptor **刻意不含** `subagentDepth`（防篡改）与 `outputSchema` / `maxTokens`（`descriptor.ts:12-19`）。
 
@@ -696,7 +696,7 @@ system prompt 侧，fork 直接用父**已渲染好的字节**（`AgentTool.tsx:
 #### 4.4.6 结果回灌：两条通道
 
 - **同步子 Agent** → 走 `tool_result`。`mapToolResultToToolResultBlockParam` 在 `status:'completed'` 分支拼 `contentOrMarker + agentId/usage trailer`（`AgentTool.tsx:1340-1373`）。
-- **异步子 Agent** → 走 **`<task-notification>` XML 消息**入队给模型，**不是** tool_result。`enqueueAgentNotification` 组装 `task_id / output_file / status / summary / result / usage / worktree`（`src/tasks/LocalAgentTask.tsx:197-262`），且**仅在 `notified` 原子翻转后发送**，防重复通知（`:224-240`）。
+- **异步子 Agent** → 走 **`<task-notification>` XML 消息**入队给模型，**不是** tool_result。`enqueueAgentNotification` 组装 `task_id / output_file / status / summary / result / usage / worktree`（`src/tasks/LocalAgentTask/LocalAgentTask.tsx:197-262`），且**仅在 `notified` 原子翻转后发送**，防重复通知（`:224-240`）。
 
 #### 4.4.7 生命周期与并发
 
@@ -728,15 +728,15 @@ flowchart TB
 
 #### 4.5.1 pi —— 没有对等通信，而且连"兄弟"这个关系都不存在
 
-pi 的核心只承认**父子（ownership / subtree）**一种跨会话关系，并且用断言把它写死：`assertTaskConversationScope` 要求目标会话必须是当前 task 自己拥有的子树成员，否则抛 `Forbidden: conversation <id> is outside task <id>'s subtree`（`packages/agent/src/harness/pico3/harness.ts:329-340`）。
+pi 的核心只承认**父子（ownership / subtree）**一种跨会话关系，并且在两处把它写成硬校验。
 
-`sendOwned` 与 `abortConversation` 都必须先过这道校验（`harness.ts:251`、`:270`）。
+其一是**创建时**：一段会话要么挂在某个 `parent` 之下，要么由某个 task 拥有；声明 owner 时会去查这个 task 是否存在，不存在直接抛错（`packages/durable/src/session/transaction.ts:306-320`）。子任务还有两条额外约束——必须活在 owner 的会话里，且**不允许是 background**（`:408-419`）。
 
-换句话说，pi 不是「没实现兄弟通信」，而是**根本不允许跨兄弟引用**——你的可操作范围在结构上就是你的子树。子 Agent 也只能由父创建并拥有（`harness/pico3/kinds/task-api.ts:18-25` 的 `createOwnedConversation`）。
+其二是**操作时**：只能中止自己**直接拥有**的任务，比较的是记录上的 `owner` 字段，不一致就抛 `Task <id> is not owned by task <owner>`（`packages/durable/src/harness/scheduler.ts:2209-2219`）。
 
-仓库里确实有一处带 `peer` 语义的代码：`experimental/coordinator.ts` 定义了 `peer_connected` / `peer_disconnected` / `message` 等消息类型（`:20-26`），并维护 `const peers = new Map<string, RoutedPeer>()`（`:291`）。
+换句话说，pi 不是「没实现兄弟通信」，而是**根本不允许跨兄弟引用**——你的可操作范围在结构上就是你的子树。而「子树」这个概念仍然保留，只是落到了 `TaskOwnership.creator` 这条边上，注释写明它用于归属、子树中止与子树空闲等待（`packages/durable/src/types.ts:404`）。
 
-但它的 peer 是**每个 session 一个的 worker 进程**，路由是「一个 server 中心 + N 个 worker」的星形，且只有 server 能广播——`handleRoutedMessage` 对 `broadcast` 的处理是 `if (from !== "server") throw new Error("Only the current server may broadcast")`（`coordinator.ts:424-445`）。**这是会话级的进程路由，不是 Agent 级的对等通信**，两者不应混读。
+还有一处需要更正上一版的判断：旧版仓库里那个带 `peer` 语义的 `coding-agent/src/experimental/coordinator.ts`（会话级星形进程路由）在 v1.4.0 已被删除，`experimental/` 目录只剩 `source-resolver.ts`。也就是说 pi 现在**连会话级的进程路由都不再内置**——多进程协作整体交给 `chord` 的 host / link 抽象（第 15 章）。
 
 #### 4.5.2 deepseek-harness —— 两个包给出两个答案
 
@@ -918,7 +918,6 @@ sequenceDiagram
 
 > **设计理由**：本层会**递归回卷**到完整运行时栈（2.3）。每多一层，token 成本、延迟、内存、失败面都是**乘性**增长，而边际收益通常递减。四家中有三家选了「默认只允许一层」，是经过权衡的保守选择。
 
-
 ### 6.2 深度超限的表现形式
 
 | 项 | pi | dsh | codex | CC |
@@ -927,7 +926,6 @@ sequenceDiagram
 | 源码依据 | — | — | `spec_plan.rs`；`multi_agents/spawn.rs:71-77` | — |
 
 > **设计理由**：**「不存在的工具」优于「会报错的工具」**。给模型一个它不该用的工具，就等于邀请它去试探；而缺失的工具会自然引导模型「自己解决」。codex 的错误文案甚至直接把替代策略写进去了。
-
 
 ### 6.3 并发超限
 
@@ -938,7 +936,6 @@ sequenceDiagram
 
 > **设计理由**：codex「完成不等于释放」这一点值得注意——它把额度回收与**生命周期显式关闭**绑定，而不是与任务结束绑定。好处是父 Agent 可以在子任务完成后仍然向它追问（`send_input`）；代价是父必须记得 `close`，否则额度会被已完成的僵尸占满。
 
-
 ### 6.4 子 Agent 失败或崩溃
 
 | 项 | pi | dsh | codex | CC |
@@ -947,7 +944,6 @@ sequenceDiagram
 | 源码依据 | — | `types.ts:308-334`；`out-of-process.ts:192-219` | — | `agentToolUtils.ts:670-681`；`AgentTool.tsx:1223-1234` |
 
 > **设计理由**：两处设计很有代表性——① dsh 用「**用值表达失败而非异常**」让父 Agent 的代码路径统一；② CC 同步路径「**尽量保留部分产出**」，因为子 Agent 跑到一半的中间结果对父通常仍有价值，直接 rethrow 会让这些工作白费。
-
 
 ### 6.5 父 Agent 被取消
 
@@ -958,7 +954,6 @@ sequenceDiagram
 
 > **设计理由**：这里有一个真实的取舍冲突——「级联取消」保证一致性，但用户按 ESC 的本意往往是「停下当前这轮对话」，不是「杀掉我刚派出去跑 10 分钟的后台任务」。CC 选择**按意图区分**（前台随父死、后台独立生存），代价是可能留下孤儿（由 6.6 的回收机制兜底）。
 
-
 ### 6.6 孤儿回收
 
 | 项 | pi | dsh | codex | CC |
@@ -967,7 +962,6 @@ sequenceDiagram
 | 源码依据 | — | `continuation-activation.ts:841-867` | — | `killShellTasks.ts:53-76`；`runAgent.ts:816-859`；`framework.ts:125-144` |
 
 > **设计理由**：**子 Agent 会衍生出不属于它的资源**（bash 进程、MCP 连接、临时目录）。只回收「agent 对象」是不够的，必须追踪「它曾经创建了什么」。CC 的 `killShellTasksForAgent` 是四家中唯一显式处理「agent 遗留子进程」的实现。
-
 
 ### 6.7 运行超时
 
@@ -978,7 +972,6 @@ sequenceDiagram
 
 > **设计理由**：**四家都不给子 Agent 设运行超时**，这不是遗漏。Agent 任务的时长分布极长尾（一次重构可能跑 20 分钟），硬超时会杀掉正在做正确工作的 Agent；而「父等待超时」是可恢复的（父可以先回去做别的，之后再来 `TaskOutput`）。**超时应设在「等待」上，不设在「执行」上。**
 
-
 ### 6.8 平级 Agent 的嵌套限制
 
 | 项 | pi | dsh | codex | CC |
@@ -988,7 +981,6 @@ sequenceDiagram
 
 > **设计理由**：平级 Agent 的组织若允许无限嵌套，会退化成一张**无界的通信图**（N 个 Agent 两两通信 = O(N²) 条通道）。CC 选择扁平的 team 结构，配合 `TEAMMATE_MESSAGES_UI_CAP = 50`，把复杂度钉死在可控范围。**注意配套的实测数据**：进程内 agent 在鲸鱼会话中「2 分钟起 292 个 agent 达 36.8GB RSS」——扁平化不是洁癖，是内存安全的必要约束。
 
-
 ### 6.9 消息/通知的投递语义
 
 | 项 | pi | dsh | codex | CC |
@@ -997,7 +989,6 @@ sequenceDiagram
 | 源码依据 | — | — | `host.rs:17-37`；`agent_message_board.rs:143-189`；`local.rs:166-175` | `LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84` |
 
 > **设计理由**：**「给 Agent 发消息」实质上是一张隐式的 turn 触发器**。若允许消息唤醒空闲 Agent，就产生了「谁来为这次唤醒付费、若唤醒风暴如何处理」的失控面。codex 的做法是把通知降格为**纯投递**——只在接收方本来就要跑下一轮时顺带送达，从根上消除了唤醒风暴与跨 turn 状态泄漏。
-
 
 ### 6.10 共享任务板的争用与重复认领
 
@@ -1056,21 +1047,12 @@ sequenceDiagram
 
 | 文件 | 行号 | 用途 |
 |---|---|---|
-| `packages/agent/src/harness/session/types.ts` | 521-528 | `Branch` 接口（游标 + 视图） |
-| `packages/agent/src/harness/session/types.ts` | 18-25 / 64 | `EntryBase`（节点）/ `Entry` 联合 |
-| `packages/agent/src/harness/session/values.ts` | 158 | `branchTip` 值定义 |
-| `packages/agent/src/harness/session/session.ts` | 355-368 | `createBranch`（不复制历史） |
-| `packages/agent/src/harness/session/session.ts` | 243-270 | `beginMutation`（mutation line 串行化） |
-| `packages/agent/src/harness/runtime/lane.ts` | 575-587 / 798-809 | `LaneBusy` 拒绝并发 operation |
-| `packages/agent/src/harness/runtime/lane.ts` | 762-796 | `acceptNavigation`（分支摘要触发） |
-| `packages/agent/src/harness/runtime/drive/structural.ts` | 278-298 | `branch_summary` entry 写入 |
-| `packages/agent/src/harness/compaction/branch-summarization.ts` | 87-118 / 219-234 | 分支摘要收集与生成 |
-| `packages/coding-agent/examples/extensions/subagent/index.ts` | 300-307 / 344-350 | spawn 独立 pi 进程（`--no-session`） |
-| `packages/coding-agent/examples/extensions/subagent/index.ts` | 33-34 / 219-237 / 645 | `MAX_PARALLEL_TASKS=8` / `MAX_CONCURRENCY=4` |
+| `packages/durable/src/entries.ts` | 15 / 17 / 19 / 24 / 29 / 34 | 六种条目：`user` / `assistant` / `system` / `tool-result` / `reset` / `compaction`（取代原 `Branch` / `branchSummary`） |
+| `packages/durable/src/types.ts` | 396-404 | `TaskOwnership`：`creator` 边用于归属、子树中止与子树空闲等待 |
+| `packages/durable/src/harness/tool.ts` | 106 / 125 | `NestedCallDoc`（按调用 key 一文档一份）/ `ToolTask` |
+| `packages/durable/src/harness/scheduler.ts` | 2209-2219 | `abortOwned`：只允许中止自己**直接拥有**的任务，否则抛错 |
+| `packages/coding-agent/examples/extensions/subagent/index.ts` | 298 / 34-35 / 603-643 | spawn 独立 pi 进程（`--no-session`）/ `MAX_PARALLEL_TASKS=8` 与 `MAX_CONCURRENCY=4` |
 | `packages/coding-agent/examples/extensions/subagent/index.ts` | 8-10 / 471-721 | single / parallel / chain 三种编排 |
-| `packages/agent/src/harness/pico3/harness.ts` | 329-340 / 251 / 270 | `subtree` 归属断言（兄弟之间不可引用） |
-| `packages/agent/src/harness/pico3/kinds/task-api.ts` | 18-25 | 子会话只能由父创建并拥有 |
-| `packages/coding-agent/src/experimental/coordinator.ts` | 20-26 / 291 / 424-445 | 会话级 peer 总线（星形，仅中心可广播；非 Agent 级对等通信） |
 
 ### deepseek-harness
 
@@ -1082,7 +1064,6 @@ sequenceDiagram
 | `packages/subagent/subagent/src/depth.ts` | 28-36 | `delegationDepthOf`（取 max，resume 不降级） |
 | `packages/subagent/subagent/src/child-agent.ts` | 50-59 / 33-37 | `resolveChildDepth` / `SubagentDepthError` |
 | `packages/subagent/subagent/src/child-agent.ts` | 172-176 / 218 / 232 | 权限冻结 / `restrict()` 收窄 / approval 钉为 never |
-| `packages/subagent/subagent-in-process-driver/src/index.ts` | 104 | `startInProcessRun` |
 | `packages/subagent/subagent-fork-in-process/src/index.ts` | 48-55 / 72 | seed 取到最后 `turn/end` / `inheritsParentContext=true` |
 | `packages/subagent/subagent-spawn-in-process/src/index.ts` | 50 | `inheritsParentContext=false` |
 | `packages/subagent/subagent-acp/src/index.ts` | 132-139 / 147-153 / 155 | cwd 传递 / 无启动能力 / 不继承上下文 |
@@ -1090,9 +1071,9 @@ sequenceDiagram
 | `packages/subagent/subagent-claude-code/src/process.ts` | 67-159 | `ManagedClaudeCodeProcess` 适配 |
 | `packages/subagent/subagent-codex/src/run.ts` | 135-137 | `codexAppServerArgv`（`app-server --stdio`） |
 | `packages/subagent/subagent-codex/src/wire.ts` | 192 / 32-43 / 114-148 | `CodexAppServerWire` / 权限映射 / 失败分类 |
-| `packages/subagent/subagent/src/continuation.ts` | 406-456 / 204 | cold resume / `sendMessage` |
+| `packages/subagent/subagent/src/manager.ts` | 906 / 543 / 739 | cold resume（`agents.resume`）/ `sendMessage` / `materialize` |
 | `packages/subagent/subagent/src/descriptor.ts` | 48 / 12-19 | descriptor v3 / 刻意不含的字段 |
-| `packages/subagent/subagent/src/continuation-activation.ts` | 45-56 / 808-830 / 841-867 | ActivationPool / 取消级联 / 孤儿回收 |
+| `packages/subagent/subagent/src/activation.ts` | 16 | `ActivationPool`（本地激活池，186 行） |
 | `packages/subagent/tool-subagent/src/index.ts` | 381 / 390-429 / 430-459 | `subagent` 工具 / 参数 / oneOf 三态输出 |
 | `packages/subagent/tool-subagent-control/src/index.ts` | 29 / 77 / 113 | `send_message` / `interrupt_agent` / 祖先授权 |
 | `packages/subagent/tool-subagent-control/src/list-agents.ts` | 87 / 101-106 | `list_agents` / scope 语义 |
@@ -1103,7 +1084,8 @@ sequenceDiagram
 | `docs/subsystems/subagent.md` | 150 | 权威边界：兄弟 / 隔代 / 自身 / 一次性子全部拒绝 |
 | `packages/subagent/subagent/src/depth.ts` | 19-24 | 深度单调（可加深、不可降低） |
 | `packages/experimental/agent-team/README.md` | 69 / 128 / 132 / 134 / 204 / 206 | 任意成员互发 / 隐式 Lead / 投递保证与限制 / 兄弟不冒用 Lead / 扁平名册 |
-| `packages/experimental/agent-team/src/mailbox.ts` | 117 / 145 / 262 | 成员校验与目标解析 / 先登记后释放事务 / host-only 投递 |
+| `packages/experimental/agent-team/src/roster.ts` | 79 | 成员校验：非活跃队伍成员直接抛 `TEAM_NOT_MEMBER` |
+| `packages/experimental/agent-team/src/session-message.ts` | 25 | `messageAccepted`（投递受理判定） |
 | `packages/experimental/agent-team/src/task-board.ts` | 119 / 133 | 版本号 CAS / `claim` 语义 |
 | `packages/experimental/agent-team/src/types.ts` | 58-65 | `TeamMemberView`（角色与状态） |
 | `packages/experimental/tool-agent-team/src/index.ts` | 176 / 208 / 225 / 270 / 281 / 306 / 338 / 353 | 团队工具清单（`spawn_teammate` / `send_message` / `team_task_*` 等） |
@@ -1153,8 +1135,8 @@ sequenceDiagram
 | `src/tasks/types.ts` | 12-19 / 37-46 | `TaskState` 联合 / 后台任务判定 |
 | `src/tasks/DreamTask/DreamTask.ts` | 1-4 / 20-23 / 52-74 / 136-155 | Dream 语义 / 两态状态机 / 注册 / kill 回滚 |
 | `src/tasks/InProcessTeammateTask/types.ts` | 13-20 / 41-67 / 96-101 | Teammate 身份 / 状态 / **36.8GB RSS 实测注释** |
-| `src/tasks/LocalAgentTask.tsx` | 460-486 / 466-515 / 526-614 | abort 链接策略 / 异步注册 / 前台注册 |
-| `src/tasks/LocalAgentTask.tsx` | 197-262 / 224-240 / 309-332 | `<task-notification>` / 去重 / 批量 kill |
+| `src/tasks/LocalAgentTask/LocalAgentTask.tsx` | 460-486 / 466-515 / 526-614 | abort 链接策略 / 异步注册 / 前台注册 |
+| `src/tasks/LocalAgentTask/LocalAgentTask.tsx` | 197-262 / 224-240 / 309-332 | `<task-notification>` / 去重 / 批量 kill |
 | `src/tasks/LocalShellTask/LocalShellTask.tsx` | 180-252 / 259-287 / 390-410 / 24-42 | shell 托管 / 前台登记 / Ctrl+B / stall watchdog |
 | `src/tasks/LocalMainSessionTask.ts` | 54-57 / 338-479 | 主会话后台化类型 / `startBackgroundSession` |
 | `src/tasks/RemoteAgentTask/RemoteAgentTask.tsx` | 60-61 / 808-847 | 远程任务类型 / archive 清理 |
@@ -1169,8 +1151,8 @@ sequenceDiagram
 | `src/tools/AgentTool/forkSubagent.ts` | 60-71 / 78-89 / 107-169 | `FORK_AGENT` 定义 / 双层防递归 / `buildForkedMessages` |
 | `src/constants/tools.ts` | 36-46 / 55-71 / 77-88 / 107-112 | 三份白名单 + 递归防护 |
 | `src/tools/TaskOutputTool/TaskOutputTool.tsx` | 30-34 / 91-105 / 219-253 | 输出 schema / 内存优先 / 轮询实现 |
-| `src/tools/TaskStopTool/TaskStopTool.tsx` | 10-19 / 44 | 输入 schema / `KillShell` 别名 |
-| `src/tools/TaskUpdateTool/TaskUpdateTool.tsx` | 37-65 / 188-199 / 277-298 | 输入 schema / owner 自动置 / mailbox 通知 |
+| `src/tools/TaskStopTool/TaskStopTool.ts` | 10-19 / 44 | 输入 schema / `KillShell` 别名 |
+| `src/tools/TaskUpdateTool/TaskUpdateTool.ts` | 37-65 / 188-199 / 277-298 | 输入 schema / owner 自动置 / mailbox 通知 |
 | `src/services/tools/toolOrchestration.ts` | 8-12 / 26-67 | 并发上限 10 / 只读批并发 |
 | `src/utils/swarm/permissionSync.ts` / `utils/teammateMailbox.ts` | — | 团队 mailbox 与权限同步 |
 | `src/utils/teammateMailbox.ts` | 4-6 / 43-51 / 56-62 / 165 | 邮箱路径 / 消息结构 / `getInboxPath` / 加锁写入 |
@@ -1183,3 +1165,13 @@ sequenceDiagram
 | `src/tools/SendMessageTool/SendMessageTool.ts` | 67-78 | 收件人语法（含 `[门控: UDS_INBOX]` 的跨会话寻址） |
 | `src/utils/agentSwarmsEnabled.ts` | 24-40 | 团队总开关与 killswitch |
 | `src/tools.ts` | 126-128 | `ListPeersTool` 门控与还原缺口 |
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [durable.exports]({{ site.baseurl }}/appendix/claims/#claim.pi.durable.exports) · [nested-tool-calls]({{ site.baseurl }}/appendix/claims/#claim.pi.nested-tool-calls) · [codemode-worker]({{ site.baseurl }}/appendix/claims/#claim.pi.codemode-worker) |
+| dsh | [agent-team-board]({{ site.baseurl }}/appendix/claims/#claim.dsh.agent-team-board) |
+| codex | [multi-agent-session]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-session) · [multi-agent-tools]({{ site.baseurl }}/appendix/claims/#claim.codex.multi-agent-tools) · [message-board-endpoint]({{ site.baseurl }}/appendix/claims/#claim.codex.message-board-endpoint) |

@@ -4,7 +4,7 @@ title: "第 13 章 · MCP 与外部能力接入"
 nav_order: 1
 parent: "第三部分 · 外围区"
 permalink: /ch/13/
-reviewed_at: 2026-10-15
+reviewed_at: 2026-10-27
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -12,15 +12,13 @@ review_priority: P0
 
 # 第 13 章：MCP 与外部能力接入 —— 能力除了内建的，还从哪来
 
-本章结论与源码证据：[pi.mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [pi.mcp-disable-flag]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-disable-flag) · [pi.mcp-runtime]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-runtime) · [pi.mcp-resources]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-resources) · [dsh.mcp-client]({{ site.baseurl }}/appendix/claims/#claim.dsh.mcp-client) · [codex.mcp-v2]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-v2) · [codex.mcp-resource-handler]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-resource-handler) · [claude-code.artifact-baseline]({{ site.baseurl }}/appendix/claims/#claim.claude-code.artifact-baseline) · [pi.mcp-tool-projection]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-tool-projection) · [dsh.acp-interface]({{ site.baseurl }}/appendix/claims/#claim.dsh.acp-interface)。其余分析须结合对应来源逐条复核。
-
 **本章回答什么** —— 本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。
 
 **四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `v1.2.0` 已内置 MCP extension，并把 MCP 工具、资源、OAuth、重连和 Code Mode 暴露组合到同一运行时；dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物资料和明确推断为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
 
 **读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
-> **当前基线补充（2026-10-15）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.299` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
+> **当前基线补充（2026-10-27）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.311` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
@@ -36,7 +34,7 @@ review_priority: P0
 >
 > **易混点**：本章的「能力」指**模型可调用的外部工具与资源**，不含本体内建工具（第 5 章）。MCP 在本层被当作一个整体看待；第 12 章只把 MCP server 计作「一种扩展单位」来数，两章的切分口径不同，见 2.2。
 >
-> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.299` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
+> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.311` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
 
 ---
 
@@ -183,7 +181,7 @@ durable 与 Code Mode 仍是 pi 当前能力面的重要组成：`packages/durab
 
 两条并不矛盾，合起来才是完整立场：**内置 MCP 负责标准连接与资源能力，扩展机制负责二次定制**。这与第 12 章记下的 pi 扩展机制形态一致——它给扩展留了 11 个生命周期回调与 10 个 `register*`，注册工具是其中一项：
 
-`packages/coding-agent/src/core/extensions/types.ts:1425-1428`
+`packages/coding-agent/src/core/extensions/types.ts:1671-1674`
 ```ts
 /** Register a tool that the LLM can call. */
 registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
@@ -193,7 +191,7 @@ registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any
 
 注册的运行时实现会做两件事：要求参数 schema 必须是对象，然后刷新工具表（不是就地修改，而是重建）：
 
-`packages/coding-agent/src/core/extensions/loader.ts:273-285`
+`packages/coding-agent/src/core/extensions/loader.ts:292-304`
 ```ts
 registerTool(tool: ToolDefinition): void {
     assertActive();
@@ -219,7 +217,7 @@ export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep
 
 这个联合不进外部工具表；扩展注册的工具经 `extension.tools` 汇聚，合并规则是**首次注册者胜**：
 
-`packages/coding-agent/src/core/extensions/runner.ts:586-596`
+`packages/coding-agent/src/core/extensions/runner.ts:637-647`
 ```ts
 /** Get all registered tools from all extensions (first registration per name wins). */
 getAllRegisteredTools(): RegisteredTool[] {
@@ -265,7 +263,7 @@ MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ign
 
 **缺口二：扩展改写工具入参之后不做重新校验。** 这一点 pi 自己在类型注释里写明了：
 
-`packages/coding-agent/src/core/extensions/types.ts:1023-1028`
+`packages/coding-agent/src/core/extensions/types.ts:1250-1255`
 ```ts
 /**
  * Fired before a tool executes. Can block.
@@ -281,15 +279,23 @@ MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ign
 
 pi 的「用包分发能力」不是比喻，它有完整的安装与发现链路。设置项里 `packages` 与 `extensions` 是并列的两个字段：
 
-`packages/coding-agent/src/core/settings-manager.ts:135-136`
+`packages/coding-agent/src/core/settings-schema.ts:302-309`
 ```ts
-packages?: PackageSource[]; // Array of npm/git package sources (string or object with filtering)
-extensions?: string[]; // Array of local extension file paths or directories
+		packages: Type.Optional(
+			Type.Array(PackageSourceSchema, {
+				description: "npm or git package sources, as strings or objects with resource filtering.",
+			}),
+		),
+		extensions: Type.Optional(
+			Type.Array(Type.String(), { description: "Local extension file paths or directories." }),
+		),
 ```
+
+两个字段的性质不同：`packages` 走 `PackageSourceSchema`（字符串或带资源过滤的对象），`extensions` 是纯字符串路径数组。**最新代码把这份定义从手写 interface 换成了 TypeBox schema**——设置项的合法形态、默认值与文档描述现在是同一份声明，`settings-schema.ts` 里 `Type.Optional(...description...)` 直接生成配置文档。
 
 npm 源的安装落点是确定的（user 级进 agent 目录，project 级进项目目录，且 project 级要求项目已受信）：
 
-`packages/coding-agent/src/core/package-manager.ts:2066-2075`
+`packages/coding-agent/src/core/package-manager.ts:2132-2141`
 ```ts
 private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
     if (scope === "temporary") {
@@ -319,12 +325,19 @@ return manifest;
 
 这套机制的信任边界被 pi 明确写在了文档里，且**只加在安装与加载上，不在运行中**：
 
-`packages/coding-agent/docs/extensions.md:111-113`
+`packages/coding-agent/docs/extensions.md:5`
 ```markdown
-> **Security:** Extensions run with your full system permissions and can execute arbitrary code. Only install from sources you trust.
-
-Extensions are auto-discovered from trusted locations. Project-local `.pi/extensions` entries load only after the project is trusted.
+An extension runs inside the Pi process with the same operating-system permissions. It can inspect prompts, tool calls, files, credentials, and session history, so load extensions only from sources you trust.
 ```
+
+措辞比旧版更具体：不再只说「能执行任意代码」，而是列出**它能看什么**——提示词、工具调用、文件、凭据、会话历史。项目级扩展的加载门仍然存在，但现在写在「加进 Pi」一节里：
+
+`packages/coding-agent/docs/extensions.md:50`
+```markdown
+Reload replaces the extension runtime, so code after `await ctx.reload()` must not reuse state from the old runtime. Only personal and explicit command-line extensions can participate in the `project_trust` event that runs before project extensions load.
+```
+
+这句同时约束了两件事：**`project_trust` 事件本身不能被项目级扩展拦截**（否则等于让被审对象当审判者），以及 **reload 之后旧 runtime 的状态必须丢弃**。
 
 一个佐证：当前源码已经有独立的 `packages/coding-agent/src/extensions/mcp/` 目录，并在 CLI、工具定义、资源定义和连接 runtime 之间形成完整调用链。因此当前应区分「内置 MCP」与「第三方 MCP 扩展」，不能再用第三方适配包推导 pi 没有内置实现。
 
@@ -414,7 +427,7 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 
 这个边界在 subprocess 包自己的文档里被明确承认为例外：
 
-`packages/subprocess/subprocess/README.md:150`
+`packages/subprocess/subprocess/README.md:149`
 ```markdown
 - **SDK-managed spawns remain outside** — a transport that owns its internal spawn (the SDK client, MCP) cannot route that call through this service; it can still import `scrubbedParentEnv` so environment policy stays single-sourced.
 ```
@@ -468,7 +481,7 @@ it('reaps the probe before starting the serving process', async () => {
 
 `syncTools` 的核心设计是「下一代构建完成之前不碰注册表」：
 
-`packages/mcp/mcp-client/src/tools.ts:119`
+`packages/mcp/mcp-client/src/tools.ts:120`
 ```ts
 // Phase 1: fetch and build the next generation without touching the registry.
 const definitions = new Map<string, ToolDefinition>()
@@ -564,7 +577,7 @@ dsh 的凭据面只有两处：stdio 的 `env`（经擦洗合并）与 HTTP 的 
 
 连接的载体是一个「代」（generation）加一套中断预算：
 
-`packages/mcp/mcp-client/src/connection.ts:145-157`
+`packages/mcp/mcp-client/src/connection.ts:146-158`
 ```ts
 /** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
 let client: Client | undefined
@@ -583,7 +596,7 @@ let firstAttemptError: unknown
 
 退避逻辑里有一个四家中独有的设计——**稳定窗重置预算**：
 
-`packages/mcp/mcp-client/src/connection.ts:220-236`
+`packages/mcp/mcp-client/src/connection.ts:222-238`
 ```ts
 // A connection that stayed up past the stability window (= maxDelayMs, the
 // longest backoff spacing) ended the previous outage: start a fresh budget.
@@ -666,7 +679,7 @@ async request(request, exec): Promise<JsonValue> {
 
 server 清单进 `config.toml` 的一个映射字段，且 schema 用自定义反序列化——因为它要接受「原始 MCP 输入形状」而不是内部结构：
 
-`codex-rs/config/src/config_toml.rs:290-293`
+`codex-rs/config/src/config_toml.rs:299-302`
 ```rust
 /// Definition for MCP servers that Codex can reach out to for tool calls.
 #[serde(default)]
@@ -679,7 +692,7 @@ pub mcp_servers: HashMap<String, McpServerConfig>,
 
 传输配置的两个变体都直接引用了协议规范的锚点，这在四家中是独一份：
 
-`codex-rs/config/src/mcp_types.rs:564`
+`codex-rs/config/src/mcp_types.rs:614`
 ```rust
 pub enum McpServerTransportConfig {
     /// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio
@@ -706,7 +719,7 @@ pub enum McpServerTransportConfig {
 
 来源仲裁是本层最重的一块。5 类来源被建模成枚举：
 
-`codex-rs/codex-mcp/src/catalog.rs:70-83`
+`codex-rs/codex-mcp/src/catalog.rs:73-86`
 ```rust
 pub enum McpServerSource {
     /// A plugin discovered through the process-wide legacy plugin manager.
@@ -726,7 +739,7 @@ pub enum McpServerSource {
 
 仲裁靠一个 `RegistrationPrecedence` 的序（`catalog.rs:115-118`），唯一被硬编码的内置 server 是 `codex_apps`（`catalog.rs:96`、`mcp/mod.rs:64`）。插件侧还有两种清单形状——`.mcp.json` 的 `mcp_servers` 键或裸 server 映射：
 
-`codex-rs/codex-mcp/src/plugin_config.rs:44-48`
+`codex-rs/codex-mcp/src/plugin_config.rs:46-50`
 ```rust
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -781,7 +794,7 @@ pub(crate) const MAX_MCP_STDIO_LINE_BYTES: usize = 8 * 1024 * 1024;
 
 executor 路径的常量把「为什么是 8 MiB」写清楚了，也顺带说明了 stderr 为什么可以小得多：
 
-`codex-rs/rmcp-client/src/executor_process_transport.rs:49-53`
+`codex-rs/rmcp-client/src/executor_process_transport.rs:51-55`
 ```rust
 // Tool results can make valid MCP responses large, so keep the protocol
 // ceiling well above ordinary messages while still bounding hostile input.
@@ -792,23 +805,42 @@ const MAX_MCP_STDERR_LINE_BYTES: usize = 1024 * 1024;
 
 **stdio 子进程的启动方式与其他三家都不同**：它不用 `std::process` / `tokio::process`，而用带 PTY 能力的 `codex_utils_pty::Command`，并显式要求独立进程组 + 只保留 stdio 描述符：
 
-`codex-rs/rmcp-client/src/stdio_server_launcher.rs:281-291`
+`codex-rs/rmcp-client/src/stdio_server_launcher.rs:281-292`
 ```rust
-let build_command = || {
-    let mut command = Command::new(&resolved_program);
-    command.current_dir(&cwd).envs(&envs).args(&args);
-    command.process_mode(ProcessMode::NewGroup);
-    // MCP uses only stdio; unrelated orchestrator descriptors must not
-    // propagate into the server or commands it launches.
-    // StdioOnly is currently Unix-only. Windows can still inherit unrelated
-    // handles and needs a handle allowlist in the shared spawn backend.
-    #[cfg(unix)]
-    command.descriptor_policy(DescriptorPolicy::StdioOnly);
-    command
+        let build_command = || {
+            let mut command = Command::new(&resolved_program);
+            command.current_dir(&cwd).envs(&envs).args(&args);
+            command.process_mode(ProcessMode::NewGroup);
+            // MCP uses only stdio; select Explicit to exclude unrelated
+            // orchestrator descriptors from the server and commands it launches.
+            // Descriptor allowlisting is Unix-only. Windows can still inherit unrelated
+            // handles and needs a handle allowlist in the shared spawn backend.
+            #[cfg(unix)]
+            command.descriptor_policy(DescriptorPolicy::Explicit);
+            command
+        };
+```
+
+这一段的措辞变化里藏着一次语义纠正：旧版写 `DescriptorPolicy::StdioOnly`，注释解释为「只保留 stdio 描述符」；新版改成 **`DescriptorPolicy::Explicit`**，注释也跟着改成「select Explicit to exclude unrelated orchestrator descriptors」——**从「声明我只用 stdio」变成「逐个声明我要哪些」**，同样是排除无关句柄，但后者是显式白名单而不是基于用途的推断。两者的差别在 Windows 一侧更明显：注释仍然承认 Unix 之外做不到句柄白名单，但**进程容器化补上了另一半**：
+
+```rust
+// codex-rs/rmcp-client/src/stdio_server_launcher.rs:297-307
+#[cfg(windows)]
+let job = match codex_utils_pty::JobObject::create_without_breakaway() {
+    Ok(job) => {
+        command.prepare_suspended_spawn(&job);
+        Some(job)
+    }
+    Err(error) => {
+        warn!("Windows MCP process job containment unavailable: {error}");
+        None
+    }
 };
 ```
 
-这一步使第 4 章记下的「父死子必死」契约同样覆盖 MCP server——`ProcessMode::NewGroup` 让 server 落在独立进程组里，于是超时与回收都能按组处理。
+`JobObject::create_without_breakaway` + `prepare_suspended_spawn` 意味着 **Windows 上 MCP server 也被装进 Job Object**：父进程退出时整组被回收，且子进程不能通过 breakaway 逃出。这条路径失败时只 `warn!` 不阻断——**降级是显式的、可见的**，而不是静默地退化成「随便继承」。
+
+`ProcessMode::NewGroup`（Unix）与 Job Object（Windows）合起来，使第 4 章记下的「父死子必死」契约在 MCP server 上**两个平台都成立**，超时与回收都能按组处理。
 
 环境是**白名单重建**而不是全量继承：`Command::new` 先 `env_clear()`（`codex-rs/utils/pty/src/child_command.rs:58-62`），再由 `create_env_for_mcp_server`（`rmcp-client/src/utils.rs:16`）从一份 11 项的默认表重建：
 
@@ -880,7 +912,7 @@ impl McpProtocolMode {
 
 实际发出的 capabilities 只有一项加若干受信扩展：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:1100-1113`
+`codex-rs/codex-mcp/src/rmcp_client.rs:1116-1129`
 ```rust
 let mut capabilities = ClientCapabilities::default();
 capabilities.elicitation = Some(client_elicitation_capability);
@@ -972,21 +1004,30 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 这是 codex 在这一层上最重的一块设计。MCP 工具经既有的工具注册表进入，与其他 external handler 走同一条路：
 
-`codex-rs/core/src/tools/spec_plan.rs:152-159`
+`codex-rs/core/src/tools/spec_plan.rs:151-165`
 ```rust
-let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
-    mcp,
-    &turn_context.config,
-    apps_enabled,
-    &mcp.config().mcp_server_catalog,
-    search_tool_enabled(turn_context, model_info),
-    &mut registry,
-);
+    let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
+        mcp,
+        &turn_context.config,
+        apps_enabled,
+        &mcp.config().mcp_server_catalog,
+        model_info.supports_search_tool,
+        &mut registry,
+    );
+    apply_mcp_tool_exposure_policy(
+        turn_context,
+        model_info,
+        mcp,
+        &registered_mcp_tools,
+        &mut registry,
+    );
 ```
 
-注册时同时应用一次「暴露策略」（`spec_plan.rs:160-166` 的 `apply_mcp_tool_exposure_policy`），而这个策略的落点在别处：
+两处小改动指向同一个方向：**注册与暴露被拆成两步，中间那次返回值是契约**。旧版传的是 `search_tool_enabled(turn_context, model_info)`——一个「现问一句」的函数；新版传 `model_info.supports_search_tool`，一个**已经解析好的能力位**。而 `apply_mcp_tool_exposure_policy` 现在吃 `&registered_mcp_tools`：**先知道注册了什么，再决定什么能被看见**。
 
-`codex-rs/core/src/mcp_tool_exposure.rs:142-144`
+暴露策略本身落在别处：
+
+`codex-rs/core/src/mcp_tool_exposure.rs:154-156`
 ```rust
 if registry.register_external_with_exposure(handler, tool_exposure) && fits_agent_budget {
     registered_tools.insert(tool_name);
@@ -997,32 +1038,65 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 审批不是复用某个通用动作，而是**为 MCP 建了一个专用动作类型**：
 
-`codex-rs/core/src/mcp_tool_call.rs:1536`
+`codex-rs/core/src/mcp_tool_call.rs:1550-1577`
 ```rust
-let action = ApprovalAction::McpToolCall {
-    id: call_id.to_string(),
-    server: invocation.server.clone(),
-    tool_name: invocation.tool.clone(),
-    arguments: invocation.arguments.clone(),
-    connector_id: metadata.connector_id.clone(),
-    connector_name: metadata.connector_name.clone(),
-    connector_description: metadata.connector_description.clone(),
-    connected_account_email: (invocation.server == CODEX_APPS_MCP_SERVER_NAME)
-        .then(|| metadata.connected_account_email.clone())
-        ...
-};
+    let action = ApprovalAction::McpToolCall {
+        id: call_id.to_string(),
+        server: invocation.server.clone(),
+        tool_name: invocation.tool.clone(),
+        arguments: invocation.arguments.clone(),
+        connector_id: metadata.connector_id.clone(),
+        connector_name: metadata.connector_name.clone(),
+        connector_description: metadata.connector_description.clone(),
+        connected_account_email: (invocation.server == CODEX_APPS_MCP_SERVER_NAME)
+            .then(|| metadata.connected_account_email.clone())
+            .flatten(),
+        tool_title: metadata.tool_title.clone(),
+        tool_description: metadata.tool_description.clone(),
+        annotations: metadata
+            .annotations
+            .as_ref()
+            .map(|annotations| GuardianMcpAnnotations {
+                destructive_hint: annotations.destructive_hint,
+                open_world_hint: annotations.open_world_hint,
+                read_only_hint: annotations.read_only_hint,
+            }),
+        hook_tool_name: hook_tool_name.clone(),
+        approval_policy: config.approval_policy.value(),
+        reviewer: approvals_reviewer,
+        approval_mode: policy.mode,
+        allow_session_remember: session_approval_key.is_some(),
+        allow_persistent_approval: persistent_approval_key.is_some(),
+    };
 ```
 
-字段清单本身就是设计说明：审批界面能拿到 server 名、工具名、参数、连接器身份与已连账号邮箱——**即「这次调用是谁发起的、用了谁的凭据」在审批时是可见的**。这一点四家中只有 codex 做到了。动作随后走与内置工具同一个审批入口：
+字段清单本身就是设计说明。旧版到这里只有 8 个字段，覆盖「谁发起、用了谁的凭据」；最新代码又加进来四类，把审批界面从「知道发生了什么」推到「能判断该不该发生」：
 
-`codex-rs/core/src/mcp_tool_call.rs:1574`
+| 新增字段 | 回答的问题 |
+|---|---|
+| `tool_title` / `tool_description` | 这个工具自称是干什么的（模型与用户看到的是同一份说明） |
+| `annotations` → `GuardianMcpAnnotations` | MCP 协议的三个提示位：`read_only_hint` / `destructive_hint` / `open_world_hint` |
+| `hook_tool_name` | 钩子看到的工具名（与 `tool_name` 分离，用于钩子匹配） |
+| `approval_policy` / `reviewer` / `approval_mode` | 这次审批按哪条策略、交给谁裁决 |
+
+`annotations` 的出现值得一提：**MCP server 自报的 `readOnlyHint` / `destructiveHint` 是「服务器自己说的」，不是可信事实**。codex 的做法是把它作为审批界面上的**提示**而不是判定依据——放行判定仍然走 `permission_profile` 与 `approval_policy`（见下面的自动放行函数）。这个区分是必须的，否则一个恶意 server 只要声明自己是只读就能绕过审批。
+
+动作随后走与内置工具同一个审批入口，但**返回值多了一维**：
+
+`codex-rs/core/src/mcp_tool_call.rs:1588-1596`
 ```rust
-Some(
-    match sess.request_approval(action, approval_context).await {
-        ...
-    },
-)
+    let approval = sess.request_approval(action, approval_context).await;
+    Some(McpToolApproval {
+        decision: match approval.result {
+            Ok(decision) => decision,
+            Err(ToolError::Rejected(rejection)) => ReviewDecision::denied(rejection),
+            Err(ToolError::Codex(_)) => ReviewDecision::Abort,
+        },
+        source: approval.source,
+    })
 ```
+
+`decision` 是「批没批」，`source` 是「**谁批的**」（`Option<ApprovalResolutionSource>`，`mcp_tool_call.rs:1484-1487`）。这一维的存在说明 codex 的审批链上不止一个裁决者——Guardian 自动复核与用户人工点同意走同一条返回路径，但下游需要知道区别。另外三种错误被映射成三种不同语义：`Rejected` → 拒绝（带理由）、`Codex(_)` → 中止、其他 → 原样透传，**没有一种会退化成「当作同意」**。
 
 自动放行条件也被显式建模，而不是散落在各处：
 
@@ -1054,7 +1128,7 @@ pub fn mcp_permission_prompt_is_auto_approved(
 
 反向情形被单独处理，且拒绝语写得很直白：
 
-`codex-rs/core/src/mcp_tool_call.rs:1610-1613`
+`codex-rs/core/src/mcp_tool_call.rs:1626-1629`
 ```rust
 if *approval_policy == AskForApproval::Never {
     return ReviewDecision::denied(
@@ -1069,14 +1143,14 @@ if *approval_policy == AskForApproval::Never {
 
 存储位置分三级：keyring 优先，失败回退 `CODEX_HOME/.credentials.json`，且存储模式可配（Auto / Keyring / File）：
 
-`codex-rs/rmcp-client/src/oauth.rs:92`
+`codex-rs/rmcp-client/src/oauth.rs:100`
 ```rust
 const KEYRING_SERVICE: &str = "Codex MCP Credentials";
 ```
 
 持久化结构里有一项不是 OAuth 标准字段——`issuer`，它用来防「授权服务器混淆」：
 
-`codex-rs/rmcp-client/src/oauth.rs:96-106`
+`codex-rs/rmcp-client/src/oauth.rs:105-115`
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredOAuthTokens {
@@ -1093,26 +1167,59 @@ pub struct StoredOAuthTokens {
 
 三种存储模式对应三条不同代码路径，其中 `Keyring` 模式带「清理旧文件」的动作——**迁移是显式的一次写入而非后台静默**：
 
-`codex-rs/rmcp-client/src/oauth.rs:466-478`
+`codex-rs/rmcp-client/src/oauth.rs:483-509`
 ```rust
-OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
-    &keyring_store,
-    keyring_backend_kind,
-    server_name,
-    tokens,
-),
-OAuthCredentialsStoreMode::File => save_oauth_tokens_to_file(tokens),
-OAuthCredentialsStoreMode::Keyring => save_oauth_tokens_with_keyring_and_cleanup_file(
-    &keyring_store,
-    keyring_backend_kind,
-    server_name,
-    tokens,
-),
+    match store_mode {
+        OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
+            &keyring_store,
+            keyring_backend_kind,
+            server_name,
+            tokens,
+        ),
+        OAuthCredentialsStoreMode::File => {
+            let result = save_oauth_tokens_to_file(tokens);
+            observation.record_save_attempt(Store::File, &result);
+            result
+        }
+        OAuthCredentialsStoreMode::Keyring => {
+            let result = save_oauth_tokens_with_keyring_and_cleanup_file(
+                &keyring_store,
+                store_mode,
+                keyring_backend_kind,
+                server_name,
+                tokens,
+            );
+            observation.record_save_attempt(telemetry::keyring(keyring_backend_kind), &result);
+            if let Err(error) = &result {
+                telemetry::record_secure_error(&mut observation, error.as_ref());
+            }
+            result
+        }
+    }
 ```
+
+最新代码在这里加了一层旧版没有的东西：**凭据落盘失败率是可观测的**。三条路径的结构差异不再只是「调哪个函数」，而是「**观测点摆在哪**」：
+
+| 模式 | 调用的写入函数 | 观测 |
+|---|---|---|
+| `Auto` | `…with_keyring_with_fallback_to_file` | 无（委托给被调方，本层不重复记账） |
+| `File` | `save_oauth_tokens_to_file` | `record_save_attempt(Store::File, &result)` |
+| `Keyring` | `…with_keyring_and_cleanup_file` | `record_save_attempt(telemetry::keyring(_), &result)` + 失败时 `record_secure_error` |
+
+`observation` 来自这一行开头的 `telemetry::policy(store_mode, keyring_backend_kind, Operation::Save)`（`oauth.rs:482`），它产出的是 `codex_otel::auth_storage::StorageTelemetry`。**关键在于它携带什么**——那个模块自己的文档注释就是答案：
+
+`codex-rs/rmcp-client/src/oauth/telemetry.rs:1`
+```rust
+//! Maps MCP storage policy, pinned stores, and typed failures to credential-free metric dimensions.
+```
+
+`credential-free` 这个词是承诺也是约束：指标维度里只有存储模式、后端种类、操作类型、失败类别，**没有 token、没有 server 凭据、没有账号标识**。`record_secure_error` 的实现在做同一件事的反向操作——它沿着 `source()` 链逐层 `downcast_ref` 去找 `OAuthKeyringLoadError` / `OAuthStoreLockFailure`，把这些**类型化错误**折叠成有限几个类别（`telemetry.rs:19-40`），而不是把错误消息字符串塞进指标。
+
+> **为什么这一层值得单独说**：凭据存储是四家里最难观测的一块——它的失败往往表现为「下次启动又要重新登录」，而用户不会为此报错。codex 选择在**写入口**打点（而不是读取时统计），这使它同时能回答「keyring 不可用有多常见」与「回退到文件的比例是多少」，且代价是每次写入多一次结构体更新。
 
 认证方式是一个三值枚举，每个变体的注释都写明了失败回退规则：
 
-`codex-rs/config/src/mcp_types.rs:194-209`
+`codex-rs/config/src/mcp_types.rs:189-204`
 ```rust
 pub enum McpServerAuth {
     /// Use stored MCP OAuth credentials when available. Starting an OAuth login
@@ -1134,7 +1241,7 @@ pub enum McpServerAuth {
 
 第三个变体是 EMA（Enterprise Managed Auth），它被单独建模成一个配置结构：
 
-`codex-rs/config/src/mcp_ema.rs:29-34`
+`codex-rs/config/src/mcp_ema.rs:34-39`
 ```rust
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1178,7 +1285,7 @@ const MAX_HELPER_OUTPUT_BYTES: usize = 64 * 1024;
 
 连接集的内部状态被集中在一个结构里，其中 `required_servers` 与 `disabled_servers` 是两条相反的名单：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:186-197`
+`codex-rs/codex-mcp/src/connection_manager.rs:228-239`
 ```rust
 pub(crate) struct McpConnectionSet {
     servers: HashMap<String, McpServerView>,
@@ -1198,7 +1305,7 @@ pub(crate) struct McpConnectionSet {
 
 启动结果被汇总成一个三分清单（就绪 / 取消 / 失败）并以事件发出，**失败不是错误而是事件**：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:790-807`
+`codex-rs/codex-mcp/src/connection_manager.rs:835-852`
 ```rust
 for (server_name, outcome) in outcomes {
     match outcome {
@@ -1222,7 +1329,7 @@ let _ = tx_event
 
 只有显式声明 `required` 的 server 会把失败升级为阻断：
 
-`codex-rs/codex-mcp/src/connection_manager/required.rs:15`
+`codex-rs/codex-mcp/src/connection_manager/required.rs:17`
 ```rust
 pub(crate) async fn validate_required_servers(&self) -> Result<()> {
     let failures = async {
@@ -1245,7 +1352,7 @@ pub(crate) async fn validate_required_servers(&self) -> Result<()> {
 
 失败之后还会**自动排一次后台重连**，而不是等用户手动操作：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:743-745`
+`codex-rs/codex-mcp/src/connection_manager.rs:787-789`
 ```rust
 if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
     async_managed_client.reconnect_failed_startup().await;
@@ -1254,7 +1361,7 @@ if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
 
 超时的两个默认值把「连接」与「调用」分开给：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:103-107`
+`codex-rs/codex-mcp/src/rmcp_client.rs:104-108`
 ```rust
 pub(crate) const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
@@ -1265,7 +1372,7 @@ const CODEX_APPS_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 退避公式带一个封顶的指数与五次封顶：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:278-283`
+`codex-rs/codex-mcp/src/rmcp_client.rs:285-290`
 ```rust
 fn codex_apps_reconnect_backoff(consecutive_failures: u32) -> Duration {
     let exponent = consecutive_failures.saturating_sub(1).min(5);
@@ -1372,7 +1479,7 @@ user 与 local 各自读一处全局状态（`config.ts:963`、`:980`），enter
 2. 整体合并构建时：plugin < user < project（仅已批准） < local（`config.ts:1231-1238`）；
 3. **企业配置存在时，其余全部忽略**：
 
-`src/services/mcp/config.ts:1082-1096`
+`src/services/mcp/config.ts:1084-1098`
 ```ts
 // If an enterprise mcp config exists, do not use any others; this has exclusive control over all MCP servers
 // (enterprise customers often do not want their users to be able to add their own MCP servers).
@@ -1570,7 +1677,7 @@ const MAX_MCP_DESCRIPTION_LENGTH = 2048
 
 skip-prefix 是第三种碰撞策略：
 
-`src/services/mcp/client.ts:1760`
+`src/services/mcp/client.ts:1761`
 ```ts
 // Check if we should skip the mcp__ prefix for SDK MCP servers
 const skipPrefix =
@@ -1601,7 +1708,7 @@ return toolsToProcess
 
 MCP 工具自己的 `checkPermissions` 不做判定，只返回 `passthrough` 并附一条「建议加规则」的建议（`client.ts:1814-1832`，建议的规则名是全限定名）。真正的判定发生在通用规则匹配函数里，而 MCP 的全部特殊性都集中在这一个函数：
 
-`src/utils/permissions/permissions.ts:247-268`
+`src/utils/permissions/permissions.ts:251-272`
 ```ts
 // MCP tools are matched by their fully qualified mcp__server__tool name. In
 // skip-prefix mode (CLAUDE_AGENT_SDK_MCP_NO_PREFIX), MCP tools have unprefixed
@@ -1749,7 +1856,7 @@ server 日志通知也没有处理器：`notifications/message` 在 `src/service
 
 ## 五、横向对比矩阵
 
-> **当前基线说明（2026-10-15）**：本矩阵的 pi 列已按 `v1.2.0` 内置 MCP extension 重标。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
+> **当前基线说明（2026-10-27）**：本矩阵的 pi 列已按 `v1.4.0` 重标：MCP 客户端在 v1.4.0 下沉为独立包 `packages/mcp/`（client / oauth / transports），扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
 
 一次外部工具调用要连穿四层，其中只有「注册」与「判定」两处是本层与其他层的接口。把这四个接口画出来，本章与其他章的接缝就清楚了。
 
@@ -2082,3 +2189,14 @@ flowchart TD
 | `src/components/mcp/ElicitationDialog.tsx` | elicitation 三态对话框 | 1,148 |
 
 *本章为外围区第一篇；上一站是启动区的第 2 章（提示词与上下文注入），下一站是第 14 章（长时任务与后台作业）——即「循环结束之后还在跑」的那一层。*
+
+## 证据索引
+
+本章每条登记结论都绑定到固定的源码片段。逐条的片段范围、证明等级与推断建议见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)。
+
+| 项目 | 本章登记结论 |
+|---|---|
+| pi | [mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [mcp-disable-flag]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-disable-flag) · [mcp-runtime]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-runtime) · [mcp-resources]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-resources) · [mcp-tool-projection]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-tool-projection) |
+| dsh | [mcp-client]({{ site.baseurl }}/appendix/claims/#claim.dsh.mcp-client) · [acp-interface]({{ site.baseurl }}/appendix/claims/#claim.dsh.acp-interface) |
+| codex | [mcp-v2]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-v2) · [mcp-resource-handler]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-resource-handler) |
+| Claude Code | [artifact-baseline]({{ site.baseurl }}/appendix/claims/#claim.claude-code.artifact-baseline) |
