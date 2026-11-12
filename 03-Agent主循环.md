@@ -314,7 +314,7 @@ if (finish.kind === 'max-tokens') return { kind: 'max-tokens' };
 
 #### 4.2.5 状态：日志即事实源
 
-`turn/start`、`step/start`、`assistant/message`、`tool/call`、`tool/result`、`turn/end` 全部落盘（`session/src/types.ts:288-427`）。每一次请求都从日志 derive 出来。**红利**：回放即测试（`invariant.spec.ts`）。**代价**：复杂度最高。
+`turn/start`、`step/start`、`assistant/message`、`tool/call`、`tool/result`、`turn/end` 全部落盘（`session/src/types.ts:288-427`）。每一次请求都从日志 derive 出来。**红利**：回放即测试——派生消息缓存要与逐步 replay 逐值相等（`derived-cache.spec.ts`）。**代价**：复杂度最高。
 
 ---
 

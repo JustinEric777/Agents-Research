@@ -942,7 +942,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | — | `ActivationPool.reserve` 超限返回 `ACTIVATION_LIMIT_REACHED`（默认 8） | `AgentRegistry.total_count` CAS 递增 + `max_threads`；槽位由 `SpawnReservation::Drop` 自动归还。**注意：已完成的 agent 仍占用额度直到被 `close`** | 工具批次并发默认 10；只读批并发、写入批串行 |
-| 源码依据 | — | `continuation-activation.ts:45-56` | `registry.rs:89-108, 330-346` | `toolOrchestration.ts:8-12, 26-67` |
+| 源码依据 | — | `activation.ts:15-35`（`ActivationPool.reserve`） | `registry.rs:89-108, 330-346` | `toolOrchestration.ts:8-12, 26-67` |
 
 > **设计理由**：codex「完成不等于释放」这一点值得注意——它把额度回收与**生命周期显式关闭**绑定，而不是与任务结束绑定。好处是父 Agent 可以在子任务完成后仍然向它追问（`send_input`）；代价是父必须记得 `close`，否则额度会被已完成的僵尸占满。
 
@@ -960,7 +960,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | — | 父取消 → 子收到 `agent.cancel({kind:'parent'})`，**子先于父释放**（保证子不会在父已死的情况下继续写） | `close` 会关闭目标 agent **及其全部 descendants** | `registerAsyncAgent(parentAbortController)` 用 `createChildAbortController` 让子随父 abort；**但后台 agent 故意不链接父 controller**——ESC 不会杀掉后台任务，必须显式 `TaskStop` |
-| 源码依据 | — | `continuation-activation.ts:808-830` | `agent/api.rs:74-75` | `LocalAgentTask.tsx:460-486`；`AgentTool.tsx:694-697` |
+| 源码依据 | — | `manager.ts:194-232`（`kind` 在 `:225` 定为 `parent`） | `agent/api.rs:74-75` | `LocalAgentTask.tsx:460-486`；`AgentTool.tsx:694-697` |
 
 > **设计理由**：这里有一个真实的取舍冲突——「级联取消」保证一致性，但用户按 ESC 的本意往往是「停下当前这轮对话」，不是「杀掉我刚派出去跑 10 分钟的后台任务」。CC 选择**按意图区分**（前台随父死、后台独立生存），代价是可能留下孤儿（由 6.6 的回收机制兜底）。
 
@@ -969,7 +969,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | — | 子优先 dispose + slot 归还；归档 session 会**取消其 running 后代**（`archive-admission.ts:30-39`）；`inbox.close` 与 `subprocessRunHandle.dispose` 都做**幂等记忆化** | `close` 递归关闭 descendants；V2 驱逐时保存 `evicted_environments` 以便恢复 | 四层防护——① `registerCleanup` 进程退出清理；② `killShellTasksForAgent` 杀掉 agent 遗留的 bash 并 `dequeueAllMatching`；③ `runAgent` 的 finally 清 todos/MCP/skills/perfetto；④ `evictTerminalTask` 仅在「终态 + 已通知」后 GC（保留/驱逐宽限 30s） |
-| 源码依据 | — | `continuation-activation.ts:841-867` | — | `killShellTasks.ts:53-76`；`runAgent.ts:816-859`；`framework.ts:125-144` |
+| 源码依据 | — | `manager.ts:742-781`（记忆化 close + 槽位归还） | — | `killShellTasks.ts:53-76`；`runAgent.ts:816-859`；`framework.ts:125-144` |
 
 > **设计理由**：**子 Agent 会衍生出不属于它的资源**（bash 进程、MCP 连接、临时目录）。只回收「agent 对象」是不够的，必须追踪「它曾经创建了什么」。CC 的 `killShellTasksForAgent` 是四家中唯一显式处理「agent 遗留子进程」的实现。
 

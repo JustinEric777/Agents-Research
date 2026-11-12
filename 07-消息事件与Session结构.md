@@ -385,7 +385,7 @@ pub(crate) struct ContextManager {
 
 **写时复制快照**（`[code]`）：「snapshots share the vector until a caller needs to mutate it」——只读消费者零拷贝共享历史。
 
-**三版本号**管理重写语义：`history_version`（压缩/回滚等重写）、`reset_version`（破坏性重置）、`user_message_revision`（用户输入，自增点在 `context_manager/history_user_authorization.rs:103`）。
+**三版本号**管理重写语义：`history_version`（压缩/回滚等重写）、`reset_version`（破坏性重置）、`user_message_revision`（用户输入，自增点在 `context_manager/history_user_authorization.rs:218`）。
 
 ```rust
 // codex-rs/core/src/state/session.rs:69 / :75

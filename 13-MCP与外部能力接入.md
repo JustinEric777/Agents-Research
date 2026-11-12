@@ -720,7 +720,7 @@ server 清单进 `config.toml` 的一个映射字段，且 schema 用自定义�
 pub mcp_servers: HashMap<String, McpServerConfig>,
 ```
 
-同层还有两个企业相关字段，直接放在 config 顶层：`mcp_enterprise_managed_auth`（`config_toml.rs:298`）与 `mcp_oauth_credentials_store`（`:306`）——**凭据存储模式是配置项**，这是 codex 与 CC 的又一处分歧。
+同层还有两个企业相关字段，直接放在 config 顶层：`mcp_enterprise_managed_auth`（`config_toml.rs:302-304`）与 `mcp_oauth_credentials_store`（`:306-312`）——**凭据存储模式是配置项**，这是 codex 与 CC 的又一处分歧。
 
 传输配置的两个变体都直接引用了协议规范的锚点，这在四家中是独一份：
 
@@ -971,7 +971,7 @@ if !extensions.is_empty() {
 
 **「不声明 sampling」是三家的共同选择**（codex 只声明 elicitation，CC 声明 roots + elicitation，dsh 什么都不声明）。原因不在协议而在安全模型：sampling 意味着 server 可以反向消耗宿主的模型额度，三家的默认都是拒绝。
 
-受信扩展白名单由 `client_mcp_extensions`（`codex-mcp/src/client_capabilities.rs:39`）决定，只保留四个 ID。也就是说**扩展能力默认不上报、按 ID 白名单放行**——这与 codex 在其余各处的「显式枚举」风格一致。
+受信扩展白名单由 `client_mcp_extensions`（`codex-mcp/src/client_capabilities.rs:58`）决定，只保留四个 ID。也就是说**扩展能力默认不上报、按 ID 白名单放行**——这与 codex 在其余各处的「显式枚举」风格一致。
 
 `codex-rs/rmcp-client/tests/mcp_2026_discovery.rs` 的 `modern_mode_uses_sdk_discovery_and_self_contained_request_metadata`（`:193-234`）测的是协商的**线格式**而不只是行为：断言客户端在 `server/discover` 与 `tools/list` 请求的 `_meta` 里都带上协议版本与 `clientInfo`，server 侧固定回 `supportedVersions` / `capabilities` / `_meta` / `ttlMs` / `cacheScope`（`:84-100`）。
 
@@ -1141,7 +1141,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
     })
 ```
 
-`decision` 是「批没批」，`source` 是「**谁批的**」（`Option<ApprovalResolutionSource>`，`mcp_tool_call.rs:1484-1487`）。这一维的存在说明 codex 的审批链上不止一个裁决者——Guardian 自动复核与用户人工点同意走同一条返回路径，但下游需要知道区别。另外三种错误被映射成三种不同语义：`Rejected` → 拒绝（带理由）、`Codex(_)` → 中止、其他 → 原样透传，**没有一种会退化成「当作同意」**。
+`decision` 是「批没批」，`source` 是「**谁批的**」（`Option<ApprovalResolutionSource>`，`mcp_tool_call.rs:1642`）。这一维的存在说明 codex 的审批链上不止一个裁决者——Guardian 自动复核与用户人工点同意走同一条返回路径，但下游需要知道区别。另外三种错误被映射成三种不同语义：`Rejected` → 拒绝（带理由）、`Codex(_)` → 中止、其他 → 原样透传，**没有一种会退化成「当作同意」**。
 
 自动放行条件也被显式建模，而不是散落在各处：
 
