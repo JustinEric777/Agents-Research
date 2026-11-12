@@ -4,7 +4,7 @@ title: "第 13 章 · MCP 与外部能力接入"
 nav_order: 1
 parent: "第三部分 · 外围区"
 permalink: /ch/13/
-reviewed_at: 2026-10-27
+reviewed_at: 2026-11-12
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -18,7 +18,7 @@ review_priority: P0
 
 **读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
-> **当前基线补充（2026-10-27）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.311` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
+> **当前基线补充（2026-11-12）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.322` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
@@ -34,7 +34,7 @@ review_priority: P0
 >
 > **易混点**：本章的「能力」指**模型可调用的外部工具与资源**，不含本体内建工具（第 5 章）。MCP 在本层被当作一个整体看待；第 12 章只把 MCP server 计作「一种扩展单位」来数，两章的切分口径不同，见 2.2。
 >
-> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.311` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
+> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.322` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
 
 ---
 
@@ -145,7 +145,7 @@ review_priority: P0
 | client capabilities | MCP SDK 默认能力，精确清单待补充源码复核 | 空 `{}`（`connection.ts:261`） | elicitation + 4 个受信扩展（`rmcp_client.rs:1100-1113`） | roots + elicitation（`client.ts:994-1000`） |
 | 工具命名 | `mcp__<server>__<tool>`，清洗、截断并追加 hash | `mcp__<server>__<tool>`（`tools.ts:82`） | `mcp__<server>__<tool>`（`mcp/mod.rs:83-87`、`tools.rs:22`） | `mcp__<server>__<tool>`（`mcpStringUtils.ts:50-52`） |
 | 名字长度上限 | 64（`tools.ts:48-92`） | 64（`tools.ts:48`） | 128（`tools.rs:226`） | 无 |
-| 描述截断 | 模型文本结果 20 KiB；完整结果落临时文件 | 不截断（`tools.ts:134`） | namespace 描述 ≤ 512 KiB、agent plugin ≤ 1,000 B（`handlers/mcp.rs:48-49`） | 2,048 字符，只截送给模型的那份（`client.ts:218`、`:1789-1794`） |
+| 描述截断 | 模型文本结果 20 KiB、中间截断（`output-limit.ts:9`）；全文落 `.txt` 并可回读 | 不截断（`tools.ts:134`） | namespace 描述 ≤ 512 KiB、agent plugin ≤ 1,000 B（`handlers/mcp.rs:48-49`） | 2,048 字符，只截送给模型的那份（`client.ts:218`、`:1789-1794`） |
 | 分页 | resources / templates 支持 cursor 与聚合 | 交给 SDK 聚合（`tools.ts:123`） | 自建上限：100 页 / 2,048 条（`pagination.rs:9-11`） | **无**（不消费 cursor） |
 | 调用链归口 | 内置 MCP extension 注册为 pi tool，并支持 Code Mode / tool search | 统一 `ctx.tools.register`（`tools.ts:150`） | 工具表 + 一等审批动作（`mcp_tool_exposure.rs:142`、`mcp_tool_call.rs:1536`） | 规则匹配层（`permissions.ts:238-269`） |
 | 凭据处理 | OAuth credential store + headers/env | 静态 `env` / `headers`（`transport.ts:37`、`:43`） | keyring + 文件回退 + OAuth + 企业 EMA（`oauth.rs:92`、`mcp_ema.rs:29`） | SecureStorage + OAuth + XAA（`auth.ts:1376`、`xaa.ts:1-17`） |
@@ -179,9 +179,29 @@ durable 与 Code Mode 仍是 pi 当前能力面的重要组成：`packages/durab
 
 当前结论使用 `code` 与 `unverified` 两个状态分开表达：源码足以证明结构和入口的内容写成事实；依赖真实 server、凭据或多轮运行才能确认的行为保留为 `unverified`，不升格为实现保证。
 
+**输出上限在 v1.5 已经下沉成独立包**，处理方式与 codex 同形——保留首尾、切掉中段，再把全文落盘：
+
+`packages/mcp/src/output-limit.ts:8-9`
+```ts
+/** Model-facing text of an MCP result beyond this is cut in the middle. */
+export const MCP_OUTPUT_MAX_BYTES = 20 * 1024;
+```
+
+`truncateMiddle` 把额度一分为二：`head` 取前 10 KiB、`tail` 取后 10 KiB，两端都向字符边界收缩（`isBoundary` 判掉 `10xxxxxx` 续字节），中间插入 `…N chars truncated…`。截断后的文本还要在前面补两行元信息：
+
+`packages/mcp/src/output-limit.ts:42-43`
+```ts
+const tokens = Math.ceil(truncation.totalBytes / 4);
+const text = `Warning: truncated output (original token count: ${tokens})\nTotal output lines: ${truncation.totalLines}\n\n${truncation.content}${where}`;
+```
+
+这不是「丢数据」，而是**换通道**：`saveOutput` 回调把完整文本写成 `.txt` 并在尾部追加 `[Full output: <path> (read it with offset/limit)]`，模型可以再用 `read` 的 `offset` / `limit` 把中段取回来（`:34-40`）。落盘失败也不静默——降级成 `[Could not save the full output: …]`，模型知道「有东西没拿到」。
+
+**这一点让 pi 与 codex 在「超长工具输出」上收敛到同一套解法**：pi 的注释直接写了 `like Codex does`，两家的差别只在治理位置——pi 在 MCP 客户端出口按 20 KiB 切模型可见文本，codex 由 `HeadTailBuffer` 在流式缓冲层就按字节分帧（见第 4 章）。
+
 两条并不矛盾，合起来才是完整立场：**内置 MCP 负责标准连接与资源能力，扩展机制负责二次定制**。这与第 12 章记下的 pi 扩展机制形态一致——它给扩展留了 11 个生命周期回调与 10 个 `register*`，注册工具是其中一项：
 
-`packages/coding-agent/src/core/extensions/types.ts:1671-1674`
+`packages/coding-agent/src/core/extensions/types.ts:1716-1719`
 ```ts
 /** Register a tool that the LLM can call. */
 registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
@@ -191,7 +211,7 @@ registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any
 
 注册的运行时实现会做两件事：要求参数 schema 必须是对象，然后刷新工具表（不是就地修改，而是重建）：
 
-`packages/coding-agent/src/core/extensions/loader.ts:292-304`
+`packages/coding-agent/src/core/extensions/loader.ts:298-310`
 ```ts
 registerTool(tool: ToolDefinition): void {
     assertActive();
@@ -217,7 +237,7 @@ export type ToolName = "read" | "bash" | "powershell" | "edit" | "write" | "grep
 
 这个联合不进外部工具表；扩展注册的工具经 `extension.tools` 汇聚，合并规则是**首次注册者胜**：
 
-`packages/coding-agent/src/core/extensions/runner.ts:637-647`
+`packages/coding-agent/src/core/extensions/runner.ts:636-647`
 ```ts
 /** Get all registered tools from all extensions (first registration per name wins). */
 getAllRegisteredTools(): RegisteredTool[] {
@@ -250,7 +270,7 @@ getAllRegisteredTools(): RegisteredTool[] {
 
 **约束一：`pi.exec` 不足以替代 MCP 的 stdio 长连接。** 它的实现是一次性的——`stdio` 由 `["ignore", "pipe", "pipe"]` 构成，stdin 被丢弃，函数在收齐输出后 resolve，不返回常驻句柄：
 
-`packages/coding-agent/src/core/exec.ts:41-45`
+`packages/coding-agent/src/core/exec.ts:58-62`
 ```ts
 const proc = spawn(command, args, {
     cwd,
@@ -263,7 +283,7 @@ MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ign
 
 **缺口二：扩展改写工具入参之后不做重新校验。** 这一点 pi 自己在类型注释里写明了：
 
-`packages/coding-agent/src/core/extensions/types.ts:1250-1255`
+`packages/coding-agent/src/core/extensions/types.ts:1271-1276`
 ```ts
 /**
  * Fired before a tool executes. Can block.
@@ -279,7 +299,7 @@ MCP 的 stdio 传输需要双向长连接与持续的读写循环，`stdio: "ign
 
 pi 的「用包分发能力」不是比喻，它有完整的安装与发现链路。设置项里 `packages` 与 `extensions` 是并列的两个字段：
 
-`packages/coding-agent/src/core/settings-schema.ts:302-309`
+`packages/coding-agent/src/core/settings-schema.ts:314-321`
 ```ts
 		packages: Type.Optional(
 			Type.Array(PackageSourceSchema, {
@@ -295,7 +315,7 @@ pi 的「用包分发能力」不是比喻，它有完整的安装与发现链�
 
 npm 源的安装落点是确定的（user 级进 agent 目录，project 级进项目目录，且 project 级要求项目已受信）：
 
-`packages/coding-agent/src/core/package-manager.ts:2132-2141`
+`packages/coding-agent/src/core/package-manager.ts:2326-2335`
 ```ts
 private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string {
     if (scope === "temporary") {
@@ -311,30 +331,42 @@ private getManagedNpmInstallPath(source: NpmSource, scope: SourceScope): string 
 
 包内资源由 `package.json` 的 `pi` 字段声明，读取时对每个字段做「必须是字符串数组」的校验，不合法就整条丢弃：
 
-`packages/coding-agent/src/core/pi-manifest.ts:24-31`
+`packages/coding-agent/src/core/pi-manifest.ts:25-38`
 ```ts
 const manifest: PiManifest = {};
 for (const field of RESOURCE_FIELDS) {
-    const entries = pkg.pi[field];
-    if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string")) {
-        manifest[field] = entries;
-    }
+	const entries = pkg.pi[field];
+	if (Array.isArray(entries) && entries.every((entry) => typeof entry === "string")) {
+		manifest[field] = entries;
+	}
 }
+
+const changelogPath = pkg.pi.changelogPath;
+if (typeof changelogPath === "string") {
+	manifest.changelogPath = changelogPath;
+}
+
 return manifest;
 ```
 
 这套机制的信任边界被 pi 明确写在了文档里，且**只加在安装与加载上，不在运行中**：
 
-`packages/coding-agent/docs/extensions.md:5`
+`packages/coding-agent/docs/extensions.md:7`
 ```markdown
 An extension runs inside the Pi process with the same operating-system permissions. It can inspect prompts, tool calls, files, credentials, and session history, so load extensions only from sources you trust.
 ```
 
 措辞比旧版更具体：不再只说「能执行任意代码」，而是列出**它能看什么**——提示词、工具调用、文件、凭据、会话历史。项目级扩展的加载门仍然存在，但现在写在「加进 Pi」一节里：
 
-`packages/coding-agent/docs/extensions.md:50`
+`packages/coding-agent/docs/extensions.md:1528-1534`
 ```markdown
-Reload replaces the extension runtime, so code after `await ctx.reload()` must not reuse state from the old runtime. Only personal and explicit command-line extensions can participate in the `project_trust` event that runs before project extensions load.
+Important behavior:
+- `await ctx.reload()` emits `session_shutdown` for the current extension runtime
+- It then reloads resources and emits `session_start` with `reason: "reload"` and `resources_discover` with reason `"reload"`
+- The currently running command handler still continues in the old call frame
+- Code after `await ctx.reload()` still runs from the pre-reload version
+- Code after `await ctx.reload()` must not assume old in-memory extension state is still valid
+- After the handler returns, future commands/events/tool calls use the new extension version
 ```
 
 这句同时约束了两件事：**`project_trust` 事件本身不能被项目级扩展拦截**（否则等于让被审对象当审判者），以及 **reload 之后旧 runtime 的状态必须丢弃**。
@@ -351,35 +383,30 @@ Reload replaces the extension runtime, so code after `await ctx.reload()` must n
 
 dsh 没有专门的 MCP 配置文件，配置就是 Cordis 插件条目的 `config` 字段，schema 由本包导出并做判别式校验——**一行配置一个 server**：
 
-`packages/mcp/mcp-client/src/index.ts:119`
+`packages/mcp/mcp-client/src/index.ts:161-190`
 ```ts
 export const Config = z.union([
   z.object({
     transport: z.const('stdio'),
     serverName: z.string().required().pattern(SERVER_NAME_PATTERN),
     command: z.string().required(),
-    args: z.array(String).default([]),
-    env: z.dict(String).default({}),
-    cwd: z.string().default(''),
-    toolCallTimeoutMs: z.number().default(DEFAULT_TOOL_CALL_TIMEOUT_MS),
-    failOnStartupError: z.boolean().default(false),
-    maxInstructionBytes: z.number().step(1).min(1).default(DEFAULT_MAX_INSTRUCTION_BYTES),
-    reconnect: Reconnect,
+...
+    reconnect: ReconnectSchema,
   }),
-  ...
+...
 ]) as z<ConfigInput, Config>
 ```
 
 server 名的合法字符集是硬约束，也是后面命名空间分隔符能成立的前提：
 
-`packages/mcp/mcp-client/src/index.ts:40`
+`packages/mcp/mcp-client/src/index.ts:52`
 ```ts
-const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
+export const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 ```
 
 生命周期入口是 `apply(ctx, config)`，它按「先校验配置 → 再占命名空间 → 再连」的顺序做，其中**占命名空间**这一步是重复 server 名的防线：
 
-`packages/mcp/mcp-client/src/index.ts:154`
+`packages/mcp/mcp-client/src/index.ts:203-218`
 ```ts
 export async function apply(ctx: Context, config: Config): Promise<void> {
   // Fail loud at load: reconnect misconfiguration (including programmatic
@@ -396,7 +423,7 @@ export async function apply(ctx: Context, config: Config): Promise<void> {
 
 #### 4.2.2 传输：两种，且刻意不接管子进程
 
-`packages/mcp/mcp-client/src/transport.ts:31-45`
+`packages/mcp/mcp-client/src/transport.ts:31-46`
 ```ts
 export function createTransport(config: Config): Transport {
   switch (config.transport) {
@@ -427,7 +454,7 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 
 这个边界在 subprocess 包自己的文档里被明确承认为例外：
 
-`packages/subprocess/subprocess/README.md:149`
+`packages/subprocess/subprocess/README.md:150`
 ```markdown
 - **SDK-managed spawns remain outside** — a transport that owns its internal spawn (the SDK client, MCP) cannot route that call through this service; it can still import `scrubbedParentEnv` so environment policy stays single-sourced.
 ```
@@ -439,16 +466,16 @@ function buildChildEnv(extra: Record<string, string>): Record<string, string> {
 
 dsh 的 `Client` 构造里只有两行与协商有关，且都是「放权」：
 
-`packages/mcp/mcp-client/src/connection.ts:258`
+`packages/mcp/mcp-client/src/connection.ts:282-289`
 ```ts
-const generation = new Client(
-  { name: 'dsh-mcp-client', version: '0.0.1' },
-  {
-    capabilities: {},
-    versionNegotiation: { mode: 'auto' },
-    ...
-  },
-)
+  async function connectGeneration(): Promise<void> {
+    if (isStopped()) return
+    const client = new Client({ name: 'dsh-mcp-client', version: '0.0.1' }, {
+      capabilities: {}, versionNegotiation: { mode: 'auto' },
+      listChanged: { tools: { autoRefresh: false, debounceMs: 0, onChanged: () => { void refreshTools() } } },
+    })
+    const record: Generation = { wire: new McpGeneration(client, config.closeTimeoutMs, error => diagnostic(error, 'cleanup')) }
+    current = record
 ```
 
 `capabilities: {}` 意味着它**不声明 roots、不支持 sampling、不支持 elicitation**；`mode: 'auto'` 意味着协议版本由 SDK 挑。它依赖的是官方 SDK 的新版本包，而不是事实标准的 `@modelcontextprotocol/sdk`：
@@ -460,7 +487,7 @@ const generation = new Client(
 
 dsh 用测试把这个交权行为**钉住**了——`negotiation-lifecycle.spec.ts` 断言的是「协商过程中的进程与重试行为」，而不是协商内容本身：
 
-`packages/mcp/mcp-client/tests/negotiation-lifecycle.spec.ts:66-76`
+`packages/mcp/mcp-client/tests/negotiation-lifecycle.spec.ts:69-79`
 ```ts
 it('reaps the probe before starting the serving process', async () => {
   const { handle, events, release } = await stdioFixture()
@@ -481,52 +508,52 @@ it('reaps the probe before starting the serving process', async () => {
 
 `syncTools` 的核心设计是「下一代构建完成之前不碰注册表」：
 
-`packages/mcp/mcp-client/src/tools.ts:120`
+`packages/mcp/mcp-client/src/tools.ts:133-164`
 ```ts
-// Phase 1: fetch and build the next generation without touching the registry.
-const definitions = new Map<string, ToolDefinition>()
-const response = client.getServerCapabilities()?.tools === undefined
-  ? { tools: [] }
-  : await client.listTools(undefined, { cacheMode: 'refresh' })
-for (const tool of response.tools) {
-  const publicName = publicToolName(opts.serverName, tool.name)
-  if (definitions.has(publicName)) {
-    throw new Error(
-      `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
-    )
-  }
-  ...
-}
+  // Phase 1: fetch and build the next generation without touching the registry.
+  const definitions = new Map<string, ToolDefinition>()
+  const response = client.getServerCapabilities()?.tools === undefined
+    ? { tools: [] }
+    : await client.listTools(undefined, { cacheMode: 'refresh', signal: opts.signal })
+  for (const tool of response.tools) {
+    const publicName = publicToolName(opts.serverName, tool.name)
+    if (definitions.has(publicName)) {
+      throw new Error(
+        `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
+      )
+    }
+...
+        }
 ```
 
 三处判据值得注意：**能力优先**（server 未声明 tools 能力时直接返回空表，不发请求）、**强制刷新缓存**（`cacheMode: 'refresh'`）、**同名即错**（同一 server 在一份列表里报了两次同名工具，判为非法而不是取其一）。
 
 第二阶段是替换，且失败时**整代回滚**：
 
-`packages/mcp/mcp-client/src/tools.ts:146-160`
+`packages/mcp/mcp-client/src/tools.ts:173-187`
 ```ts
-for (const dispose of previous.values()) dispose()
-const disposers: ToolDisposers = new Map()
-try {
-  for (const [publicName, definition] of definitions) {
-    disposers.set(publicName, ctx.tools.register(definition))
+  for (const dispose of previous.values()) dispose()
+  const disposers: ToolDisposers = new Map()
+  try {
+    for (const [publicName, definition] of definitions) {
+      disposers.set(publicName, ctx.tools.register(definition))
+    }
+  } catch (error) {
+    // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
+    // registration occupies this server's namespace. Roll back so the model
+    // sees either the full generation or none of it — never a partial set.
+    for (const dispose of disposers.values()) dispose()
+    ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
+    throw new McpToolRegistrationError('MCP tool registration failed', { cause: error })
   }
-} catch (error) {
-  // A conflict on an `mcp__<serverName>__`-qualified name means a foreign
-  // registration occupies this server's namespace. Roll back so the model
-  // sees either the full generation or none of it — never a partial set.
-  for (const dispose of disposers.values()) dispose()
-  ctx.logger.error(`mcp-client(${opts.serverName}): tool registration failed, no tools registered: ${String(error)}`)
-  if (opts.registrationFailure === 'throw') throw error
-  return new Map()
-}
+  return disposers
 ```
 
 「要么整代可见、要么一个都不可见」——这条不变式在四家里只有 dsh 显式写出来并加了注释。它的代价是：一个坏工具会让整个 server 的工具全部消失；它的收益是模型侧永远不会看到半套名字空间。
 
 #### 4.2.5 命名与上限
 
-`packages/mcp/mcp-client/src/tools.ts:81-86`
+`packages/mcp/mcp-client/src/tools.ts:91-97`
 ```ts
 export function publicToolName(serverName: string, rawName: string): string {
   const joined = `mcp__${serverName}__${rawName}`
@@ -539,7 +566,7 @@ export function publicToolName(serverName: string, rawName: string): string {
 
 三个常量决定了它的行为边界，其中第一个注释说明了上限的来源是**下游模型的函数名契约**而不是内部约定：
 
-`packages/mcp/mcp-client/src/tools.ts:48-54`
+`packages/mcp/mcp-client/src/tools.ts:58-64`
 ```ts
 const MAX_PUBLIC_NAME_LENGTH = 64
 
@@ -554,7 +581,7 @@ const HASH_LENGTH = 12
 
 工具定义的最终形态是统一到内部契约上的（与内置工具同类型）：
 
-`packages/mcp/mcp-client/src/tools.ts:225`
+`packages/mcp/mcp-client/src/tools.ts:251-272`
 ```ts
 export function createMcpToolDefinition(
   ctx: Context,
@@ -577,48 +604,46 @@ dsh 的凭据面只有两处：stdio 的 `env`（经擦洗合并）与 HTTP 的 
 
 连接的载体是一个「代」（generation）加一套中断预算：
 
-`packages/mcp/mcp-client/src/connection.ts:146-158`
+`packages/mcp/mcp-client/src/connection.ts:136-149`
 ```ts
-/** Current generation: the connecting or connected client; undefined during backoff waits and after final failure. */
-let client: Client | undefined
-/** Transport-aware close operation paired with {@link client}. */
-let closeClient: (() => Promise<boolean>) | undefined
-/** Live tool registrations owned by this server; only {@link enqueueSync} and dispose swap it. */
-let disposers: ToolDisposers = new Map()
-let reconnectTimer: NodeJS.Timeout | undefined
-/** Consecutive failed connection attempts within the current outage. */
-let failedAttempts = 0
-/** When the current generation finished connect + initial sync; undefined while down. */
-let connectedAt: number | undefined
-/** The real error from the first connection attempt, for startup-await diagnostics. */
-let firstAttemptError: unknown
+  type Generation = { wire: McpGeneration; connectedAt?: number }
+  let current: Generation | undefined
+  let bindingValue: { config?: Config } | undefined
+  let disposed = false
+  let serverInstructions = ''
+  let disposers: ToolDisposers = new Map()
+  let syncChain: Promise<void> = Promise.resolve()
+  let settling: Promise<void> = Promise.resolve()
+  let reconnectTimer: NodeJS.Timeout | undefined
+  let failedAttempts = 0
+  let closureFailure: McpCloseResult | undefined
+  let checkingCredentials: Promise<void> | undefined
+  let credentialsDirty = false
+  const isCurrent = (record: Generation): boolean => !disposed && current === record && !record.wire.lifetime.signal.aborted
 ```
 
 退避逻辑里有一个四家中独有的设计——**稳定窗重置预算**：
 
-`packages/mcp/mcp-client/src/connection.ts:222-238`
+`packages/mcp/mcp-client/src/connection.ts:208-220`
 ```ts
-// A connection that stayed up past the stability window (= maxDelayMs, the
-// longest backoff spacing) ended the previous outage: start a fresh budget.
-if (connectedAt !== undefined && Date.now() - connectedAt >= policy.maxDelayMs) failedAttempts = 0
-connectedAt = undefined
-failedAttempts += 1
-if (failedAttempts > policy.maxAttempts) {
-  // Enqueue the give-up disposal so it cannot race an in-flight sync's
-  // phase-2 swap (which checks isCurrent inside the queue).
-  syncChain = syncChain.then(() => {
-    for (const dispose of disposers.values()) dispose()
-    disposers = new Map()
-    serverInstructions = ''
-  })
-  return
-}
-const delayMs = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (failedAttempts - 1))
+    if (connectedAt !== undefined && Date.now() - connectedAt >= policy.maxDelayMs) failedAttempts = 0
+    failedAttempts++
+    if (failedAttempts > policy.maxAttempts) {
+      syncChain = syncChain.then(clearTools)
+      status.update({ state: 'failed', reason: 'gave-up', lastError: error })
+      ctx.logger.error(`${label}: giving up after ${policy.maxAttempts} consecutive failed reconnect attempts — tools unregistered; reload the plugin or restart the Host to reconnect`)
+      return
+    }
+    const delayMs = Math.min(policy.maxDelayMs, policy.initialDelayMs * 2 ** (failedAttempts - 1))
+    const action = connectedAt !== undefined ? 'connection lost; reconnecting' : 'connection failed; retrying'
+    ctx.logger.warn(`${label}: ${action} in ${delayMs}ms (attempt ${failedAttempts}/${policy.maxAttempts})`)
+    status.update({ state: 'reconnecting', attempt: failedAttempts, maxAttempts: policy.maxAttempts,
+      nextRetryAtMs: Date.now() + delayMs, lastError: error })
 ```
 
 把「稳定窗 = 最长退避间隔」作为重置条件，解决的是一类具体故障：**周期性抖动**（连上、稳定运行、再断）如果累计计数，会在若干小时后耗尽预算而无谓注销工具；而**崩溃循环**（连上就崩）因为 `connectedAt` 很快被判为「未过稳定窗」而继续累计。默认值把这两个窗口的尺度定在了同一数量级：
 
-`packages/mcp/mcp-client/src/connection.ts:41-46`
+`packages/mcp/mcp-client/src/connection.ts:47-52`
 ```ts
 export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
   enabled: true,
@@ -634,13 +659,14 @@ export const RECONNECT_DEFAULTS: Required<ReconnectConfig> = Object.freeze({
 
 资源的读取被做成三个共享工具，由 `mcp-resources` 包统一注册一次，通过 `server` 参数路由到具体 server：
 
-`packages/mcp/mcp-resources/src/tools.ts:33-41`
+`packages/mcp/mcp-resources/src/tools.ts:34-43`
 ```ts
 yield ctx.tools.register(defineTool({
   name: 'list_mcp_resources',
   description: 'List resources available from an MCP server.',
   parameters: listParameters,
   output,
+  isConcurrencySafe: () => true,
   execute: (args, exec) => request(args.server, {
     method: 'resources/list', ...args.cursor === undefined ? {} : { cursor: args.cursor },
   }, exec),
@@ -649,20 +675,26 @@ yield ctx.tools.register(defineTool({
 
 连接层负责把三个 method 路由到当前代，并在断开时直接抛错而不是排队：
 
-`packages/mcp/mcp-client/src/connection.ts:367`
+`packages/mcp/mcp-client/src/connection.ts:352-378`
 ```ts
-async request(request, exec): Promise<JsonValue> {
-  const generation = client
-  if (!generation || connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
-  const options = { signal: exec.signal, timeout: config.toolCallTimeoutMs }
-  switch (request.method) {
-    case 'resources/list':
-      return await generation.listResources(
-        request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
-      ) as JsonValue
-    ...
-  }
-},
+      async request(request, exec): Promise<JsonValue> {
+        const record = current
+        if (record?.connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
+        try {
+          return await record.wire.run(async (signal) => {
+            const options = { signal: AbortSignal.any([signal, exec.signal]), timeout: config.toolCallTimeoutMs }
+            const generation = record.wire.client
+            // The SDK answers an unadvertised capability with the same empty page, but
+            // writes a console.debug line to stdout, which the ACP profile reserves for JSON-RPC.
+            const listable = generation.getServerCapabilities()?.resources !== undefined
+            switch (request.method) {
+              case 'resources/list':
+                return listable
+...
+              case 'resources/read': return await generation.readResource({ uri: request.uri }, options) as JsonValue
+              /* v8 ignore next -- exhaustive over the closed resource request union */
+              default: return assertNever(request)
+            }
 ```
 
 **分页是把 cursor 透传给调用方**，由模型自己翻页——这与 codex 在客户端内部 `collect_paginated` 收集全部分页（见 4.3.4）是两种相反的答案。
@@ -679,7 +711,7 @@ async request(request, exec): Promise<JsonValue> {
 
 server 清单进 `config.toml` 的一个映射字段，且 schema 用自定义反序列化——因为它要接受「原始 MCP 输入形状」而不是内部结构：
 
-`codex-rs/config/src/config_toml.rs:299-302`
+`codex-rs/config/src/config_toml.rs:296-300`
 ```rust
 /// Definition for MCP servers that Codex can reach out to for tool calls.
 #[serde(default)]
@@ -692,7 +724,7 @@ pub mcp_servers: HashMap<String, McpServerConfig>,
 
 传输配置的两个变体都直接引用了协议规范的锚点，这在四家中是独一份：
 
-`codex-rs/config/src/mcp_types.rs:614`
+`codex-rs/config/src/mcp_types.rs:658-690`
 ```rust
 pub enum McpServerTransportConfig {
     /// https://modelcontextprotocol.io/specification/2025-06-18/basic/transports#stdio
@@ -719,7 +751,7 @@ pub enum McpServerTransportConfig {
 
 来源仲裁是本层最重的一块。5 类来源被建模成枚举：
 
-`codex-rs/codex-mcp/src/catalog.rs:73-86`
+`codex-rs/codex-mcp/src/catalog.rs:95-108`
 ```rust
 pub enum McpServerSource {
     /// A plugin discovered through the process-wide legacy plugin manager.
@@ -739,7 +771,7 @@ pub enum McpServerSource {
 
 仲裁靠一个 `RegistrationPrecedence` 的序（`catalog.rs:115-118`），唯一被硬编码的内置 server 是 `codex_apps`（`catalog.rs:96`、`mcp/mod.rs:64`）。插件侧还有两种清单形状——`.mcp.json` 的 `mcp_servers` 键或裸 server 映射：
 
-`codex-rs/codex-mcp/src/plugin_config.rs:46-50`
+`codex-rs/codex-mcp/src/plugin_config.rs:44-48`
 ```rust
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -773,28 +805,29 @@ codex 的传输实现不是一个枚举而是六条独立路径：
 | `rmcp-client/src/event_notification_transport.rs` | server 通知的带限队列 |
 | `rmcp-client/src/http_client_adapter.rs` | Streamable HTTP 适配 |
 
-stdio 路径按协议模式二选一分帧器，注释直接说明了差别：
+stdio 路径按协议模式切换分帧器，第三态 `Closed` 只用于收尾；注释直接说明了两种 framing 的差别：
 
-`codex-rs/rmcp-client/src/local_stdio_transport.rs:29-33`
+`codex-rs/rmcp-client/src/local_stdio_transport.rs:140-146`
 ```rust
 enum StdioTransport {
     /// Preserve rmcp's existing framing for servers using the initialize handshake.
-    Legacy(AsyncRwTransport<RoleClient, ChildStdout, ChildStdin>),
+    Legacy(AsyncRwTransport<RoleClient, Box<dyn AsyncRead + Unpin + Send>, Stdin>),
     /// Bound frames and skip messages unknown to the client during 2026-07-28 discovery.
-    V20260728(BoundedStdioTransport),
+    Modern(BoundedStdioTransport),
+    Closed,
 }
 ```
 
 两种分帧都设了行字节上限，取值一致（8 MiB）：
 
-`codex-rs/rmcp-client/src/bounded_stdio_transport.rs:22`
+`codex-rs/rmcp-client/src/bounded_stdio_transport.rs:25`
 ```rust
 pub(crate) const MAX_MCP_STDIO_LINE_BYTES: usize = 8 * 1024 * 1024;
 ```
 
 executor 路径的常量把「为什么是 8 MiB」写清楚了，也顺带说明了 stderr 为什么可以小得多：
 
-`codex-rs/rmcp-client/src/executor_process_transport.rs:51-55`
+`codex-rs/rmcp-client/src/executor_process_transport.rs:49-53`
 ```rust
 // Tool results can make valid MCP responses large, so keep the protocol
 // ceiling well above ordinary messages while still bounding hostile input.
@@ -805,7 +838,7 @@ const MAX_MCP_STDERR_LINE_BYTES: usize = 1024 * 1024;
 
 **stdio 子进程的启动方式与其他三家都不同**：它不用 `std::process` / `tokio::process`，而用带 PTY 能力的 `codex_utils_pty::Command`，并显式要求独立进程组 + 只保留 stdio 描述符：
 
-`codex-rs/rmcp-client/src/stdio_server_launcher.rs:281-292`
+`codex-rs/rmcp-client/src/stdio_server_launcher.rs:471-482`
 ```rust
         let build_command = || {
             let mut command = Command::new(&resolved_program);
@@ -877,7 +910,7 @@ env.retain(|name, _| {
 
 codex 是四家中唯一把协议版本做成显式模式枚举的：
 
-`codex-rs/rmcp-client/src/protocol_mode.rs:9-34`
+`codex-rs/rmcp-client/src/protocol_mode.rs:9-35`
 ```rust
 pub enum McpProtocolMode {
     /// Preserve the existing MCP initialization and OAuth behavior.
@@ -885,39 +918,45 @@ pub enum McpProtocolMode {
     Legacy,
     /// Allow the MCP 2026-07-28 discovery and request lifecycle.
     V20260728,
+    /// Probe an eligible local stdio server even when its launch config omits a version.
+    DiscoverLocalStdio,
 }
-
 impl McpProtocolMode {
     /// Returns the newest protocol version this compatibility policy can use.
     pub fn preferred_protocol_version(self) -> ProtocolVersion {
         match self {
             Self::Legacy => ProtocolVersion::V_2025_06_18,
-            Self::V20260728 => ProtocolVersion::V_2026_07_28,
+            Self::V20260728 | Self::DiscoverLocalStdio => ProtocolVersion::V_2026_07_28,
         }
     }
-
     pub(crate) fn client_lifecycle(self) -> ClientLifecycleMode {
         match self {
             Self::Legacy => ClientLifecycleMode::Initialize,
-            Self::V20260728 => ClientLifecycleMode::Auto {
+            Self::V20260728 | Self::DiscoverLocalStdio => ClientLifecycleMode::Auto {
                 preferred_versions: vec![ProtocolVersion::V_2026_07_28],
                 legacy_version: Some(ProtocolVersion::V_2025_06_18),
             },
         }
-    }
-}
 ```
 
 **默认是旧协议**，新协议要显式开。这里的分寸值得注意：新协议带来的是「发现式」生命周期（免 initialize 握手），而 codex 选择不默认启用——因为 MCP server 生态里旧版实现仍占多数。
 
 实际发出的 capabilities 只有一项加若干受信扩展：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:1116-1129`
+`codex-rs/codex-mcp/src/rmcp_client.rs:1368-1389`
 ```rust
 let mut capabilities = ClientCapabilities::default();
 capabilities.elicitation = Some(client_elicitation_capability);
+if client_mcp_extensions.contains(MCP_NETWORK_POLICY_META_CAPABILITY) {
+    capabilities.experimental = Some(BTreeMap::from([(
+        MCP_NETWORK_POLICY_META_CAPABILITY.to_string(),
+        serde_json::Map::new(),
+    )]));
+}
 let extensions = client_mcp_extensions
     .iter()
+    // Only Core can open and release leases on a pooled connection.
+    .filter(|(id, _)| !matches!(*id, MCP_NETWORK_POLICY_META_CAPABILITY | LEASE_CAPABILITY))
     .filter_map(|(id, settings)| {
         settings
             .as_object()
@@ -951,12 +990,12 @@ if !extensions.is_empty() {
 
 **命名前缀被明确标注为「legacy」**，同时另有按 server 名拼接的版本：
 
-`codex-rs/codex-mcp/src/tools.rs:22`
+`codex-rs/codex-mcp/src/tools.rs:24`
 ```rust
 const LEGACY_MCP_TOOL_NAME_PREFIX: &str = "mcp__";
 ```
 
-`codex-rs/codex-mcp/src/mcp/mod.rs:83-87`
+`codex-rs/codex-mcp/src/mcp/mod.rs:87-91`
 ```rust
 pub fn qualified_mcp_tool_name_prefix(server_name: &str) -> String {
     sanitize_responses_api_tool_name(&format!(
@@ -969,7 +1008,7 @@ pub fn qualified_mcp_tool_name_prefix(server_name: &str) -> String {
 
 长度上限与哈希位数：
 
-`codex-rs/codex-mcp/src/tools.rs:226-227`
+`codex-rs/codex-mcp/src/tools.rs:266-267`
 ```rust
 const MAX_TOOL_NAME_LENGTH: usize = 128;
 const CALLABLE_NAME_HASH_LEN: usize = 12;
@@ -992,7 +1031,7 @@ const DEFAULT_MCP_PAGINATION_TIMEOUT: Duration = Duration::from_secs(30);
 
 描述上限则分两档，且带一条解释：
 
-`codex-rs/core/src/tools/handlers/mcp.rs:48-49`
+`codex-rs/core/src/tools/handlers/mcp.rs:50-51`
 ```rust
 const MAX_AGENT_PLUGIN_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 1_000;
 const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
@@ -1004,7 +1043,7 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 这是 codex 在这一层上最重的一块设计。MCP 工具经既有的工具注册表进入，与其他 external handler 走同一条路：
 
-`codex-rs/core/src/tools/spec_plan.rs:151-165`
+`codex-rs/core/src/tools/spec_plan.rs:153-169`
 ```rust
     let registered_mcp_tools = session.services.mcp_handler_cache.append_mcp_tools(
         mcp,
@@ -1012,8 +1051,10 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
         apps_enabled,
         &mcp.config().mcp_server_catalog,
         model_info.supports_search_tool,
+        session.services.mcp_manager.shared_definitions(),
         &mut registry,
     );
+    let search = step_store.get::<crate::model_search::ModelSearch>();
     apply_mcp_tool_exposure_policy(
         turn_context,
         model_info,
@@ -1027,7 +1068,7 @@ const MAX_MCP_NAMESPACE_DESCRIPTION_BYTES: usize = 512 * 1024;
 
 暴露策略本身落在别处：
 
-`codex-rs/core/src/mcp_tool_exposure.rs:154-156`
+`codex-rs/core/src/mcp_tool_exposure.rs:233-235`
 ```rust
 if registry.register_external_with_exposure(handler, tool_exposure) && fits_agent_budget {
     registered_tools.insert(tool_name);
@@ -1038,11 +1079,13 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 审批不是复用某个通用动作，而是**为 MCP 建了一个专用动作类型**：
 
-`codex-rs/core/src/mcp_tool_call.rs:1550-1577`
+`codex-rs/core/src/mcp_tool_call.rs:1713-1743`
 ```rust
     let action = ApprovalAction::McpToolCall {
         id: call_id.to_string(),
+        environment_id: environment_id.to_owned(),
         server: invocation.server.clone(),
+        server_key: server_key.to_owned(),
         tool_name: invocation.tool.clone(),
         arguments: invocation.arguments.clone(),
         connector_id: metadata.connector_id.clone(),
@@ -1067,6 +1110,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
         approval_mode: policy.mode,
         allow_session_remember: session_approval_key.is_some(),
         allow_persistent_approval: persistent_approval_key.is_some(),
+        prompt_permissions: capture_environment_permissions(permission_source),
     };
 ```
 
@@ -1083,7 +1127,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 动作随后走与内置工具同一个审批入口，但**返回值多了一维**：
 
-`codex-rs/core/src/mcp_tool_call.rs:1588-1596`
+`codex-rs/core/src/mcp_tool_call.rs:1805-1814`
 ```rust
     let approval = sess.request_approval(action, approval_context).await;
     Some(McpToolApproval {
@@ -1093,6 +1137,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
             Err(ToolError::Codex(_)) => ReviewDecision::Abort,
         },
         source: approval.source,
+        cancellation_reason: approval.cancellation_reason,
     })
 ```
 
@@ -1100,7 +1145,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 自动放行条件也被显式建模，而不是散落在各处：
 
-`codex-rs/codex-mcp/src/mcp/mod.rs:91-110`
+`codex-rs/codex-mcp/src/mcp/mod.rs:95-114`
 ```rust
 pub fn mcp_permission_prompt_is_auto_approved(
     approval_policy: AskForApproval,
@@ -1128,13 +1173,17 @@ pub fn mcp_permission_prompt_is_auto_approved(
 
 反向情形被单独处理，且拒绝语写得很直白：
 
-`codex-rs/core/src/mcp_tool_call.rs:1626-1629`
+`codex-rs/core/src/mcp_tool_call.rs:1846-1854`
 ```rust
-if *approval_policy == AskForApproval::Never {
-    return ReviewDecision::denied(
-        "MCP tool call requires approval, but approval policy is never",
-    );
-}
+    if *approval_policy == AskForApproval::Never {
+        return ApprovalResolution {
+            decision: ReviewDecision::denied(
+                "MCP tool call requires approval, but approval policy is never",
+            ),
+            source: ApprovalResolutionSource::User,
+            cancellation_reason: None,
+        };
+    }
 ```
 
 即：**策略说「从不询问」但这次调用非问不可时，答案是拒绝而不是放行**。这是「fail closed」在外部能力上的具体形态，也是本章最重要的一条可复用规则。
@@ -1143,14 +1192,14 @@ if *approval_policy == AskForApproval::Never {
 
 存储位置分三级：keyring 优先，失败回退 `CODEX_HOME/.credentials.json`，且存储模式可配（Auto / Keyring / File）：
 
-`codex-rs/rmcp-client/src/oauth.rs:100`
+`codex-rs/rmcp-client/src/oauth.rs:103`
 ```rust
 const KEYRING_SERVICE: &str = "Codex MCP Credentials";
 ```
 
 持久化结构里有一项不是 OAuth 标准字段——`issuer`，它用来防「授权服务器混淆」：
 
-`codex-rs/rmcp-client/src/oauth.rs:105-115`
+`codex-rs/rmcp-client/src/oauth.rs:107-117`
 ```rust
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct StoredOAuthTokens {
@@ -1167,7 +1216,7 @@ pub struct StoredOAuthTokens {
 
 三种存储模式对应三条不同代码路径，其中 `Keyring` 模式带「清理旧文件」的动作——**迁移是显式的一次写入而非后台静默**：
 
-`codex-rs/rmcp-client/src/oauth.rs:483-509`
+`codex-rs/rmcp-client/src/oauth.rs:501-527`
 ```rust
     match store_mode {
         OAuthCredentialsStoreMode::Auto => save_oauth_tokens_with_keyring_with_fallback_to_file(
@@ -1219,7 +1268,7 @@ pub struct StoredOAuthTokens {
 
 认证方式是一个三值枚举，每个变体的注释都写明了失败回退规则：
 
-`codex-rs/config/src/mcp_types.rs:189-204`
+`codex-rs/config/src/mcp_types.rs:198-213`
 ```rust
 pub enum McpServerAuth {
     /// Use stored MCP OAuth credentials when available. Starting an OAuth login
@@ -1241,7 +1290,7 @@ pub enum McpServerAuth {
 
 第三个变体是 EMA（Enterprise Managed Auth），它被单独建模成一个配置结构：
 
-`codex-rs/config/src/mcp_ema.rs:34-39`
+`codex-rs/config/src/mcp_ema.rs:59-64`
 ```rust
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq, JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -1285,13 +1334,16 @@ const MAX_HELPER_OUTPUT_BYTES: usize = 64 * 1024;
 
 连接集的内部状态被集中在一个结构里，其中 `required_servers` 与 `disabled_servers` 是两条相反的名单：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:228-239`
+`codex-rs/codex-mcp/src/connection_manager.rs:369-383`
 ```rust
+/// A published view over a set of running MCP server connections.
 pub(crate) struct McpConnectionSet {
-    servers: HashMap<String, McpServerView>,
+    config: Option<Arc<crate::McpConfig>>,
+    network_policy_metadata: Option<Arc<dyn NetworkPolicyMetadataProvider>>,
+    servers: HashMap<McpServerKey, McpServerView>,
     pub(crate) event_stream_connection: Option<Arc<EventStreamConnectionSettings>>,
     disabled_servers: Vec<String>,
-    required_servers: Vec<String>,
+    required_servers: Vec<McpServerKey>,
     optional_startup_deadline: OnceLock<tokio::time::Instant>,
     tool_plugin_context: Arc<ToolPluginContext>,
     prefix_mcp_tool_names: bool,
@@ -1305,54 +1357,51 @@ pub(crate) struct McpConnectionSet {
 
 启动结果被汇总成一个三分清单（就绪 / 取消 / 失败）并以事件发出，**失败不是错误而是事件**：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:835-852`
+`codex-rs/codex-mcp/src/connection_manager.rs:1246-1260`
 ```rust
-for (server_name, outcome) in outcomes {
-    match outcome {
-        Ok(_) => summary.ready.push(server_name),
-        Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
-        Err(StartupOutcomeError::Failed { error, .. }) => {
-            summary.failed.push(McpStartupFailure {
-                server: server_name,
-                error,
-            })
-        }
-    }
-}
-let _ = tx_event
-    .send(Event {
-        id: startup_submit_id,
-        msg: EventMsg::McpStartupComplete(summary),
-    })
-    .await;
+                for (key, outcome) in outcomes {
+                    let Some(server_name) = legacy_name(key) else {
+                        continue;
+                    };
+                    match outcome {
+                        Ok(_) => summary.ready.push(server_name),
+                        Err(StartupOutcomeError::Cancelled) => summary.cancelled.push(server_name),
+                        Err(StartupOutcomeError::Failed { error, .. }) => {
+                            summary.failed.push(McpStartupFailure {
+                                server: server_name,
+                                error,
+                            })
+                        }
+                    }
+                }
 ```
 
 只有显式声明 `required` 的 server 会把失败升级为阻断：
 
-`codex-rs/codex-mcp/src/connection_manager/required.rs:17`
+`codex-rs/codex-mcp/src/connection_manager/required.rs:17-53`
 ```rust
-pub(crate) async fn validate_required_servers(&self) -> Result<()> {
-    let failures = async {
-        let mut failures = Vec::new();
-        for server_name in &self.required_servers {
-            let Some(view) = self.servers.get(server_name) else {
-                failures.push(McpStartupFailure {
-                    server: server_name.clone(),
-                    error: format!("required MCP server `{server_name}` was not initialized"),
-                });
-                continue;
-            };
-            ...
+    pub(crate) async fn validate_required_servers(&self) -> Result<()> {
+        let failures = async {
+            self.record_startup_readiness("required_startup", &[], &HashSet::new());
+            let mut failures = Vec::new();
+            for server_name in &self.required_servers {
+                let Some(view) = self.servers.get(server_name) else {
+                    failures.push(McpStartupFailure {
+                        server: server_name.name().to_owned(),
+                        error: format!("required MCP server `{server_name}` was not initialized"),
+                    });
+                    continue;
+...
+            }
+            failures
         }
-        failures
-    }
-    ...
-}
+...
+        }
 ```
 
 失败之后还会**自动排一次后台重连**，而不是等用户手动操作：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:787-789`
+`codex-rs/codex-mcp/src/connection_manager.rs:1171-1173`
 ```rust
 if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
     async_managed_client.reconnect_failed_startup().await;
@@ -1361,7 +1410,7 @@ if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
 
 超时的两个默认值把「连接」与「调用」分开给：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:104-108`
+`codex-rs/codex-mcp/src/rmcp_client.rs:122-126`
 ```rust
 pub(crate) const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
@@ -1372,7 +1421,7 @@ const CODEX_APPS_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 退避公式带一个封顶的指数与五次封顶：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:285-290`
+`codex-rs/codex-mcp/src/rmcp_client.rs:266-271`
 ```rust
 fn codex_apps_reconnect_backoff(consecutive_failures: u32) -> Duration {
     let exponent = consecutive_failures.saturating_sub(1).min(5);
@@ -1405,10 +1454,10 @@ resources 侧的读取带并发与分页收集，且**支持 resource template**
 
 trace 传播是 codex 独有的一项：把当前 span 的 W3C trace context 写进请求 `_meta`，并在写入时**主动删掉可能不匹配的 tracestate**：
 
-`codex-rs/rmcp-client/src/trace_context.rs:18-28`
+`codex-rs/rmcp-client/src/trace_context.rs:65-78`
 ```rust
 pub(crate) fn with_current_trace(mut meta: Option<RequestMetaObject>) -> Option<RequestMetaObject> {
-    if let Some(trace) = codex_otel::current_span_w3c_trace_context() {
+    if let Some(trace) = current_w3c_trace_context() {
         let meta = meta.get_or_insert_default();
         if let Some(traceparent) = trace.traceparent {
             meta.set_traceparent(traceparent);
@@ -1435,7 +1484,7 @@ pub(crate) fn with_current_trace(mut meta: Option<RequestMetaObject>) -> Option<
 
 作用域枚举本身就是设计文档——它把「谁有权加一个 server」拆成了七档：
 
-`src/services/mcp/types.ts:10-19`
+`src/services/mcp/types.ts:10-20`
 ```ts
 export const ConfigScopeSchema = lazySchema(() =>
   z.enum([
@@ -1452,23 +1501,21 @@ export const ConfigScopeSchema = lazySchema(() =>
 
 三种磁盘来源的读法各不相同，其中最复杂的是 project：**从 CWD 逐级向上遍历父目录，每个目录读一份 `.mcp.json`，然后按「离 CWD 越近优先级越高」合并**：
 
-`src/services/mcp/config.ts:917`
+`src/services/mcp/config.ts:917-952`
 ```ts
-while (currentDir !== parse(currentDir).root) {
-  dirs.push(currentDir)
-  currentDir = dirname(currentDir)
-}
-
-// Process from root downward to CWD (so closer files have higher priority)
-for (const dir of dirs.reverse()) {
-  const mcpJsonPath = join(dir, '.mcp.json')
-
-  ...
-  if (config.mcpServers) {
-    // Merge servers, with files closer to CWD overriding parent configs
-    Object.assign(allServers, addScopeToServers(config.mcpServers, scope))
-  }
-}
+      while (currentDir !== parse(currentDir).root) {
+        dirs.push(currentDir)
+        currentDir = dirname(currentDir)
+      }
+      // Process from root downward to CWD (so closer files have higher priority)
+      for (const dir of dirs.reverse()) {
+        const mcpJsonPath = join(dir, '.mcp.json')
+...
+        if (config.mcpServers) {
+          // Merge servers, with files closer to CWD overriding parent configs
+          Object.assign(allServers, addScopeToServers(config.mcpServers, scope))
+        }
+        if (errors.length > 0) {
 ```
 
 user 与 local 各自读一处全局状态（`config.ts:963`、`:980`），enterprise 读一个固定路径（`config.ts:997`；路径函数见 `config.ts:62`）。
@@ -1479,7 +1526,7 @@ user 与 local 各自读一处全局状态（`config.ts:963`、`:980`），enter
 2. 整体合并构建时：plugin < user < project（仅已批准） < local（`config.ts:1231-1238`）；
 3. **企业配置存在时，其余全部忽略**：
 
-`src/services/mcp/config.ts:1084-1098`
+`src/services/mcp/config.ts:1082-1096`
 ```ts
 // If an enterprise mcp config exists, do not use any others; this has exclusive control over all MCP servers
 // (enterprise customers often do not want their users to be able to add their own MCP servers).
@@ -1677,27 +1724,26 @@ const MAX_MCP_DESCRIPTION_LENGTH = 2048
 
 skip-prefix 是第三种碰撞策略：
 
-`src/services/mcp/client.ts:1761`
+`src/services/mcp/client.ts:1760-1989`
 ```ts
-// Check if we should skip the mcp__ prefix for SDK MCP servers
-const skipPrefix =
-  client.config.type === 'sdk' &&
-  isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
-
-// Convert MCP tools to our Tool format
-return toolsToProcess
-  .map((tool): Tool => {
-    const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
-    return {
-      ...MCPTool,
-      // In skip-prefix mode, use the original name for model invocation so MCP tools
-      // can override builtins by name. mcpInfo is used for permission checking.
-      name: skipPrefix ? tool.name : fullyQualifiedName,
-      mcpInfo: { serverName: client.name, toolName: tool.name },
-      isMcp: true,
-      ...
-    }
-  })
+      // Check if we should skip the mcp__ prefix for SDK MCP servers
+      const skipPrefix =
+        client.config.type === 'sdk' &&
+        isEnvTruthy(process.env.CLAUDE_AGENT_SDK_MCP_NO_PREFIX)
+      // Convert MCP tools to our Tool format
+      return toolsToProcess
+        .map((tool): Tool => {
+          const fullyQualifiedName = buildMcpToolName(client.name, tool.name)
+          return {
+            ...MCPTool,
+            // In skip-prefix mode, use the original name for model invocation so MCP tools
+            // can override builtins by name. mcpInfo is used for permission checking.
+            name: skipPrefix ? tool.name : fullyQualifiedName,
+            mcpInfo: { serverName: client.name, toolName: tool.name },
+            isMcp: true,
+...
+          }
+        })
 ```
 
 触发条件是两个条件同时成立（type 为 `sdk` **且**环境变量为真），因此**默认路径永远是加前缀的**。skip-prefix 的意义是让 SDK server 能按原名顶替内建工具——`mcpInfo` 字段就是为这件事准备的：模型看到的是裸名，权限匹配时还原成全限定名。第 5 节的判定链会用到这一点。
@@ -1708,7 +1754,7 @@ return toolsToProcess
 
 MCP 工具自己的 `checkPermissions` 不做判定，只返回 `passthrough` 并附一条「建议加规则」的建议（`client.ts:1814-1832`，建议的规则名是全限定名）。真正的判定发生在通用规则匹配函数里，而 MCP 的全部特殊性都集中在这一个函数：
 
-`src/utils/permissions/permissions.ts:251-272`
+`src/utils/permissions/permissions.ts:247-268`
 ```ts
 // MCP tools are matched by their fully qualified mcp__server__tool name. In
 // skip-prefix mode (CLAUDE_AGENT_SDK_MCP_NO_PREFIX), MCP tools have unprefixed
@@ -1759,7 +1805,7 @@ token 的键不是 server 名，而是「server 名 + 配置内容哈希」的�
 
 `src/services/mcp/auth.ts:325-341` 的 `getServerKey` 取 `serverName` 拼上一段 16 位哈希。存储层是一个平台分支的抽象：macOS 走 keychain，其它平台**直接明文**并只做一个权限位：
 
-`src/utils/secureStorage/plainTextStorage.ts:57-64`
+`src/utils/secureStorage/plainTextStorage.ts:57-65`
 ```ts
 writeFileSync_DEPRECATED(storagePath, jsonStringify(data), {
   encoding: 'utf8',
@@ -1803,11 +1849,19 @@ const MAX_BACKOFF_MS = 30000
 
 退避公式（`:447-450`）与 dsh / codex 同形。**唯一但关键的限制是重连只覆盖非 stdio、非 sdk 的传输**：
 
-`src/services/mcp/useManageMCPConnections.ts:356`
+`src/services/mcp/useManageMCPConnections.ts:353-376`
 ```ts
-if (configType !== 'stdio' && configType !== 'sdk') {
-  ...
-}
+
+            // Handle automatic reconnection for remote transports
+            // Skip stdio (local process) and sdk (internal) - they don't support reconnection
+            if (configType !== 'stdio' && configType !== 'sdk') {
+...
+              const reconnectWithBackoff = async () => {
+                for (
+                  let attempt = 1;
+                  attempt <= MAX_RECONNECT_ATTEMPTS;
+                  attempt++
+                ) {
 ```
 
 stdio 与 sdk 分支不做自动重连，直接置 `failed`（`:466`），靠用户在菜单里点 Reconnect。理由是这两类连接的失败通常意味着**子进程已经没了或本地环境变了**，盲目重连只会重复失败（dsh 的 `negotiation-lifecycle.spec.ts:132` 有一条同旨的测试：探测失败且无法确认传输清理时就停止重试）。
@@ -1856,7 +1910,7 @@ server 日志通知也没有处理器：`notifications/message` 在 `src/service
 
 ## 五、横向对比矩阵
 
-> **当前基线说明（2026-10-27）**：本矩阵的 pi 列已按 `v1.4.0` 重标：MCP 客户端在 v1.4.0 下沉为独立包 `packages/mcp/`（client / oauth / transports），扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
+> **当前基线说明（2026-11-12）**：本矩阵的 pi 列已按 `v1.5.2` 重标：MCP 客户端在 `v1.4.0` 下沉为独立包 `packages/mcp/`（client / oauth / transports），`v1.5.2` 又在 `packages/mcp/src/output-limit.ts` 增加了一层 20 KiB 的模型可见输出上限；扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
 
 一次外部工具调用要连穿四层，其中只有「注册」与「判定」两处是本层与其他层的接口。把这四个接口画出来，本章与其他章的接缝就清楚了。
 
@@ -2113,56 +2167,56 @@ flowchart TD
 | `packages/durable/package.json` | durable runtime、Code Mode、工具发现与存储入口 | 当前 `v1.2.0` |
 | `packages/durable/src/index.ts` | `Harness`、`LiveDoc`、`TaskGraph` 等公开运行时对象 | 当前 `v1.2.0` |
 | `packages/coding-agent/src/core/extensions/types.ts` | 扩展 API：`registerTool`、`exec`、事件、无重新校验的注释 | 2,096 |
-| `packages/coding-agent/src/core/extensions/loader.ts` | 扩展加载（jiti）与 `registerTool` 运行时校验 | 812 |
+| `packages/coding-agent/src/core/extensions/loader.ts` | 扩展加载（jiti）与 `registerTool` 运行时校验 | 888 |
 | `packages/coding-agent/src/core/extensions/runner.ts` | 扩展运行时、工具汇聚（首次注册者胜） | 1,004 |
-| `packages/coding-agent/src/core/tools/index.ts` | 内建工具名联合（8 项，外部工具不进此联合） | 219 |
-| `packages/coding-agent/src/core/exec.ts` | `execCommand`（一次性子进程，无流式 stdin） | 156 |
+| `packages/coding-agent/src/core/tools/index.ts` | 内建工具名联合（8 项，外部工具不进此联合） | 224 |
+| `packages/coding-agent/src/core/exec.ts` | `execCommand`（一次性子进程，无流式 stdin） | 158 |
 | `packages/coding-agent/src/core/package-manager.ts` | npm / git 包安装与资源收集 | 2,120 |
-| `packages/coding-agent/src/core/pi-manifest.ts` | 读取 `package.json` 的 `pi` 字段 | 46 |
+| `packages/coding-agent/src/core/pi-manifest.ts` | 读取 `package.json` 的 `pi` 字段 | 42 |
 | `packages/coding-agent/src/core/settings-manager.ts` | `packages` / `extensions` 设置项（无 `mcp` 字段） | 1,530 |
 
 ### deepseek-harness
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
-| `packages/mcp/mcp-client/src/index.ts` | 插件入口 `apply`、配置 schema、命名空间保留 | 204 |
+| `packages/mcp/mcp-client/src/index.ts` | 插件入口 `apply`、配置 schema、命名空间保留 | 263 |
 | `packages/mcp/mcp-client/src/transport.ts` | 两种传输工厂与环境擦洗复用 | 46 |
-| `packages/mcp/mcp-client/src/connection.ts` | 连接代数、重连预算、资源请求路由 | 410 |
-| `packages/mcp/mcp-client/src/tools.ts` | 两阶段工具同步、命名与哈希、整代回滚 | 553 |
-| `packages/mcp/mcp-client/README.md` | 配置示例与能力边界声明 | 231 |
-| `packages/mcp/mcp-resources/src/index.ts` | `McpResourceRuntime` 作用域服务 | 130 |
-| `packages/mcp/mcp-resources/src/tools.ts` | 三个共享资源工具 | 66 |
-| `packages/mcp/mcp-client/tests/negotiation-lifecycle.spec.ts` | 协商生命周期（探测 / 收割 / 重试） | 150 |
-| `packages/mcp/mcp-client/tests/reconnect.spec.ts` | 重连预算、稳定窗、崩溃循环 | 617 |
-| `packages/mcp/mcp-client/tests/tool-definition.spec.ts` | 外部工具与内建工具的契约一致性 | 66 |
-| `packages/subprocess/subprocess/src/index.ts` | `SENSITIVE_ENV_PATTERN` 与 `scrubbedParentEnv` | 178 |
-| `packages/acp/acp/src/mcp.ts` | ACP `mcpServers` 到插件配置的翻译 | 66 |
+| `packages/mcp/mcp-client/src/connection.ts` | 连接代数、重连预算、资源请求路由 | 406 |
+| `packages/mcp/mcp-client/src/tools.ts` | 两阶段工具同步、命名与哈希、整代回滚 | 537 |
+| `packages/mcp/mcp-client/README.md` | 配置示例与能力边界声明 | 252 |
+| `packages/mcp/mcp-resources/src/index.ts` | `McpResourceRuntime` 作用域服务 | 131 |
+| `packages/mcp/mcp-resources/src/tools.ts` | 三个共享资源工具 | 68 |
+| `packages/mcp/mcp-client/tests/negotiation-lifecycle.spec.ts` | 协商生命周期（探测 / 收割 / 重试） | 158 |
+| `packages/mcp/mcp-client/tests/reconnect.spec.ts` | 重连预算、稳定窗、崩溃循环 | 796 |
+| `packages/mcp/mcp-client/tests/tool-definition.spec.ts` | 外部工具与内建工具的契约一致性 | 70 |
+| `packages/subprocess/subprocess/src/index.ts` | `SENSITIVE_ENV_PATTERN` 与 `scrubbedParentEnv` | 172 |
+| `packages/acp/acp/src/mcp.ts` | ACP `mcpServers` 到插件配置的翻译 | 143 |
 
 ### codex
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
 | `codex-rs/config/src/config_toml.rs` | `[mcp_servers]` 与两个企业字段 | 1,245 |
-| `codex-rs/config/src/mcp_types.rs` | `McpServerConfig` / 传输枚举 / 认证三值 | 812 |
-| `codex-rs/config/src/mcp_ema.rs` | 企业托管认证配置 | 42 |
-| `codex-rs/config/src/config_layer_source.rs` | 配置层来源与优先级 | 188 |
+| `codex-rs/config/src/mcp_types.rs` | `McpServerConfig` / 传输枚举 / 认证三值 | 720 |
+| `codex-rs/config/src/mcp_ema.rs` | 企业托管认证配置 | 424 |
+| `codex-rs/config/src/config_layer_source.rs` | 配置层来源与优先级 | 109 |
 | `codex-rs/rmcp-client/src/oauth.rs` | token 存取、三种存储模式、刷新 | 2,024 |
-| `codex-rs/rmcp-client/src/protocol_mode.rs` | 协议版本两态开关 | 74 |
-| `codex-rs/rmcp-client/src/stdio_server_launcher.rs` | stdio 子进程启动（独立进程组） | 921 |
-| `codex-rs/rmcp-client/src/local_stdio_transport.rs` | 两种分帧器的选择 | 246 |
-| `codex-rs/rmcp-client/src/bounded_stdio_transport.rs` | 8 MiB 行上限的有界分帧 | 412 |
-| `codex-rs/rmcp-client/src/http_headers.rs` | 本地命令产出 header（10 s / 64 KiB） | 312 |
-| `codex-rs/rmcp-client/src/trace_context.rs` | W3C trace 注入 `_meta` | 96 |
-| `codex-rs/rmcp-client/src/utils.rs` | 环境白名单与默认 header | 214 |
-| `codex-rs/codex-mcp/src/catalog.rs` | 5 类来源与优先级仲裁 | 812 |
-| `codex-rs/codex-mcp/src/tools.rs` | 工具信息、命名规范化、哈希 | 468 |
-| `codex-rs/codex-mcp/src/pagination.rs` | 分页四重上限 | 96 |
+| `codex-rs/rmcp-client/src/protocol_mode.rs` | 协议版本两态开关 | 130 |
+| `codex-rs/rmcp-client/src/stdio_server_launcher.rs` | stdio 子进程启动（独立进程组） | 1205 |
+| `codex-rs/rmcp-client/src/local_stdio_transport.rs` | 两种分帧器的选择 | 294 |
+| `codex-rs/rmcp-client/src/bounded_stdio_transport.rs` | 8 MiB 行上限的有界分帧 | 149 |
+| `codex-rs/rmcp-client/src/http_headers.rs` | 本地命令产出 header（10 s / 64 KiB） | 570 |
+| `codex-rs/rmcp-client/src/trace_context.rs` | W3C trace 注入 `_meta` | 158 |
+| `codex-rs/rmcp-client/src/utils.rs` | 环境白名单与默认 header | 357 |
+| `codex-rs/codex-mcp/src/catalog.rs` | 5 类来源与优先级仲裁 | 902 |
+| `codex-rs/codex-mcp/src/tools.rs` | 工具信息、命名规范化、哈希 | 356 |
+| `codex-rs/codex-mcp/src/pagination.rs` | 分页四重上限 | 84 |
 | `codex-rs/codex-mcp/src/connection_manager.rs` | 连接集与启动结果汇总 | 1,024 |
 | `codex-rs/codex-mcp/src/rmcp_client.rs` | 初始化参数、超时、重连退避 | 1,514 |
-| `codex-rs/codex-mcp/src/mcp/mod.rs` | 内置 server 常量、命名前缀、自动放行判定 | 742 |
-| `codex-rs/codex-mcp/src/elicitation.rs` | elicitation 策略三选一 | 214 |
+| `codex-rs/codex-mcp/src/mcp/mod.rs` | 内置 server 常量、命名前缀、自动放行判定 | 952 |
+| `codex-rs/codex-mcp/src/elicitation.rs` | elicitation 策略三选一 | 734 |
 | `codex-rs/core/src/mcp_tool_call.rs` | 专用审批动作与 fail-closed 拒绝 | 1,882 |
-| `codex-rs/core/src/mcp_tool_exposure.rs` | 工具暴露策略与预算判定 | 214 |
+| `codex-rs/core/src/mcp_tool_exposure.rs` | 工具暴露策略与预算判定 | 280 |
 | `codex-rs/core/src/tools/spec_plan.rs` | 工具表装配与 MCP 工具注册 | 1,246 |
 
 ### Claude-Code
@@ -2174,18 +2228,18 @@ flowchart TD
 | `src/services/mcp/auth.ts` | OAuth 流程、token 键、XAA 接线 | 2,465 |
 | `src/services/mcp/xaa.ts` | 跨应用授权（两段 token 交换） | 511 |
 | `src/services/mcp/xaaIdpLogin.ts` | 一次浏览器弹窗与 IdP 级缓存 | 487 |
-| `src/services/mcp/types.ts` | 作用域 / 传输 / 连接状态类型 | 259 |
+| `src/services/mcp/types.ts` | 作用域 / 传输 / 连接状态类型 | 258 |
 | `src/services/mcp/mcpStringUtils.ts` | 名字拼接与逆向解析（含已知缺陷注释） | 106 |
 | `src/services/mcp/useManageMCPConnections.ts` | 连接状态机、重连、列表热更新 | 1,141 |
-| `src/services/mcp/elicitationHandler.ts` | elicitation 的 hooks 与队列链路 | 314 |
-| `src/services/mcp/officialRegistry.ts` | 官方 URL 白名单（fail-closed，只供遥测） | 78 |
+| `src/services/mcp/elicitationHandler.ts` | elicitation 的 hooks 与队列链路 | 313 |
+| `src/services/mcp/officialRegistry.ts` | 官方 URL 白名单（fail-closed，只供遥测） | 72 |
 | `src/services/mcp/oauthPort.ts` | 回调端口选择（平台分支） | 78 |
-| `src/services/mcp/channelPermissions.ts` | 权限弹窗的 channel 外发 | 241 |
+| `src/services/mcp/channelPermissions.ts` | 权限弹窗的 channel 外发 | 240 |
 | `src/services/mcp/headersHelper.ts` | 本地命令产出 header（含信任检查） | 138 |
-| `src/services/mcp/utils.ts` | 项目 server 批准状态等工具函数 | 576 |
+| `src/services/mcp/utils.ts` | 项目 server 批准状态等工具函数 | 575 |
 | `src/utils/permissions/permissions.ts` | 规则匹配（MCP 的三级匹配在此） | 1,424 |
-| `src/utils/secureStorage/plainTextStorage.ts` | 明文凭据落盘与 0600 权限位 | 96 |
-| `src/components/mcp/MCPListPanel.tsx` | 按作用域分组的 server 管理面板 | 468 |
+| `src/utils/secureStorage/plainTextStorage.ts` | 明文凭据落盘与 0600 权限位 | 84 |
+| `src/components/mcp/MCPListPanel.tsx` | 按作用域分组的 server 管理面板 | 503 |
 | `src/components/mcp/ElicitationDialog.tsx` | elicitation 三态对话框 | 1,148 |
 
 *本章为外围区第一篇；上一站是启动区的第 2 章（提示词与上下文注入），下一站是第 14 章（长时任务与后台作业）——即「循环结束之后还在跑」的那一层。*
@@ -2196,7 +2250,7 @@ flowchart TD
 
 | 项目 | 本章登记结论 |
 |---|---|
-| pi | [mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [mcp-disable-flag]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-disable-flag) · [mcp-runtime]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-runtime) · [mcp-resources]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-resources) · [mcp-tool-projection]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-tool-projection) |
+| pi | [mcp-integration]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-integration) · [mcp-disable-flag]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-disable-flag) · [mcp-runtime]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-runtime) · [mcp-resources]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-resources) · [mcp-tool-projection]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-tool-projection) · [mcp-output-limit]({{ site.baseurl }}/appendix/claims/#claim.pi.mcp-output-limit) |
 | dsh | [mcp-client]({{ site.baseurl }}/appendix/claims/#claim.dsh.mcp-client) · [acp-interface]({{ site.baseurl }}/appendix/claims/#claim.dsh.acp-interface) |
 | codex | [mcp-v2]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-v2) · [mcp-resource-handler]({{ site.baseurl }}/appendix/claims/#claim.codex.mcp-resource-handler) |
 | Claude Code | [artifact-baseline]({{ site.baseurl }}/appendix/claims/#claim.claude-code.artifact-baseline) |

@@ -4,7 +4,7 @@ title: "第 3 章 · Agent 主循环"
 nav_order: 1
 parent: "第二部分 · 内核区"
 permalink: /ch/03/
-reviewed_at: 2026-10-27
+reviewed_at: 2026-11-12
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,7 @@ review_priority: P1
 
 # 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
-> **当前基线补充（2026-10-27）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
+> **当前基线补充（2026-11-12）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
 
 **本章回答什么** —— 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。
 
@@ -32,7 +32,7 @@ review_priority: P1
 > - **codex** —— `codex-rs/core/src/session/turn.rs`（Rust，async 采样循环 + 内建压缩）
 > - **Claude-Code** —— `src/query.ts` + `src/QueryEngine.ts`（TypeScript，async 生成器 + 显式 `next: State`）
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.322` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -703,7 +703,7 @@ if (streamingFallbackOccured) {
 | `packages/core/agent-loop/src/agent.ts` | 275-281 / 558-561 / 476-486 / 342 | 四个钩子（pre-step / request / request-error / turn-stopping） |
 | `packages/core/agent-loop/src/agent.ts` | 331-336 / 512 | max-tokens 粘性 |
 | `packages/core/agent-loop/src/agent.ts` | 516-519 | 工具调度调用点 |
-| `packages/core/agent-loop/src/tool-calls.ts` | 60 / 89-94 / 122 / 147 / 199-243 | 工具调度（见 第 4 章） |
+| `packages/core/tools/src/batch.ts` | 50 / 76-84 / 117 / 139 / 186-212 | 工具调度（见 第 4 章） |
 
 ### codex
 

@@ -4,7 +4,7 @@ title: "第 11 章 · 模型调用与 Provider"
 nav_order: 9
 parent: "第二部分 · 内核区"
 permalink: /ch/11/
-reviewed_at: 2026-10-27
+reviewed_at: 2026-11-12
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,7 @@ review_priority: P1
 
 # 第 11 章：模型调用与 Provider 抽象 —— 把 N 种线协议归一成一套事件词汇表
 
-> **当前基线补充（2026-10-27）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
+> **当前基线补充（2026-11-12）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
 
 **本章回答什么** —— 前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。
 
@@ -36,7 +36,7 @@ review_priority: P1
 >
 > **门控提示**：CC 在本层大量能力由 `feature()` 编译开关门控，逐文件清单见附录。
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.322` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -1322,63 +1322,63 @@ return expiresWithBuffer >= expiresAt
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
-| `packages/ai/src/types.ts` | 全部核心类型：`Api` / `ProviderId` / `Model` / `Message` / `Usage` / `AssistantMessageEvent` | 1024 |
-| `packages/ai/src/models.ts` | `Provider` / `Models` 接口、`applyAuth`（凭据 + baseUrl 注入）、`calculateCost` | 966 |
-| `packages/ai/src/providers/all.ts` | 41 个内置 provider 注册与 `builtinModels()` | 157 |
-| `packages/ai/src/models.generated.ts` | 生成式 provider → 模型聚合表 | 130 |
-| `packages/ai/src/api/anthropic-messages.ts` | Anthropic 流适配、块事件归一、usage / cost | 1520 |
-| `packages/ai/src/api/openai-completions.ts` | OpenAI completions 适配、`parseChunkUsage`、`detectCompat` | 1726 |
-| `packages/ai/src/api/lazy.ts` | `lazyStream()` / `lazyApi()`：同步返回流、setup 失败降级为 error 事件 | 98 |
-| `packages/ai/src/utils/event-stream.ts` | `AssistantMessageEventStream` 异步事件队列 | 111 |
-| `packages/ai/src/utils/provider-env.ts` | provider 级 env 覆盖 + Bun 沙箱 `/proc/self/environ` 兜底 | 53 |
-| `packages/ai/src/utils/retry.ts` | 助手轮级重试、可重试分类、退避 | 243 |
-| `packages/ai/src/utils/provider-retry.ts` | 请求级重试与 `retry-after` 解析 | 126 |
-| `packages/ai/src/utils/overflow.ts` | 跨 20+ provider 的上下文溢出检测 | 188 |
-| `packages/ai/src/auth/resolve.ts` | 凭据解析与 OAuth 双检锁刷新 | 206 |
-| `packages/durable/src/harness/generation.ts` | 响应分类落库：溢出压缩（`:542-546`）、重试调度（`:559-576`）、deferred（`:511-518`）、usage 行 | 774 |
-| `packages/durable/src/harness/generation.ts` | 生成准备（`:133-176`）与 `models.streamSimple` 调用（`:484`） | 774 |
-| `packages/coding-agent/src/core/provider-composer.ts` | models.json / 扩展 provider 组合、apiKey / baseUrl / headers 三层覆盖 | 611 |
+| `packages/ai/src/types.ts` | 全部核心类型：`Api` / `ProviderId` / `Model` / `Message` / `Usage` / `AssistantMessageEvent` | 925 |
+| `packages/ai/src/models.ts` | `Provider` / `Models` 接口、`applyAuth`（凭据 + baseUrl 注入）、`calculateCost` | 1343 |
+| `packages/ai/src/providers/all.ts` | 41 个内置 provider 注册与 `builtinModels()` | 192 |
+| `packages/ai/src/models.generated.ts` | 生成式 provider → 模型聚合表 | 316 |
+| `packages/ai/src/api/anthropic-messages.ts` | Anthropic 流适配、块事件归一、usage / cost | 1966 |
+| `packages/ai/src/api/openai-completions.ts` | OpenAI completions 适配、`parseChunkUsage`、`detectCompat` | 1740 |
+| `packages/ai/src/api/lazy.ts` | `lazyStream()` / `lazyApi()`：同步返回流、setup 失败降级为 error 事件 | 140 |
+| `packages/ai/src/utils/event-stream.ts` | `AssistantMessageEventStream` 异步事件队列 | 135 |
+| `packages/ai/src/utils/provider-env.ts` | provider 级 env 覆盖 + Bun 沙箱 `/proc/self/environ` 兜底 | 52 |
+| `packages/ai/src/utils/retry.ts` | 助手轮级重试、可重试分类、退避 | 278 |
+| `packages/ai/src/utils/provider-retry.ts` | 请求级重试与 `retry-after` 解析 | 128 |
+| `packages/ai/src/utils/overflow.ts` | 跨 20+ provider 的上下文溢出检测 | 195 |
+| `packages/ai/src/auth/resolve.ts` | 凭据解析与 OAuth 双检锁刷新 | 217 |
+| `packages/durable/src/harness/generation.ts` | 响应分类落库：溢出压缩（`:542-546`）、重试调度（`:559-576`）、deferred（`:511-518`）、usage 行 | 1197 |
+| `packages/durable/src/harness/generation.ts` | 生成准备（`:133-176`）与 `models.streamSimple` 调用（`:484`） | 1197 |
+| `packages/coding-agent/src/core/provider-composer.ts` | models.json / 扩展 provider 组合、apiKey / baseUrl / headers 三层覆盖 | 745 |
 
 ### deepseek-harness
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
-| `packages/llm/llm/src/types.ts` | `StreamChunk` / 块 / 终止原因 / `GenerateOptions` 契约 | 526 |
-| `packages/llm/llm/src/index.ts` | `LlmRuntime` 注册表 + 流式边界 + `LlmAdapter` | 1153 |
+| `packages/llm/llm/src/types.ts` | `StreamChunk` / 块 / 终止原因 / `GenerateOptions` 契约 | 606 |
+| `packages/llm/llm/src/index.ts` | `LlmRuntime` 注册表 + 流式边界 + `LlmAdapter` | 1237 |
 | `packages/llm/llm/src/message.ts` | 不可变消息构造与角色联合 | 307 |
 | `packages/llm/llm/src/assembler.ts` | `BlockAssembler`：chunk → block | 208 |
-| `packages/llm/llm/src/retry-policy.ts` | provider 级重试策略 schema 与解析 | 195 |
-| `packages/llm/llm-deepseek/src/adapter.ts` | 直连 Messages 请求生命周期 | 144 |
-| `packages/llm/llm-pi-ai/src/adapter.ts` | pi-ai 适配器快照与分派 | 425 |
-| `packages/llm/llm-pi-ai/src/stream.ts` | pi-ai 事件 → `StreamChunk` 归一 | 234 |
-| `packages/llm/llm-pi-ai/src/provider.ts` | 协议表与 provider 构造 | 192 |
-| `packages/llm/llm-pi-ai/src/context.ts` | 历史 → pi-ai `Context` 转换 | 339 |
-| `packages/llm/deepseek-llm-api-extensions/src/index.ts` | 顶层请求字段注册表 | 132 |
-| `packages/llm/llm-retry/src/index.ts` | `agent/request-error` 重试执行器 | 259 |
-| `packages/llm/token-meter/src/index.ts` | `TokenMeter` 回放测量服务 | 342 |
-| `packages/credentials/credentials-local/src/index.ts` | 分层凭据解析与环境优先级 | 918 |
-| `packages/core/agent-loop/src/agent.ts` | 主循环：`prepareRequest` / `buildRequest` / 消费流 | 647 |
+| `packages/llm/llm/src/retry-policy.ts` | provider 级重试策略 schema 与解析 | 201 |
+| `packages/llm/llm-deepseek/src/adapter.ts` | 直连 Messages 请求生命周期 | 182 |
+| `packages/llm/llm-pi-ai/src/adapter.ts` | pi-ai 适配器快照与分派 | 515 |
+| `packages/llm/llm-pi-ai/src/stream.ts` | pi-ai 事件 → `StreamChunk` 归一 | 254 |
+| `packages/llm/llm-pi-ai/src/provider.ts` | 协议表与 provider 构造 | 193 |
+| `packages/llm/llm-pi-ai/src/context.ts` | 历史 → pi-ai `Context` 转换 | 411 |
+| `packages/llm/deepseek-llm-api-extensions/src/index.ts` | 顶层请求字段注册表 | 144 |
+| `packages/llm/llm-retry/src/index.ts` | `agent/request-error` 重试执行器 | 257 |
+| `packages/llm/token-meter/src/index.ts` | `TokenMeter` 回放测量服务 | 296 |
+| `packages/credentials/credentials-local/src/index.ts` | 分层凭据解析与环境优先级 | 930 |
+| `packages/core/agent-loop/src/agent.ts` | 主循环：`prepareRequest` / `buildRequest` / 消费流 | 751 |
 | `patches/@earendil-works__pi-ai@0.85.1.patch` | 给上游库的性能修复（去掉 O(n²) 参数重解析） | 4.5 KB |
 
 ### codex
 
 | 文件 | 职责 | 行数 |
 |---|---|---|
-| `codex-rs/model-provider-info/src/lib.rs` | provider 注册表、`ModelProviderInfo` / `WireApi`、内置与合并、`to_api_provider` | 765 |
-| `codex-rs/model-provider/src/provider.rs` | `ModelProvider` trait、`create_model_provider`、能力与账户状态 | 1430 |
-| `codex-rs/model-provider/src/auth.rs` | provider 鉴权解析优先级与 scope | 854 |
-| `codex-rs/model-provider/src/models_endpoint.rs` | `/models` 远端目录拉取与 identity | 928 |
-| `codex-rs/models-manager/src/manager.rs` | 目录刷新 / 缓存 / ETag / 模型查找 | 805 |
-| `codex-rs/models-manager/models.json` | 内置模型清单 | 1125 |
-| `codex-rs/protocol/src/openai_models.rs` | `ModelInfo` / `ModelPreset` / 上下文窗口与压缩预算 | 1935 |
-| `codex-rs/codex-api/src/common.rs` | `ResponseEvent`（17 变体）、`ResponsesApiRequest`、`ResponseStream` | 406 |
-| `codex-rs/codex-api/src/sse/responses.rs` | SSE 消费、事件 → `ResponseEvent` 映射、错误分类 | 2106 |
+| `codex-rs/model-provider-info/src/lib.rs` | provider 注册表、`ModelProviderInfo` / `WireApi`、内置与合并、`to_api_provider` | 949 |
+| `codex-rs/model-provider/src/provider.rs` | `ModelProvider` trait、`create_model_provider`、能力与账户状态 | 775 |
+| `codex-rs/model-provider/src/auth.rs` | provider 鉴权解析优先级与 scope | 565 |
+| `codex-rs/model-provider/src/models_endpoint.rs` | `/models` 远端目录拉取与 identity | 526 |
+| `codex-rs/models-manager/src/manager.rs` | 目录刷新 / 缓存 / ETag / 模型查找 | 1256 |
+| `codex-rs/models-manager/models.json` | 内置模型清单 | 1778 |
+| `codex-rs/protocol/src/openai_models.rs` | `ModelInfo` / `ModelPreset` / 上下文窗口与压缩预算 | 2301 |
+| `codex-rs/codex-api/src/common.rs` | `ResponseEvent`（17 变体）、`ResponsesApiRequest`、`ResponseStream` | 452 |
+| `codex-rs/codex-api/src/sse/responses.rs` | SSE 消费、事件 → `ResponseEvent` 映射、错误分类 | 2104 |
 | `codex-rs/codex-api/src/endpoint/responses.rs` | HTTP 流式请求构造与发送 | 159 |
-| `codex-rs/codex-client/src/retry.rs` | `RetryPolicy` / `should_retry` / `backoff` / `run_with_retry` | 110 |
-| `codex-rs/http-client/src/client_builder.rs` | HTTP client 构建、代理策略、connect timeout、TLS 回退 | 343 |
-| `codex-rs/core/src/client.rs` | `ModelClient` / `ModelClientSession`、请求构造、事件映射、401 恢复 | 2851 |
-| `codex-rs/core/src/session/turn.rs` | turn 循环消费 `ResponseEvent`、采样重试入口 | 3083 |
-| `codex-rs/core/src/responses_retry.rs` | 流重试 / 连接退避 / 降级到 HTTP | 180 |
+| `codex-rs/codex-client/src/retry.rs` | `RetryPolicy` / `should_retry` / `backoff` / `run_with_retry` | 118 |
+| `codex-rs/http-client/src/client_builder.rs` | HTTP client 构建、代理策略、connect timeout、TLS 回退 | 477 |
+| `codex-rs/core/src/client.rs` | `ModelClient` / `ModelClientSession`、请求构造、事件映射、401 恢复 | 3381 |
+| `codex-rs/core/src/session/turn.rs` | turn 循环消费 `ResponseEvent`、采样重试入口 | 3846 |
+| `codex-rs/core/src/responses_retry.rs` | 流重试 / 连接退避 / 降级到 HTTP | 215 |
 | `codex-rs/core/src/session/context_window.rs` | token 预算与自动压缩阈值判定 | 130 |
 
 **辅助 crate 概览**：`chatgpt`（仅后台任务/PR 拉取，非推理入口，`chatgpt/src/chatgpt_client.rs:62`）；`ollama`（本地就绪检查与模型拉取，`ollama/src/lib.rs:21`，要求 ≥ 0.13.4 才支持 Responses）；`lmstudio`（本地就绪检查/加载，`lmstudio/src/lib.rs:12`）；`aws-auth`（SigV4 签名，`aws-auth/src/signing.rs:17`）。

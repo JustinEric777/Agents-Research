@@ -4,7 +4,7 @@ title: "第 9 章 · 任务与子 Agent"
 nav_order: 7
 parent: "第二部分 · 内核区"
 permalink: /ch/09/
-reviewed_at: 2026-10-27
+reviewed_at: 2026-11-12
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -14,7 +14,7 @@ review_priority: P0
 
 **本章回答什么** —— 一个 Agent 如何把工作委派给「另一个 Agent」，以及被委派者如何被创建、驱动、通信、回收。
 
-> **当前基线补充（2026-10-27）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
+> **当前基线补充（2026-11-12）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
 
 **四家分歧在哪** —— **这一层的分歧是四家中最大的**：子 Agent 的本体是另一个操作系统进程、一个可被驱动的会话、线程图上的一个节点，还是一个一等任务对象——四种答案互不兼容，且各自推导出完全不同的上下文继承、深度限制与结果回灌策略。
 
@@ -163,7 +163,7 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 会话记录上只有两条边，都不产生新 Agent：
 
-`packages/durable/src/types.ts:396-409`
+`packages/durable/src/types.ts:429-441`
 ```ts
 export type ConversationRecord = {
 	readonly id: ConversationId;
@@ -191,10 +191,20 @@ export type ConversationRecord = {
 
 真正的父子**任务**拓扑在 `ToolTask` 里。一次工具调用可以发起嵌套调用，被发起的那次调用是一个独立的 `ToolTask`，以 `parent` 字段挂成子任务：
 
-`packages/durable/src/harness/tool.ts:62-73`
+`packages/durable/src/harness/tool.ts:63-83`
 ```ts
+/**
+ * A model-issued call, read from its assistant entry, or a nested call a running tool made through `executeTool()`,
+ * whose call the input carries because no entry holds it.
+ */
 export type ToolTaskInput =
-	| { kind: "model"; assistant: EntryId; callId: string }
+	| {
+			kind: "model";
+			assistant: EntryId;
+			callId: string;
+			/** A call to a tool its request did not offer: settles `tool_unavailable` without resolving the name. */
+			unoffered?: true;
+	  }
 	| {
 			kind: "nested";
 			parent: TaskId;
@@ -208,7 +218,7 @@ export type ToolTaskInput =
 
 结果不回写进父任务的记录，而是**每次嵌套调用一份文档**：
 
-`packages/durable/src/harness/tool.ts:106-113`
+`packages/durable/src/harness/tool.ts:117-125`
 ```ts
 export const NestedCallDoc = defineDocFamily<NestedCallState, null>({
 	kind: "pi.tool.nested-call",
@@ -994,7 +1004,7 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 不适用——无对等协作，跨会话范围被 `subtree` 断言限制在自身子树内（`harness/pico3/harness.ts:329-340`） | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`experimental/agent-team/src/task-board.ts:119-124`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:133-142`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
+| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:355`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:128-132`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
 > **设计理由**（`[inference]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---
@@ -1084,8 +1094,8 @@ sequenceDiagram
 | `docs/subsystems/subagent.md` | 150 | 权威边界：兄弟 / 隔代 / 自身 / 一次性子全部拒绝 |
 | `packages/subagent/subagent/src/depth.ts` | 19-24 | 深度单调（可加深、不可降低） |
 | `packages/experimental/agent-team/README.md` | 69 / 128 / 132 / 134 / 204 / 206 | 任意成员互发 / 隐式 Lead / 投递保证与限制 / 兄弟不冒用 Lead / 扁平名册 |
-| `packages/experimental/agent-team/src/roster.ts` | 79 | 成员校验：非活跃队伍成员直接抛 `TEAM_NOT_MEMBER` |
-| `packages/experimental/agent-team/src/session-message.ts` | 25 | `messageAccepted`（投递受理判定） |
+| `packages/team/agent-team/src/task-board.ts` | 135-139 | 授权：任务变更只允许 owner 或 Team Lead（`TEAM_TASK_UNAUTHORIZED`） |
+| `packages/team/agent-team/src/projection.ts` | 1 | Team 状态由**已提交的 Session 事件**增量投影，另给 durable-only 客户端一份视图 |
 | `packages/experimental/agent-team/src/task-board.ts` | 119 / 133 | 版本号 CAS / `claim` 语义 |
 | `packages/experimental/agent-team/src/types.ts` | 58-65 | `TeamMemberView`（角色与状态） |
 | `packages/experimental/tool-agent-team/src/index.ts` | 176 / 208 / 225 / 270 / 281 / 306 / 338 / 353 | 团队工具清单（`spawn_teammate` / `send_message` / `team_task_*` 等） |

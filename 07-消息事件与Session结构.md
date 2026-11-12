@@ -4,7 +4,7 @@ title: "第 7 章 · 消息 / 事件 / Session"
 nav_order: 5
 parent: "第二部分 · 内核区"
 permalink: /ch/07/
-reviewed_at: 2026-10-27
+reviewed_at: 2026-11-12
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -18,7 +18,7 @@ review_priority: P0
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
-> **当前基线补充（2026-10-22）** —— 事实源不再只比较「消息怎样存」。pi `v1.4.0` 已把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-55`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`571902028a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`bb64b894fd`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.311` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
+> **当前基线补充（2026-11-12）** —— 事实源不再只比较「消息怎样存」。pi 自 `v1.4.0` 起把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-55`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`e8f7b93a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`6bfdc75f`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.322` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
@@ -34,7 +34,7 @@ review_priority: P0
 >
 > **易混点**：CC 的 `src/history.ts` 是**用户输入的 prompt/命令历史**（Up 箭头复用、Ctrl+R 搜索，存 `~/.claude/history.jsonl`），与会话消息无关；会话消息落在 `src/utils/sessionStorage.ts`。
 >
-> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.311` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
+> **Claude Code 证据边界**：本章 CC 的 `src/...` 引用来自本地还原树，不属于锁定 `v2.1.322` 的同版本公开源码。源码分析门禁不把这些引用作为当前 `[code]` 事实；当前 CC 结论只接受发行物证据或明确标注的推断。
 
 ---
 
@@ -165,7 +165,7 @@ review_priority: P0
 
 每条 entry 只有身份、kind，以及**分开的两份载荷**——`model` 给模型看，`data` 给应用看：
 
-`packages/durable/src/types.ts:428-443`
+`packages/durable/src/types.ts:460-475`
 ```ts
 export type EntryRecord = {
 	readonly id: EntryId;
@@ -208,7 +208,7 @@ export function defineEntry<D extends JsonValue = never>(kind: string): Entry<D>
 
 这是 pi 本层最值得记的一处设计。模型可见序列不是「把所有条目摊平」，而是**先定边界、再叠覆盖**：
 
-`packages/durable/src/harness/context.ts:123-129`
+`packages/durable/src/harness/context.ts:144-150`
 ```ts
 /**
  * Derive the active transcript and model context of one conversation within captured bounds.
@@ -223,7 +223,7 @@ export async function deriveContext(
 
 覆盖层只有两种动作，且都只影响模型上下文、不触碰记录本身：
 
-`packages/durable/src/types.ts:412-425`
+`packages/durable/src/types.ts:444-457`
 ```ts
 export type ContextEdit = {
 	/** Entry whose model messages are omitted or replaced. */

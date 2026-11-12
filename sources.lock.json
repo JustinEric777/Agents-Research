@@ -1,15 +1,15 @@
 {
   "schema_version": 2,
-  "checked_at": "2026-10-27",
+  "checked_at": "2026-11-12",
   "baseline": "current",
   "projects": {
     "pi": {
       "repository": "https://github.com/earendil-works/pi",
-      "ref": "v1.4.0",
-      "commit": "4a080252f06caf63a525d7873c5d94d3c23887e0",
+      "ref": "v1.5.2",
+      "commit": "b4afdddf44e059c67ccf5097e5317d913521b470",
       "source_kind": "official_git_tag",
-      "previous_ref": "v1.2.0",
-      "commits_since_previous_ref": 144,
+      "previous_ref": "v1.4.0",
+      "commits_since_previous_ref": 703,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -60,16 +60,17 @@
         "packages/coding-agent/src/modes/rpc/rpc-types.ts",
         "packages/coding-agent/src/modes/interactive/interactive-mode.ts",
         "packages/coding-agent/src/extensions/codemode/tool.ts",
-        "packages/coding-agent/src/extensions/tool-search/tool.ts"
+        "packages/coding-agent/src/extensions/tool-search/tool.ts",
+        "packages/mcp/src/output-limit.ts"
       ]
     },
     "dsh": {
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
       "ref": "origin/master",
-      "commit": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
+      "commit": "e8f7b93a344964de3dca1ace9e72b6e4d6de87cb",
       "source_kind": "official_git_branch_tip",
-      "last_tag": "dsh-v0.2.1-alpha.3",
-      "commits_since_last_tag": 16,
+      "last_tag": "dsh-v0.2.2-rc.2",
+      "commits_since_last_tag": 166,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -108,7 +109,7 @@
         "packages/session/session-format-v3-to-v4/src/validation.ts",
         "packages/jobs/jobs-local/src/index.ts",
         "packages/schedule/schedule/src/storage.ts",
-        "packages/experimental/agent-team/src/task-board.ts",
+        "packages/team/agent-team/src/task-board.ts",
         "packages/experimental/hook-protocol/src/runner.ts",
         "packages/experimental/hooks-codex/src/index.ts",
         "packages/experimental/webhook/src/index.ts",
@@ -117,16 +118,19 @@
         "packages/sdk/protocol/src/types.ts",
         "packages/core/tools/src/index.ts",
         "packages/llm/llm/src/types.ts",
-        "packages/host/product-telemetry-otel/src/index.ts"
-      ]
+        "packages/host/product-telemetry-otel/src/index.ts",
+        "packages/core/tools/src/contracts.ts",
+        "packages/core/tools/src/pipeline.ts"
+      ],
+      "previous_ref": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
+      "commits_since_previous_ref": 4498
     },
     "codex": {
       "repository": "https://github.com/openai/codex",
       "ref": "origin/main",
-      "commit": "bb64b894fd67158be0f874872e6d7bfe717e7368",
+      "commit": "6bfdc75f0d9e6fae313234f694839866d7c63c39",
       "source_kind": "official_git_branch_tip",
-      "last_tag": "rust-v0.163.0-alpha.13",
-      "commits_since_last_tag": 40,
+      "last_tag": "rust-v0.170.0-alpha.2",
       "evidence": "source_readable",
       "layers": [
         1,
@@ -179,14 +183,16 @@
         "codex-rs/config/src/key_aliases.rs",
         "codex-rs/login/src/auth/storage.rs",
         "codex-rs/tui/src/chatwidget.rs"
-      ]
+      ],
+      "previous_ref": "bb64b894fd67158be0f874872e6d7bfe717e7368",
+      "commits_since_previous_ref": 1198
     },
     "claude_code": {
       "repository": "https://github.com/anthropics/claude-code",
-      "ref": "v2.1.311",
-      "artifact": "@anthropic-ai/claude-code@2.1.311",
+      "ref": "v2.1.322",
+      "artifact": "@anthropic-ai/claude-code@2.1.322",
       "source_kind": "official_release_and_npm_binary_package",
-      "previous_ref": "v2.1.299",
+      "previous_ref": "v2.1.311",
       "evidence": "release_metadata",
       "layers": [
         1,
