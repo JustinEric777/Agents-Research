@@ -295,7 +295,7 @@ export type DispatchMode = 'emit' | 'parallel' | 'serial' | 'bail' | 'waterfall'
 **注意 `next()` 的语义**：listener 拿到的是「继续链」而不是「下一个 listener」，因此它可以**先调 `next()` 拿到下游结果、再在结果上叠加自己的贡献**。dsh 的 CC hook 桥就是这么做的：
 
 ```ts
-// packages/experimental/hooks-claude-code/src/index.ts:232
+// packages/experimental/hooks-claude-code/src/index.ts:235
 // Delegate so later listeners may still rewrite or reject, then prepend our
 // context only to a downstream enter decision.
 const downstream = await next()
@@ -339,7 +339,7 @@ dsh 自己声明的事件（`packages/core/agent/src/runtime-types.ts` 与 `pack
 
 | dsh 拦截点（模式） | CC 事件 | codex 事件 | CC 挂载 | codex 挂载 |
 |---|---|---|---|---|
-| `agent/created`（serial） | SessionStart | SessionStart | `hooks-claude-code/src/index.ts:209` | `hooks-codex/src/index.ts:188` |
+| `agent/created`（serial） | SessionStart | SessionStart | `hooks-claude-code/src/index.ts:212` | `hooks-codex/src/index.ts:191` |
 | `agent/pre-step`（waterfall） | UserPromptSubmit | UserPromptSubmit | `:225` | `:202` |
 | `tools/pre-execute`（waterfall） | PreToolUse | PreToolUse | `:244` | `:228` |
 | `tools/post-execute`（waterfall） | PostToolUse | PostToolUse | `:253` | `:237` |
@@ -378,7 +378,7 @@ export function matchesMatcher(matcher: string | undefined, query: string, mode:
 }
 ```
 
-CC 侧还额外支持变量替换（`${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}`，`config.ts:57`）、stdin 加尾换行、注入 `CLAUDE_PROJECT_DIR` 环境变量；codex 侧不加尾换行、无变量替换、改为在 payload 里带 `model` / `permission_mode`（`hooks-codex/src/index.ts:294-302`）。
+CC 侧还额外支持变量替换（`${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PROJECT_DIR}`，`config.ts:57`）、stdin 加尾换行、注入 `CLAUDE_PROJECT_DIR` 环境变量；codex 侧不加尾换行、无变量替换、改为在 payload 里带 `model` / `permission_mode`（`hooks-codex/src/index.ts:302-310`）。
 
 **dsh 自己新增、两方言都没有的三件事**：
 
@@ -423,7 +423,7 @@ packages/extensions/cordis-host-runner/src/sandbox.ts:2-7
 This keeps cooperative packages inspectable and disposable but
 is not containment: host-realm helper functions remain an escape route.
 ```
-配套的 README 要求把它「当 bash 访问看待」（`cordis-host-runner/README.md:54`）。
+配套的 README 要求把它「当 bash 访问看待」（`cordis-host-runner/README.md:56`）。
 
 > **这个诚实值得单独记一笔**：四家中有两家（codex 用 hook trust hash、CC 用交互式信任校验）把「信任」做成机制，dsh 选择**明确声明不是边界**并要求使用者按 bash 对待。三种态度都合理，但**「声称是沙箱其实不是」是唯一不可接受的**。
 
@@ -458,11 +458,11 @@ try {
 其余几条同样值得记：
 
 - **超时**：默认 600,000ms（`runner.ts:20`），与 CC/codex 默认一致；超时与进程组取消交给 `dsh-shell` executor，**协议层不重复实现进程控制**。
-- **配置读不了就不注册**：解析失败只 warn 并 return，agent 照常启动（`hooks-claude-code/src/index.ts:119`）——「它是兼容适配器而非动力工具」。
+- **配置读不了就不注册**：解析失败只 warn 并 return，agent 照常启动（`hooks-claude-code/src/index.ts:122`）——「它是兼容适配器而非动力工具」。
 - **非法输出按纯文本处理**，不当错误：顶层 `decision` 只接受 `approve` / `block`，`allow` / `deny` / `ask` 只在 `hookSpecificOutput.permissionDecision` 里（`codec.ts:32` 的注释明确解释了这个 schema 约束）。
 - **合并与顺序无关**：串行执行只为让 `hook/invoked` 与 `hook/result` 在日志里相邻，**结论必须与顺序无关**（`merge.ts:91`、`hooks-claude-code/README.md:95/107`）。
 - **detached 运行与 dispose 静止**：SessionStart / SubagentStart / SubagentStop 无人 await，用 `createDetachedRuns` 追踪整条链，dispose 时先 abort 再 drain，保证 `fiber.dispose()` 返回即无残留回调（`detached.ts:43`）。
-- **有界降级而非伪造能力**：CC 侧 `updatedInput` 只解析不生效（只 warn，`hooks-claude-code/src/index.ts:181`）；codex 侧 PreToolUse 只支持 `deny`。设计原则写在类型定义里：
+- **有界降级而非伪造能力**：CC 侧 `updatedInput` 只解析不生效（只 warn，`hooks-claude-code/src/index.ts:184`）；codex 侧 PreToolUse 只支持 `deny`。设计原则写在类型定义里：
 
 ```ts
 // packages/experimental/hook-protocol/src/types.ts:85
@@ -830,7 +830,7 @@ flowchart TD
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | **不重校验**（明示） | waterfall 可改写，但改写结果要满足下游的判别（`kind !== 'enter'` 即返回下游原值） | 仅 `permissionDecision:allow` 时可改写；改后由 `with_updated_hook_input` 走工具自己的接受路径 | `updatedInput` 仅在 `allow`/`ask` 下生效，`deny` 时丢弃；且仍过 `checkRuleBasedPermissions` |
-| 源码依据 | `extensions/types.ts:1026-1027` | `hooks-claude-code/src/index.ts:232` | `engine/output_parser.rs:162-170`、`core/src/tools/registry.rs:598-617` | `utils/hooks.ts:2850-2880`、`toolHooks.ts:373-405` |
+| 源码依据 | `extensions/types.ts:1026-1027` | `hooks-claude-code/src/index.ts:235` | `engine/output_parser.rs:162-170`、`core/src/tools/registry.rs:598-617` | `utils/hooks.ts:2850-2880`、`toolHooks.ts:373-405` |
 
 > **设计理由**：**这是本章最重要的一张表**——三家都把「改写」与「授权」绑定（要么限定在 allow 前提下、要么由下游重新判别），只有 pi 允许无条件改写且不重校验。
 
@@ -875,7 +875,7 @@ flowchart TD
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | —（无跨实现兼容问题） | **有界降级 + 显式告警**：CC 的 `updatedInput` 只 warn 不生效；codex 只支持 `deny` | **显式拒绝**未实现的 handler 类型（`prompt` / `agent` 解析后跳过并记原因） | 类型层面就是联合，不存在的字段无法表达 |
-| 源码依据 | — | `hooks-claude-code/src/index.ts:181`、`hook-protocol/src/types.ts:85` | `engine/discovery.rs:635-643` | `types/hooks.ts:70-164` |
+| 源码依据 | — | `hooks-claude-code/src/index.ts:184`、`hook-protocol/src/types.ts:85` | `engine/discovery.rs:635-643` | `types/hooks.ts:70-164` |
 
 > **设计理由**：**dsh**：「宁可显式降级也不伪造能力」；**codex**：配置能解析不代表能执行，必须让人看见差距；**CC**：用 schema 消除歧义
 

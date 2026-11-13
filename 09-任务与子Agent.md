@@ -374,7 +374,7 @@ export function delegationDepthOf(agent: Agent): number {
 注意 `Math.max`——**header 里的深度是单调下界，resume 不能降级**（否则一个被恢复的深子树可以绕过限制重新爆炸）。
 
 ```ts
-// packages/subagent/subagent/src/child-agent.ts:50-59（节选）
+// packages/subagent/subagent/src/child-agent.ts:50-60（节选）
 export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): number {
   const childDepth = delegationDepthOf(parent) + 1
   if (!Number.isSafeInteger(childDepth)) throw new RangeError(...)
@@ -385,19 +385,19 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 }
 ```
 
-**工具白名单收窄**用 scoped `restrict()`：既从 prompt 里消失，也拒绝执行；未知名字 fail loud（`child-agent.ts:218`）。另外每个子 Agent 都会被注入一段「权限范围已冻结、不可扩权」的上下文，并把 approval 策略钉为 `never`（`child-agent.ts:172-176, 232, 246-253`）。
+**工具白名单收窄**用 scoped `restrict()`：既从 prompt 里消失，也拒绝执行；未知名字 fail loud（`child-agent.ts:221`）。另外每个子 Agent 都会被注入一段「权限范围已冻结、不可扩权」的上下文，并把 approval 策略钉为 `never`（`child-agent.ts:172-176, 232, 246-253`）。
 
 #### 4.2.6 可续会话与 cold resume
 
 「可续子 Agent」 = **一个持久 Session + 至多一个进程内 Activation**。关联靠 session header 的 `parentSession` + `origin:'subagent'` + `delegationDepth`，父侧追加 `subagent/catalog` 事件、子侧追加 `subagent/descriptor`。
 
-cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/manager.ts:1219`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
+cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/manager.ts:1208-1223`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
 
 descriptor **刻意不含** `subagentDepth`（防篡改）与 `outputSchema` / `maxTokens`（`descriptor.ts:12-19`）。
 
 #### 4.2.7 四个模型侧工具
 
-- **`subagent`**（`packages/subagent/tool-subagent/src/index.ts:207`）：参数 `description`、`prompt`，可选 `provider` / `model` / `reasoning_effort` / `run_in_background`。输出是 **oneOf 三态**：`{kind:'background', jobId}` / `{kind:'continuable', subagentId}` / `{kind:'foreground', runId, output}`（`:430-459`）。
+- **`subagent`**（`packages/subagent/tool-subagent/src/index.ts:208`）：参数 `description`、`prompt`，可选 `provider` / `model` / `reasoning_effort` / `run_in_background`。输出是 **oneOf 三态**：`{kind:'background', jobId}` / `{kind:'continuable', subagentId}` / `{kind:'foreground', runId, output}`（`:430-459`）。
 - **`send_message`**（`packages/subagent/tool-subagent-control/src/index.ts:43`）：`{agent_id, message}` → `{messageId}`；**仅对直接可续子或直接父生效**（`manager.ts:567-583`）。
 - **`interrupt_agent`**（`:77`）：`{agent_id}` → `{accepted}`，以 `{kind:'ancestor', agent:caller}` 授权（`:113`）。
 - **`list_agents`**（`.../list-agents.ts:87`）：`scope ∈ children|descendants`；`children` 只列**可续**子，一次性子仅作遍历节点。
@@ -924,7 +924,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 无内核约束。示例扩展本身不支持嵌套（它 spawn 的是无 session 的进程） | `delegationDepth + 1 > maxDepth` 即拒。**默认 1，也就是默认禁止嵌套** | `exceeds_thread_spawn_depth_limit` → 直接不给工具 | 非内部构建下，子 Agent 的工具池里**根本没有 `Agent` 工具** |
-| 源码依据 | — | `child-agent.ts:50-59` | `spec_plan.rs`（`collab_tools_enabled`） | `constants/tools.ts:40-41` |
+| 源码依据 | — | `child-agent.ts:50-60` | `spec_plan.rs`（`collab_tools_enabled`） | `constants/tools.ts:40-41` |
 
 > **设计理由**：本层会**递归回卷**到完整运行时栈（2.3）。每多一层，token 成本、延迟、内存、失败面都是**乘性**增长，而边际收益通常递减。四家中有三家选了「默认只允许一层」，是经过权衡的保守选择。
 
@@ -951,7 +951,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 子进程非零退出，示例里按 exit code 处理 | `result` **永不 reject**，统一转 `stopReason: 'error'` + ≤4096B 诊断文本 | 终态进 `Errored(String)`，经 `notify_parent_of_terminal_turn` 回传 | 异步走 `failAgentTask` + `enqueueAgentNotification(status:'failed')` 并附 error；同步则保留部分消息，**只有当整轮没有产生任何 assistant 消息时才 rethrow** |
-| 源码依据 | — | `types.ts:308-334`；`out-of-process.ts:192-219` | — | `agentToolUtils.ts:670-681`；`AgentTool.tsx:1223-1234` |
+| 源码依据 | — | `types.ts:308-334`；`out-of-process.ts:194-220` | — | `agentToolUtils.ts:670-681`；`AgentTool.tsx:1223-1234` |
 
 > **设计理由**：两处设计很有代表性——① dsh 用「**用值表达失败而非异常**」让父 Agent 的代码路径统一；② CC 同步路径「**尽量保留部分产出**」，因为子 Agent 跑到一半的中间结果对父通常仍有价值，直接 rethrow 会让这些工作白费。
 
@@ -1004,7 +1004,7 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:358`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:128-132`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
+| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:358`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:129-133`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
 > **设计理由**（`[inference]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---

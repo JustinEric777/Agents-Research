@@ -383,7 +383,7 @@ Important behavior:
 
 dsh 没有专门的 MCP 配置文件，配置就是 Cordis 插件条目的 `config` 字段，schema 由本包导出并做判别式校验——**一行配置一个 server**：
 
-`packages/mcp/mcp-client/src/index.ts:161-190`
+`packages/mcp/mcp-client/src/index.ts:163-192`
 ```ts
 export const Config = z.union([
   z.object({
@@ -399,14 +399,14 @@ export const Config = z.union([
 
 server 名的合法字符集是硬约束，也是后面命名空间分隔符能成立的前提：
 
-`packages/mcp/mcp-client/src/index.ts:52`
+`packages/mcp/mcp-client/src/index.ts:54`
 ```ts
 export const SERVER_NAME_PATTERN = /^[A-Za-z0-9_-]{1,32}$/
 ```
 
 生命周期入口是 `apply(ctx, config)`，它按「先校验配置 → 再占命名空间 → 再连」的顺序做，其中**占命名空间**这一步是重复 server 名的防线：
 
-`packages/mcp/mcp-client/src/index.ts:203-218`
+`packages/mcp/mcp-client/src/index.ts:205-220`
 ```ts
 export async function apply(ctx: Context, config: Config): Promise<void> {
   // Fail loud at load: reconnect misconfiguration (including programmatic
@@ -508,13 +508,14 @@ it('reaps the probe before starting the serving process', async () => {
 
 `syncTools` 的核心设计是「下一代构建完成之前不碰注册表」：
 
-`packages/mcp/mcp-client/src/tools.ts:133-164`
+`packages/mcp/mcp-client/src/tools.ts:142-162`
 ```ts
   // Phase 1: fetch and build the next generation without touching the registry.
   const definitions = new Map<string, ToolDefinition>()
   const response = client.getServerCapabilities()?.tools === undefined
     ? { tools: [] }
     : await client.listTools(undefined, { cacheMode: 'refresh', signal: opts.signal })
+  const outputValidators = new AjvJsonSchemaValidator()
   for (const tool of response.tools) {
     const publicName = publicToolName(opts.serverName, tool.name)
     if (definitions.has(publicName)) {
@@ -522,15 +523,21 @@ it('reaps the probe before starting the serving process', async () => {
         `mcp-client(${opts.serverName}): server listed tool "${tool.name}" more than once — invalid tool list`,
       )
     }
-...
-        }
+    // The bridge checks structured output itself: the SDK reports its local check as a
+    // ProtocolError indistinguishable from a server's JSON-RPC error.
+    const { outputSchema: _outputSchema, ...callDefinition } = tool
+    const outputCheck = compileOutputCheck(outputValidators, tool)
+    const invalidResult = (reason: string): McpToolError => {
+      const message = `Tool "${tool.name}" returned an invalid MCP result: ${reason}`
+      return new McpToolError(opts.redact === undefined ? message : opts.redact(message), 'MCP_INVALID_RESULT')
+    }
 ```
 
-三处判据值得注意：**能力优先**（server 未声明 tools 能力时直接返回空表，不发请求）、**强制刷新缓存**（`cacheMode: 'refresh'`）、**同名即错**（同一 server 在一份列表里报了两次同名工具，判为非法而不是取其一）。
+四处判据值得注意：**能力优先**（server 未声明 tools 能力时直接返回空表，不发请求）、**强制刷新缓存**（`cacheMode: 'refresh'`）、**输出 schema 先编译**（`compileOutputCheck` 在注册前就把校验器编好，坏 schema 变成一个带原因的 `MCP_INVALID_RESULT` 而不是运行时崩）、**同名即错**（同一 server 在一份列表里报了两次同名工具，判为非法而不是取其一）。
 
 第二阶段是替换，且失败时**整代回滚**：
 
-`packages/mcp/mcp-client/src/tools.ts:173-187`
+`packages/mcp/mcp-client/src/tools.ts:207-221`
 ```ts
   for (const dispose of previous.values()) dispose()
   const disposers: ToolDisposers = new Map()
@@ -553,7 +560,7 @@ it('reaps the probe before starting the serving process', async () => {
 
 #### 4.2.5 命名与上限
 
-`packages/mcp/mcp-client/src/tools.ts:91-97`
+`packages/mcp/mcp-client/src/tools.ts:100-106`
 ```ts
 export function publicToolName(serverName: string, rawName: string): string {
   const joined = `mcp__${serverName}__${rawName}`
@@ -566,7 +573,7 @@ export function publicToolName(serverName: string, rawName: string): string {
 
 三个常量决定了它的行为边界，其中第一个注释说明了上限的来源是**下游模型的函数名契约**而不是内部约定：
 
-`packages/mcp/mcp-client/src/tools.ts:58-64`
+`packages/mcp/mcp-client/src/tools.ts:67-73`
 ```ts
 const MAX_PUBLIC_NAME_LENGTH = 64
 
@@ -581,7 +588,7 @@ const HASH_LENGTH = 12
 
 工具定义的最终形态是统一到内部契约上的（与内置工具同类型）：
 
-`packages/mcp/mcp-client/src/tools.ts:251-272`
+`packages/mcp/mcp-client/src/tools.ts:322-343`
 ```ts
 export function createMcpToolDefinition(
   ctx: Context,
@@ -679,7 +686,7 @@ yield ctx.tools.register(defineTool({
 ```ts
       async request(request, exec): Promise<JsonValue> {
         const record = current
-        if (record?.connectedAt === undefined) throw new Error(`${label}: server is disconnected`)
+        if (record?.connectedAt === undefined) throw new McpToolError(`${label}: server is disconnected`, 'MCP_SERVER_UNAVAILABLE')
         try {
           return await record.wire.run(async (signal) => {
             const options = { signal: AbortSignal.any([signal, exec.signal]), timeout: config.toolCallTimeoutMs }
@@ -690,7 +697,16 @@ yield ctx.tools.register(defineTool({
             switch (request.method) {
               case 'resources/list':
                 return listable
-...
+                  ? await generation.listResources(
+                    request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
+                  ) as JsonValue
+                  : { resources: [] }
+              case 'resources/templates/list':
+                return listable
+                  ? await generation.listResourceTemplates(
+                    request.cursor === undefined ? undefined : { cursor: request.cursor }, options,
+                  ) as JsonValue
+                  : { resourceTemplates: [] }
               case 'resources/read': return await generation.readResource({ uri: request.uri }, options) as JsonValue
               /* v8 ignore next -- exhaustive over the closed resource request union */
               default: return assertNever(request)

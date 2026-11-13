@@ -526,7 +526,7 @@ const DEFAULT_RETRYABLE_CODES = Object.freeze([EMPTY_RESPONSE_CODE, 'RATE_LIMIT'
 
 两种模式（`retry-policy.ts:37` / `:49`）：`normal`（有界，仅白名单码）与 `always`（无上限，重试一切）。
 
-执行器 `llm-retry` 是**无配置的 function plugin**（`llm-retry/src/index.ts:24-28`），监听 `agent/request-error`（`:243`）。它的**先落盘后等待**顺序值得单独记一笔：
+执行器 `llm-retry` 是**无配置的 function plugin**（`llm-retry/src/index.ts:25-29`），监听 `agent/request-error`（`:243`）。它的**先落盘后等待**顺序值得单独记一笔：
 
 ```ts
 // packages/llm/llm-retry/src/index.ts:188-191
@@ -1228,7 +1228,7 @@ return expiresWithBuffer >= expiresAt
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 请求级读 `x-should-retry` 头；额度类错误（`insufficient_quota`/billing）**刻意不重试** | `RATE_LIMIT` 在默认可重试集；有效 `providerRetryAfterMs` **覆盖**本地退避 | 传输层 `retry_429 = false`，**429 只走业务层**；延迟从 `try again in Ns` 文本抠出 | 429 在重试集内（非订阅者或 Enterprise）；`x-should-retry` 头优先 |
-| 源码依据 | `provider-retry.ts:23`；`utils/retry.ts:7-9` | `retry-policy.ts:20`；`llm-retry/src/index.ts:227` | `model-provider-info/src/lib.rs:445`；`sse/responses.rs:692-719` | `withRetry.ts:696`、`:732-751` |
+| 源码依据 | `provider-retry.ts:23`；`utils/retry.ts:7-9` | `retry-policy.ts:20`；`llm-retry/src/index.ts:228` | `model-provider-info/src/lib.rs:445`；`sse/responses.rs:692-719` | `withRetry.ts:696`、`:732-751` |
 
 > **设计理由**（`[inference]`）：codex 的 `retry_429 = false` 是最有信息量的一个选择——它明确避免**双重退避**（传输层 + 业务层各等一次 = 等两倍）。**若服务端给了等待时长，客户端就不该再自己算一遍。**
 
@@ -1255,7 +1255,7 @@ return expiresWithBuffer >= expiresAt
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 态度 | **静默降级**：图片 → 占位文本；redacted thinking 跨模型时降级或丢弃；maxTokens 超窗自动夹紧 | **显式拒绝**：`UNSUPPORTED_CONTENT`；文件永不外发只换 handle | **元数据驱动裁剪**：不支持就 `warn!` 后丢弃参数 | **按 provider 分集合**：`modelSupportsThinking` 决定发不发 `thinking`；可被环境变量覆盖 |
-| 源码依据 | `utils/transform-messages.ts:35`、`:100-148`；`api/simple-options.ts:15` | `llm-pi-ai/src/adapter.ts:359`；`llm/src/index.ts:1051` | `core/src/client.rs:959-965`、`:936-947`、`:973-976` | `utils/model/thinking.ts:90`；`claude.ts:1604`；`modelSupportOverrides.ts:30` |
+| 源码依据 | `utils/transform-messages.ts:35`、`:100-148`；`api/simple-options.ts:15` | `llm-pi-ai/src/adapter.ts:359`；`llm/src/index.ts:133` | `core/src/client.rs:959-965`、`:936-947`、`:973-976` | `utils/model/thinking.ts:90`；`claude.ts:1604`；`modelSupportOverrides.ts:30` |
 
 > **设计理由**：dsh 的选择最值得记——README 与源码注释都写明「以 capability 显式拒绝而非静默丢弃」。**静默降级会让模型收到一个它以为完整的上下文**（图片变占位文本后，模型可能基于「[image omitted]」编造内容）。三种态度都合理，但「静默降级」是唯一会让用户误判的。
 

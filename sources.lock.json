@@ -72,10 +72,10 @@
     "dsh": {
       "repository": "https://github.com/deepseek-ai/deepseek-harness",
       "ref": "origin/master",
-      "commit": "e8f7b93a344964de3dca1ace9e72b6e4d6de87cb",
+      "commit": "39163dd30f703a79079e2d2446545cff3c453738",
       "source_kind": "official_git_branch_tip",
-      "last_tag": "dsh-v0.2.2-rc.2",
-      "commits_since_last_tag": 166,
+      "last_tag": "dsh-v0.2.2-rc.3",
+      "commits_since_last_tag": 608,
       "evidence": "source_readable",
       "layers": [
         1,
@@ -127,8 +127,8 @@
         "packages/core/tools/src/contracts.ts",
         "packages/core/tools/src/pipeline.ts"
       ],
-      "previous_ref": "571902028a75c64c1d767f4ae5fd099485f0ddf0",
-      "commits_since_previous_ref": 4498
+      "previous_ref": "e8f7b93a344964de3dca1ace9e72b6e4d6de87cb",
+      "commits_since_previous_ref": 64
     },
     "codex": {
       "repository": "https://github.com/openai/codex",
