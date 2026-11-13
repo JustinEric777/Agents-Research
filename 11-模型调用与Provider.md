@@ -692,10 +692,10 @@ if let Some(built_in_provider) = model_providers.get_mut(&key) {
 | 重试包裹 | `codex-client/src/retry.rs:82` `run_with_retry` |
 | **原生事件消化** | `codex-api/src/sse/responses.rs:575` `process_sse_with_treatment` → `:353` `process_responses_event` |
 | 映射为内部事件 | `core/src/client.rs:2257` `map_response_stream`、`:2280` `map_response_events` |
-| turn 消费 | `session/turn.rs:2547` `stream.next()`、`:2574` `match event` |
+| turn 消费 | `session/turn.rs:3094` `resampling.next()`、`:3107` `match event` |
 
 ```rust
-// codex-rs/core/src/session/turn.rs:2827-2875
+// codex-rs/core/src/session/turn.rs:3531-3585
 ResponseEvent::Completed {
     response_id,
     token_usage,
@@ -1206,7 +1206,7 @@ return expiresWithBuffer >= expiresAt
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | `isContextOverflow()` 覆盖 **3 类**：报错文本（约 24 条正则）、静默溢出（usage 超窗）、length-零输出；另设 `NON_OVERFLOW_PATTERNS` 排除误判 | 用**稳定错误码** `CONTEXT_WINDOW_EXCEEDED` | 错误枚举 `ContextWindowExceeded`，在 `retry_delay` 中列为**不可重试** | 双路：`stop_reason==='model_context_window_exceeded'` 复用 max_output 恢复路径；旧 400 文本解析后**下调 `max_tokens` 重试** |
-| 源码依据 | `packages/ai/src/utils/overflow.ts:136`、`:37`、`:152`、`:162`、`:75` | `packages/llm/llm/src/error.ts:25`；pi-ai 侧 `llm-pi-ai/src/stream.ts:80-93` | `protocol/src/error.rs:396`、`:406`；turn 层 `session/turn.rs:1659-1662` | `claude.ts:2279-2292`；`withRetry.ts:388-425`；预检 `query.ts:641-646` |
+| 源码依据 | `packages/ai/src/utils/overflow.ts:136`、`:37`、`:152`、`:162`、`:75` | `packages/llm/llm/src/error.ts:25`；pi-ai 侧 `llm-pi-ai/src/stream.ts:80-93` | `protocol/src/error.rs:396`、`:406`；turn 层 `session/turn.rs:426`、`:919` | `claude.ts:2279-2292`；`withRetry.ts:388-425`；预检 `query.ts:641-646` |
 
 > **设计理由**：**pi**：`[inference]` 排除表专门防 Bedrock 限流被误判为溢出——**误判会导致不必要的压缩，压缩又可能丢上下文**；**dsh**：`[inference]` 「consumers 不解析 message」——错误码是可路由的，文本不是；**codex**：`[inference]` 重试同一超长请求必然再失败，不如直接置满并交给压缩；**CC**：`[inference]` 新老 API 双兼容——用户可能用旧版端点
 

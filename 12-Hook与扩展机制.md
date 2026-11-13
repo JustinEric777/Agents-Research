@@ -82,7 +82,7 @@ review_priority: P1
 - **不管工具怎么调度** —— 那是 L4。但 `PreToolUse` 这类钩子正是在 L4 的准备阶段插入的，且**权限判定的优先级低于 hook**（见第 10 章 4.3.5）。
 - **不管权限规则怎么写** —— 那是 L10。本层只负责「让外部代码有机会介入权限决策」（CC 的 `PermissionRequest`、codex 的 `run_permission_request_hooks`）。
 - **不管具体某个扩展的功能** —— 那是扩展自己的事。本章只分析**机制**：口子开在哪、能改什么、改完谁复核。
-- **不管 MCP 这类外部能力怎么接进来** —— 那是外围区第 13 章。本层只回答「MCP server 能不能算一个扩展单位、它被画在哪一层、它的调用是否复用同一条权限链」（见 5.1）；server 的生命周期、工具发现、传输方式与凭据传递都在第 13 章。这个切分留了一处跨章的口径分歧：**四家对「MCP 是扩展还是能力」的答案并不一致**——codex 把 `McpTool { server, tool, input, ... }` 直接做成 hook 处理器的一个变体（`config/src/hook_config.rs:161-201`，见 4.3.2），CC 却只认 bash / prompt / agent / http 四类 handler（`src/schemas/hooks.ts:176-189`，见 4.4.2），MCP 在它那里是「注册工具的六层之一」而非「hook 的一种」。本层记录这个分歧，不裁定它。
+- **不管 MCP 这类外部能力怎么接进来** —— 那是外围区第 13 章。本层只回答「MCP server 能不能算一个扩展单位、它被画在哪一层、它的调用是否复用同一条权限链」（见 5.1）；server 的生命周期、工具发现、传输方式与凭据传递都在第 13 章。这个切分留了一处跨章的口径分歧：**四家对「MCP 是扩展还是能力」的答案并不一致**——codex 把 `McpTool { server, tool, input, ... }` 直接做成 hook 处理器的一个变体（`protocol/src/hooks.rs:174`，见 4.3.2），CC 却只认 bash / prompt / agent / http 四类 handler（`src/schemas/hooks.ts:176-189`，见 4.4.2），MCP 在它那里是「注册工具的六层之一」而非「hook 的一种」。本层记录这个分歧，不裁定它。
 
 ### 2.3 层次定位
 
@@ -596,7 +596,7 @@ sequenceDiagram
 | 替换模型可见文本 | ✅ 用 `feedback_message` 包装而不是替换 | `registry.rs:749-757` |
 | 影响审批 | ✅ **优先级最高**（Hooks > Guardian > User） | `tools/approvals.rs:500-519` |
 | 注入上下文 | ✅ `additionalContext` → developer message | `hook_runtime.rs:846-855` |
-| 让 turn 继续 | ✅ Stop hook 的 `continuation_fragments` | `session/turn.rs:659-676` |
+| 让 turn 继续 | ✅ Stop hook 的 `continuation_fragments` | `session/turn.rs:826` |
 | 改权限/控制流 | ❌ `updatedPermissions` / `interrupt` 被拒 | `output_parser.rs:405-410` |
 
 **审批合并规则是「任一 deny 胜出」**（`events/permission_request.rs:156-166`），而不是「第一个决定生效」——这与 dsh 的 most-restrictive 合并思路一致。
@@ -884,7 +884,7 @@ flowchart TD
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 单个扩展失败只记录并继续 | preset 服务泄漏到 root realm 直接拒绝挂载；host-half 启动失败先 dispose 再抛 | 记 `load_failure` 进 warnings；`required_load_errors` 另分一类 | 逐级降级：manifest 缺失合成默认 → 非法抛错 → commands/skills 失败 catch 成空数组 |
-| 源码依据 | `loader.ts:622-625` | `agent-preset-registry/src/mount.ts:261`、`lifecycle.ts:29` | `engine/discovery.rs` | `pluginLoader.ts:1154-1211`、`commands.ts:361-372` |
+| 源码依据 | `loader.ts:622-625` | `agent-preset-registry/src/mount.ts:204`、`lifecycle.ts:29` | `engine/discovery.rs` | `pluginLoader.ts:1154-1211`、`commands.ts:361-372` |
 
 > **设计理由**：四家一致选择「单个扩展失败不拖垮整体」，但**失败的记账粒度**不同：pi 只记录并继续；codex 把 `load_failure` 与 `required_load_errors` 分成两类 warnings；CC 逐级降级（manifest 缺失合成默认 → 非法抛错 → 子资源失败 catch 成空数组）；dsh 对 preset 泄漏到 root realm 直接拒绝挂载。**dsh 的例外值得注意**：它区分了「插件自身坏了」（可继续）与「插件污染了宿主」（必须拒绝）。
 

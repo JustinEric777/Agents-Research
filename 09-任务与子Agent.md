@@ -255,8 +255,8 @@ const proc = spawn(invocation.command, invocation.args, {
 ```
 
 - **隔离来自新进程，不是会话结构**：`--no-session` 意味着连会话都不落盘。
-- **结果解析**：逐行读 stdout 的 JSONL 事件流，抽取 `message_end`（`index.ts:360`）与 `tool_result_end`（`index.ts:382`）。
-- **三种编排模式**：single / parallel / chain；并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:34-35`），用 `mapWithConcurrencyLimit` 调度（`index.ts:643`）。
+- **结果解析**：逐行读 stdout 的 JSONL 事件流，只认 `message_end`（`index.ts:453`）——tool 结果不走独立事件，而是以 `role === 'toolResult'` 的 message 混在同一批里（`:458`）。
+- **三种编排模式**：single / parallel / chain；并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:38-39`），用 `mapWithConcurrencyLimit` 调度（`index.ts:813`）。
 - **Agent 定义**从 `~/.pi/agent/agents/*.md`（带 frontmatter）发现。
 
 #### 4.1.4 内核确实没有子 Agent 概念
@@ -391,14 +391,14 @@ export function resolveChildDepth(parent: Agent, maxDepth: number | undefined): 
 
 「可续子 Agent」 = **一个持久 Session + 至多一个进程内 Activation**。关联靠 session header 的 `parentSession` + `origin:'subagent'` + `delegationDepth`，父侧追加 `subagent/catalog` 事件、子侧追加 `subagent/descriptor`。
 
-cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/manager.ts:906`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
+cold resume 时用 `sessionQuery.observeSession` 读子 session → `foldSubagentDescriptor` 还原 provider/persona/toolFilter → `materialize` → `agents.resume`（`packages/subagent/subagent/src/manager.ts:1219`）。`SUBAGENT_DESCRIPTOR_VERSION = 3`。
 
 descriptor **刻意不含** `subagentDepth`（防篡改）与 `outputSchema` / `maxTokens`（`descriptor.ts:12-19`）。
 
 #### 4.2.7 四个模型侧工具
 
-- **`subagent`**（`packages/subagent/tool-subagent/src/index.ts:381`）：参数 `description`、`prompt`，可选 `provider` / `model` / `reasoning_effort` / `run_in_background`。输出是 **oneOf 三态**：`{kind:'background', jobId}` / `{kind:'continuable', subagentId}` / `{kind:'foreground', runId, output}`（`:430-459`）。
-- **`send_message`**（`packages/subagent/tool-subagent-control/src/index.ts:29`）：`{agent_id, message}` → `{messageId}`；**仅对直接可续子或直接父生效**（`:66-72`）。
+- **`subagent`**（`packages/subagent/tool-subagent/src/index.ts:207`）：参数 `description`、`prompt`，可选 `provider` / `model` / `reasoning_effort` / `run_in_background`。输出是 **oneOf 三态**：`{kind:'background', jobId}` / `{kind:'continuable', subagentId}` / `{kind:'foreground', runId, output}`（`:430-459`）。
+- **`send_message`**（`packages/subagent/tool-subagent-control/src/index.ts:43`）：`{agent_id, message}` → `{messageId}`；**仅对直接可续子或直接父生效**（`manager.ts:567-583`）。
 - **`interrupt_agent`**（`:77`）：`{agent_id}` → `{accepted}`，以 `{kind:'ancestor', agent:caller}` 授权（`:113`）。
 - **`list_agents`**（`.../list-agents.ts:87`）：`scope ∈ children|descendants`；`children` 只列**可续**子，一次性子仅作遍历节点。
 
@@ -459,7 +459,7 @@ pub struct AgentRoleConfig {
 }
 ```
 
-内置角色集中在 `core/src/agent/role.rs:341-401`：`default`、`explorer`（只读式代码问答，**鼓励并行多开**）、`worker`（执行/生产工作，强调写入所有权）；`awaiter` 被注释掉并标注 「Awaiter is temp removed」。
+内置角色集中在 `core/src/agent/role.rs:320-375`：`default`、`explorer`（只读式代码问答，**鼓励并行多开**）、`worker`（执行/生产工作，强调写入所有权）；`awaiter` 被注释掉并标注 「Awaiter is temp removed」。
 
 权限模型写得很明确：
 
@@ -526,15 +526,15 @@ core 侧的适配器落成 `inject_if_running(...)`：找不到线程即 `Skippe
 
 #### 4.3.6 与主循环的集成：深度集成，不是「未启用」
 
-证据链：`core/Cargo.toml:22-23` 依赖 graph-store 与 roles → `core/src/lib.rs:57` 重导出 `AgentControl` → `Session` 持有 `agent_control: LocalAgentControl`（`session/mod.rs:460`）→ turn 级注入 `multi_agent_version`（`session/turn_context.rs:345, 1184-1194`）与 `collaboration_mode`（`turn.rs:1263`）→ 工具面由 `tools/spec_plan.rs:1246` 装配。
+证据链：`core/Cargo.toml:22-23` 依赖 graph-store 与 roles → `core/src/lib.rs:57` 重导出 `AgentControl` → `Session` 持有 `agent_control: LocalAgentControl`（`session/mod.rs:542`）→ turn 级注入 `multi_agent_version`（`session/turn_context.rs:345, 1184-1194`）与 `collaboration_mode`（`turn.rs:1540`）→ 工具面由 `tools/spec_plan.rs:1246` 装配。
 
 明确**未启用/骨架**的部分已在 (1) 表中列出（`ext/agent`、`agent-identity`、`cloud-tasks`，以及默认关闭的 V2 与消息板）。
 
 #### 4.3.7 并发与回收
 
 - **并发上限**：`AgentRegistry.total_count` CAS 递增 + `max_threads`（`core/src/agent/registry.rs:89-108, 330-346`），槽位由 `SpawnReservation::Drop` **自动回收**；V2 上限 = `max_concurrent_threads_per_session - 1`。执行期另有 `AgentExecutionLimiter`（仅 V2 SubAgent 生效）与 LRU 驱逐 `V2Residency`。
-- **中断**：`interrupt_spawned_agent` 拒绝 root 与自身目标；对已卸载/已死的目标视为成功且**不重载**（`control/interrupt.rs:17-52`）。
-- **孤儿回收**：`close` 关闭 agent **及其全部 descendants**（`agent/api.rs:74-75`）；**已完成 agent 仍占用并发额度直到被 close**（工具描述 `spec.rs:328`）；V2 驱逐时保存 `evicted_environments` 以便恢复。
+- **中断**：`interrupt_spawned_agent` 拒绝 root 与自身目标；对已卸载/已死的目标视为成功且**不重载**（`control/interrupt.rs:16-52`）。
+- **孤儿回收**：`close` 关闭 agent **及其全部 descendants**（`agent/api.rs:74-75`）；**已完成 agent 仍占用并发额度直到被 close**（工具描述 `multi_agents_spec.rs:347`）；V2 驱逐时保存 `evicted_environments` 以便恢复。
 - **结果回传**：子 agent 终态由 `notify_parent_of_terminal_turn` 以 `trigger_turn=false` 投给父（`control/completion.rs:25-130`）。
 
 ---
@@ -757,7 +757,7 @@ dsh 的答案必须分两层读，因为它的两个包给的结论**正好相�
 > Authority comes from the exact live sender. Parent-to-child delivery requires the target's `SessionHeader.parentSession` to name the sender; child-to-parent delivery requires the sender's resident Activation to name the target. Siblings, ancestors beyond one edge, self-targets, stale Agent objects, and one-shot children are rejected.
 > —— `docs/subsystems/subagent.md:150`
 
-配套的可见性收窄：`list_agents` 会走完整棵子树，但明确告知模型「You may use `send_message` only for depth-1 entries; deeper entries are candidates for `interrupt_agent` only」（`tool-subagent-control/src/list-agents.ts:99-101`）。
+配套的可见性收窄：`list_agents` 走完整棵子树（`rootOf` + `listDescendants`，`tool-subagent-control/src/list-agents.ts:85-92`），但每条只投影成 `{name, status, description}` 三个字段——Agent 句柄与 Session 本身不下发给模型。
 
 深度也在这里冻结：`maxDepth` 默认 1（`subagent/subagent/src/index.ts:202`），且持久化的父 header 深度是**单调下界**——运行时的 `subagentDepth` 只能加深、不能降低，理由是「a resumed child arrives with fresh options, and counting it from zero would let it delegate as if it were top-level」（`subagent/src/depth.ts:19-24`）。
 

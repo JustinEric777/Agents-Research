@@ -156,13 +156,13 @@ review_priority: P1
 
 | 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 主循环入口 | `runLoop` `agent-loop.ts:162` | `kick()` `agent.ts:251` | `run_turn` `turn.rs:163` | `queryLoop` `query.ts:241` |
-| 外层续接循环 | `while(true)` `:178` | `while(await this.turn())` `:253` | `loop{}` `turn.rs:423` | `while(true)` `query.ts:307` |
+| 主循环入口 | `runLoop` `agent-loop.ts:162` | `kick()` `agent.ts:251` | `run_turn` `turn.rs:217` | `queryLoop` `query.ts:241` |
+| 外层续接循环 | `while(true)` `:178` | `while(await this.turn())` `:253` | `loop{}` `turn.rs:543` | `while(true)` `query.ts:307` |
 | 内层工具循环 | `while(hasMoreToolCalls\|\|pending)` `:182` | `while(true)` `agent.ts:312` | 无独立内层，与 `loop{}` 合并 | 无独立内层，靠 `next:State` 续 |
-| 单次模型调用 | `streamAssistantResponse` `:380` | `step()` `agent.ts:380` | `run_sampling_request` `turn.rs:1584` | `deps.callModel` `query.ts:659` |
+| 单次模型调用 | `streamAssistantResponse` `:380` | `step()` `agent.ts:380` | `run_sampling_request` `turn.rs:1891` | `deps.callModel` `query.ts:659` |
 | 停止判定（主出口） | 无 toolCall `:258` | `finish.kind==='completed'` | `needs_follow_up=false` | `!needsFollowUp` `:1062` |
 | 退出原因枚举 | 隐式（stopReason + 无工具） | `TurnEndReason`（日志事件） | `break` 分支 + 错误分类 | 显式 `Terminal.reason`（11 种） |
-| steering 注入 | 内层循环条件 `pendingMessages` | `agent/pre-step` 瀑布 `:275` | `pending_input` drain `turn.rs:423` | 命令队列 + `consumedCommandUuids` `:223` |
+| steering 注入 | 内层循环条件 `pendingMessages` | `agent/pre-step` 瀑布 `:275` | `pending_input` drain `turn.rs:547` | 命令队列 + `consumedCommandUuids` `:223` |
 | 扩展钩子 | 4 个回调（prepareNextTurn/finishTurn/before/afterToolCall） | 4 个命名瀑布（pre-step/request/request-error/turn-stopping） | stop hooks + PreToolUse | stop hooks `stopHooks.ts:65` |
 | hook 调用语义 | 回调可抛错 | **瀑布**（可链式改写决策） | 顺序执行 | 顺序执行（异常降级为 warning） |
 | 截断处理 | 全批工具失败 `:475` | max-tokens **粘性** `:331` | mid-turn compact `:610` | 恢复式续写（上限 3）`query.ts:164` |
@@ -323,7 +323,7 @@ if (finish.kind === 'max-tokens') return { kind: 'max-tokens' };
 #### 4.3.1 run_turn 骨架
 
 ```rust
-// codex-rs/core/src/session/turn.rs:163
+// codex-rs/core/src/session/turn.rs:217
 pub(crate) async fn run_turn(
     sess: Arc<Session>,
     turn_context: Arc<TurnContext>,
@@ -362,7 +362,7 @@ pub(crate) async fn run_turn(
 }
 ```
 
-**判定入口**：codex 的压缩判定是 `turn.rs:598` 内联的 `should_roll_over`，而非某个独立的 `should_auto_compact` 函数：
+**判定入口**：codex 的压缩判定是 `turn.rs:745` 内联的 `should_roll_over`，而非某个独立的 `should_auto_compact` 函数：
 
 ```rust
 // :598-600
@@ -373,7 +373,7 @@ let allow_auto_compact_fallback = !should_roll_over && !token_limit_reached;
 
 #### 4.3.2 采样与工具：工具不打断流
 
-`run_sampling_request`（`:1584`）→ `try_run_sampling_request`（`:2448`）内是流式事件循环。工具调用被推入 `FuturesOrdered`（`turn.rs:129` 导入、`:2502` 实例化、`:2680` push_back），模型继续输出，流结束后 `drain_in_flight`（`:2395`）统一收割。
+`run_sampling_request`（`:1891`）→ `try_run_sampling_request`（`:2890`）内是流式事件循环。工具调用被推入 `FuturesOrdered`（`turn.rs:149` 导入、`:3037` 实例化、`:3337` push_back），模型继续输出，流结束后 `drain_in_flight`（`:2852`）统一收割。
 
 #### 4.3.3 压缩内建：三阶段 + guardian 守卫
 
@@ -540,7 +540,7 @@ if (streamingFallbackOccured) {
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 注入点 | 内层循环条件 `:182` | `agent/pre-step` `:275` | `pending_input` drain `turn.rs:423` | 命令队列 `:223` | 4/4 都支持 |
+| 注入点 | 内层循环条件 `:182` | `agent/pre-step` `:275` | `pending_input` drain `turn.rs:547` | 命令队列 `:223` | 4/4 都支持 |
 | 是否可拦截 | 否 | **可 reject/改写** | 否 | 否 | 1/4 |
 | 与压缩的关系 | 无 | pre-step 内联 | 独立分支 | 独立队列 | — |
 
@@ -557,7 +557,7 @@ if (streamingFallbackOccured) {
 
 | 维度 | pi | dsh | codex | CC | 共识度 |
 |---|---|---|---|---|---|
-| 模型调用重试 | 无（上层负责） | `request-error` 瀑布 | 采样本层 `loop{}` `turn.rs:1611` | `withRetry.ts:170`（默认 10 次） | 3/4 |
+| 模型调用重试 | 无（上层负责） | `request-error` 瀑布 | 采样本层 `loop{}` `turn.rs:1934` | `withRetry.ts:170`（默认 10 次） | 3/4 |
 | 限流/高负载降级 | 无 | 无 | 无 | **fallback model** `withRetry.ts:335-351` | 1/4 |
 | 重试上限常量 | — | — | — | `DEFAULT_MAX_RETRIES=10`、`MAX_529_RETRIES=3` | 1/4 |
 | 超窗恢复 | 无 | 无 | 压缩重试（guardian 限一次） | collapse drain → reactiveCompact（`hasAttemptedReactiveCompact` 防螺旋 `:1292-1297`） | 2/4 |
@@ -579,7 +579,7 @@ if (streamingFallbackOccured) {
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 整批工具调用全体失败（`:263-269` → `:475`），要求模型重发 | turn 终态粘在 `max-tokens`（`:331-336`、`:512`），后续正常 step 不降级 | 转 mid-turn compact 后 continue（`:598-622`） | 升档重试（8k→64k，`ESCALATED_MAX_TOKENS=64_000` `utils/context.ts:25`）或恢复式续写，上限 `MAX_OUTPUT_TOKENS_RECOVERY_LIMIT=3`（`:164`，恢复循环 `:1223-1252`） |
-| 源码依据 | `agent-loop.ts:263` | `agent.ts:331` | `turn.rs:598` | `query.ts:164/1195-1221` |
+| 源码依据 | `agent-loop.ts:263` | `agent.ts:331` | `turn.rs:745` | `query.ts:164/1195-1221` |
 
 > **设计理由**：截断意味着「参数可能不完整」。pi 选择最保守（一律重发），代价是浪费一次往返；dsh 着眼**信号保真**（让上层知道该续写）；codex 选择**自动补救**（压缩腾出空间重试）；CC 两者都做（先升档，再恢复计数）。四家没有共识，因为这是「安全 vs 效率」的经典取舍。
 
@@ -595,7 +595,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:1611`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
+| 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:1934`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
 
 > **设计理由**（`[inference]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
 
@@ -620,7 +620,7 @@ if (streamingFallbackOccured) {
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 机制 | 全批 terminate 才停 | `turnEnds && inbox.nextStep.length===0` | `guardian_budget_compacted` 每 step 限一次压缩 | `hasAttemptedReactiveCompact`（`:1157`/`:1292-1297`）+ `MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES=3`（`autoCompact.ts:70`，检查 `:260-265`，计数 `:341-349`） |
-| 源码依据 | `shouldTerminateToolBatch` `:685` | `agent.ts:312` | `turn.rs:422/535/737-750` | — |
+| 源码依据 | `shouldTerminateToolBatch` `:685` | `agent.ts:312` | `turn.rs:543/556/745-762` | — |
 
 > **设计理由**（`[inference]`）：CC 的常量注释记录「1,279 个会话连续压缩失败 50+ 次、全站每天浪费约 25 万次 API 调用」——**熔断阈值来自生产数据而非拍脑袋**，这是全系列唯一。
 
@@ -628,7 +628,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | prepare/execute 全 catch → 错误 toolResult，**零逃逸**（`:703`/`:773`/`:816`） | 调度器失败**不伪造结果**，抛第一个失败（`tool-calls.ts:219-236` 注释 `[code]`：避免假结果造成死循环） | payload 类型级错误升级为 `Fatal`，其余 `RespondToModel` | 四条错误→tool_result 路径（未知工具 `toolExecution.ts:369-411`、zod 失败 `:616-680`、validateInput `:687-733`、执行抛错 `:1691-1737`）；**Bash 出错会取消兄弟工具**（`StreamingToolExecutor.ts:354-364`），Read/WebFetch 不会 |
+| 做法 | prepare/execute 全 catch → 错误 toolResult，**零逃逸**（`:703`/`:773`/`:816`） | 调度器失败**不伪造结果**，抛第一个失败（`batch.ts:219-233` 注释 `[code]`：避免假结果造成死循环） | payload 类型级错误升级为 `Fatal`，其余 `RespondToModel` | 四条错误→tool_result 路径（未知工具 `toolExecution.ts:369-411`、zod 失败 `:616-680`、validateInput `:687-733`、执行抛错 `:1691-1737`）；**Bash 出错会取消兄弟工具**（`StreamingToolExecutor.ts:354-364`），Read/WebFetch 不会 |
 
 > **设计理由**（`[inference]`）：CC 的「Bash 失败级联取消兄弟」反映了实际使用模式——shell 命令之间常有隐含依赖，一个失败后继续跑其余命令通常无意义且会产生误导性输出。
 
