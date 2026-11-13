@@ -234,7 +234,7 @@ throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 
 #### 4.1.5 skills 与子 Agent 不是扩展机制
 
-需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:409-509`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。
+需要区分清楚：`skills`（`SKILL.md` + frontmatter，`skills.ts:414-505`）与 prompt templates（`prompt-templates.ts:222-298`）走**资源加载器**管线，与扩展是两套。
 
 子 Agent 更明确——pi 的 README 直接写 「No sub-agents」（`README.md:539`），`~/.pi/agent/agents/*.md` 这套约定由**示例扩展**自己实现（`examples/extensions/subagent/agents.ts:88-129`），通过 spawn 独立 `pi` 进程执行（见第 9 章 4.1）。
 
@@ -513,23 +513,23 @@ pub trait ToolLifecycleContributor: Send + Sync {
 
 即：**要「改 payload」用 hooks，要「拥有工具实现」用 contributor**。这条线解释了为什么 codex 需要两条通道——hook 是外部进程，无法安全地持有一个工具的实现与状态；而进程内 contributor 改动工具输入又会让 hook 的契约失效。
 
-#### 4.3.2 hooks 的 12 个事件与配置形态
+#### 4.3.2 hooks 的 14 个事件与配置形态
 
 ```rust
-// protocol/src/protocol.rs:1577-1592
+// protocol/src/protocol.rs:1826-1843
 pub enum HookEventName {
     PreToolUse, PermissionRequest, PostToolUse, PreCompact, PostCompact,
     SessionStart, SessionEnd, UserPromptSubmit, SubagentStart, SubagentStop,
-    Stop, Interrupt,
+    Stop, Interrupt, PreModelRequest, PostModelRequest,
 }
 ```
 
-配套枚举刻画了完整的协议面：`HookHandlerType{Command,McpTool,Prompt,Agent}`（`:1594`）、`HookExecutionMode{Sync,Async}`（`:1603`）、`HookScope{Thread,Turn}`（`:1610`）、`HookSource`（10 类来源，`:1617`）、`HookTrustStatus{Managed,Untrusted,Trusted,Modified}`（`:1634`）、`HookRunStatus{Running,Completed,Failed,Blocked,Stopped}`（`:1643`）、`HookOutputEntryKind{Warning,Stop,Feedback,Context,Error}`（`:1653`）。
+配套枚举刻画了完整的协议面：`HookHandlerType{Command,McpTool,Prompt,Agent}`（`:1847`）、`HookExecutionMode{Sync,Async}`（`:1856`）、`HookScope{Thread,Turn}`（`:1863`）、`HookSource`（11 类来源，末项 `Unknown` 兜底，`:1870`）、`HookTrustStatus{Managed,Untrusted,Trusted,Modified}`（`:1887`）、`HookRunStatus{Running,Completed,Failed,Blocked,Stopped}`（`:1896`）、`HookOutputEntryKind{Warning,Stop,Feedback,Context,Error}`（`:1906`）。
 
-声明有 4 处来源：`config.toml` 的 `hooks` 表、配置层目录的 `hooks.json`、插件包的 `hooks/hooks.json`、托管 MDM/requirements。schema 类型在 config crate：
+声明有 4 处来源：`config.toml` 的 `hooks` 表、配置层目录的 `hooks.json`、插件包的 `hooks/hooks.json`、托管 MDM/requirements。schema 类型在 protocol crate，config 侧只做 re-export（`config/src/hook_config.rs:5-7`）：
 
 ```rust
-// config/src/hook_config.rs:161-201
+// protocol/src/hooks.rs:149-188
 #[serde(tag = "type")]
 pub enum HookHandlerConfig {
     #[serde(rename = "command")] Command { command, command_windows, timeout_sec, r#async, status_message, additional_context_limit },
@@ -539,17 +539,17 @@ pub enum HookHandlerConfig {
 }
 ```
 
-**注意后两种是「可解析但未实现」**——引擎会明确跳过并记录原因：
+**注意后两种是「可解析但未实现」**——引擎会明确跳过并记录原因（`Prompt` 与 `Agent` 各一条）：
 
 ```rust
-// hooks/src/engine/discovery.rs:635-643
+// hooks/src/engine/discovery.rs:782-790
 HookHandlerConfig::Prompt {} => {
     source.record_load_failure(format!("skipping prompt hook in {}: prompt hooks are not supported yet", ...), warnings);
     continue;
 }
 ```
 
-事件级的 stdin/stdout 结构在 `hooks/src/schema.rs`（1,254 行）逐事件定义，并由 `write_schema_fixtures`（`:640`）生成 23 个 JSON schema 文件、编译期内嵌（`engine/schema_loader.rs:37` 用 `include_str!`）。**这是四家中对 hook 协议最「形式化」的一家**：协议不是文档，而是可生成、可校验的 schema。
+事件级的 stdin/stdout 结构在 `hooks/src/schema.rs`（1,267 行）逐事件定义，并由 `hooks/src/bin/write_hooks_schema_fixtures.rs`（`:3`）生成 24 个 JSON schema 文件、编译期内嵌（`engine/schema_loader.rs:37` 用 `include_str!`）。**这是四家中对 hook 协议最「形式化」的一家**：协议不是文档，而是可生成、可校验的 schema。
 
 #### 4.3.3 一次 hook 的完整链路
 

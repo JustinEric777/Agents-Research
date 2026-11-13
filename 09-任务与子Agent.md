@@ -27,7 +27,7 @@ review_priority: P0
 > **分析对象**：
 > - **pi** —— `packages/durable/src/session/{session,transaction,forks}.ts`（会话、事务与 fork）+ `packages/durable/src/harness/scheduler.ts`（任务串行化；原 `lane.ts` 已删）+ `packages/coding-agent/examples/extensions/subagent/index.ts`（子 Agent 是示例扩展，内核无此概念）
 > - **deepseek-harness** —— `packages/subagent/subagent/src/{index,types,child-agent,depth,continuation}.ts` + `subagent-{in-process-driver,fork-in-process,spawn-in-process,acp,claude-code,codex}/src/*`
-> - **codex** —— `codex-rs/core/src/agent/*` + `core/src/tools/handlers/multi_agents*.rs` + `agent-graph-store/src/*` + `ext/agent-message-board/src/*`
+> - **codex** —— `codex-rs/core/src/agent/*` + `core/src/tools/handlers/multi_agents*.rs` + `agent-graph-store/src/*` + `message-board/src/*`（板与工具）+ `ext/agent-message-board/src/*`（安装 / MCP 接线）
 > - **Claude-Code** —— `src/Task.ts` + `src/tasks/*` + `src/tools/AgentTool/*` + `src/tools/Task{Output,Stop,Update}Tool/*`
 >
 > **易混点**：本层是四家**分歧最大**的一层，其中两处形态与直觉不同（见 4.1 与 4.3 开头）。
@@ -415,7 +415,7 @@ descriptor **刻意不含** `subagentDepth`（防篡改）与 `outputSchema` / `
 | `agent-graph-store` | 505 | **在用**：`core/Cargo.toml:22-23` 依赖，`ThreadManagerState.agent_graph_store` 持有（`core/src/thread_manager.rs:26-27`） |
 | `agent-roles` | 615 | **在用**：角色发现与解析（`loader.rs:23-117`） |
 | `collaboration-mode-templates` | 163 | **在用**：仅两段 prompt 文本，运行期经 `CollaborationMode` 注入 world state |
-| `ext/agent-message-board` | 3,259 | **门控**：需 `AgentMessageBoard` + `MultiAgentV2` 同时开启且非 ephemeral |
+| `message-board/src`（板与工具） | 4,566 | **门控**：需 `AgentMessageBoard` + `MultiAgentV2` 同时开启且非 ephemeral |
 | `cloud-tasks` / `-client` | 5,418 / 1,142 | **与子 Agent 无关**：这是「云端任务」功能（`TaskId`/`TaskStatus`），走 `chatgpt.com/backend-api` |
 | `external-agent-migration` | 16,405（多测试） | 导入外部 agent 配置，含 `subagents.rs:57-87` 把外部 `*.md` 转成 `agents/<name>.toml` |
 | **`ext/agent`** | 194 | **未接入**：`AgentRunner` 在 `core/src` 内零引用 |
@@ -508,19 +508,19 @@ match turn_context.multi_agent_version {
 
 #### 4.3.5 消息板：不唤醒空闲 Agent
 
-数据模型：`PostMetadata{ message_id, channel_name, author: AgentPath, thread_id, created_at }` + `SubscriptionState{ channel_name, thread_id, target_agent, enabled, last_message_id }`（`ext/agent-message-board/src/types.rs:12-64`）。
+数据模型：`PostMetadata{ message_id, channel_name, author: AgentPath, thread_id, created_at }` + `SubscriptionState{ channel_name, thread_id, target_agent, enabled, last_message_id }`（`message-board/src/types.rs:15-22` 的 `PostMetadata` + `:93-101` 的 `SubscriptionState`）。
 
 投递语义**以定向为主、非广播**：`PostDestination = Channel(String) | NewChannel(String) | Thread(Uuid)`，另有 `agents_to_notify: Vec<AgentPath>`（≤256，重复只通知一次）。整个 board 由一个 `SessionId` 限定，「每次操作都校验调用者成员资格」。
 
 最有价值的一条设计约束写在注释里：
 
 ```rust
-// codex-rs/ext/agent-message-board/src/host.rs:17-37（注释）
+// codex-rs/message-board/src/host.rs:17-24（注释）
 /// Notification admission is atomic with turn completion: inactive agents
 /// are skipped, and no notification may start work or survive into a later turn.
 ```
 
-core 侧的适配器落成 `inject_if_running(...)`：找不到线程即 `SkippedInactive`，且用 `InterAgentCommunication::new(..., trigger_turn=false)`（`core/src/agent_message_board.rs:143-189`）。**发布后即便通知失败，内容仍可读**（写与通知解耦，`local.rs:166-175`）；`MAX_POST_BYTES = 64KiB`。
+core 侧的适配器落成 `inject_if_running(...)`：找不到线程即 `SkippedInactive`，且用 `InterAgentCommunication::new(..., trigger_turn=false)`（`core/src/session/inject.rs:22-49`）。**发布后即便通知失败，内容仍可读**（写与通知解耦，`message-board/src/local.rs:160-163`）；`MAX_POST_BYTES = 64KiB`。
 
 工具 9 个：`create_channel / get_channels / list_threads / search_posts / read_thread / read_post / subscribe / unsubscribe / post`。
 
@@ -783,13 +783,13 @@ codex 的对等能力由两代工具面承载：V1 把五个工具包在命名�
 
 也就是说 codex 的兄弟通信**不需要经过父中转**——仓库里有一个单测直接叫 `v2_reload_preserves_shared_instructions_after_root_unloads`（`core/src/agent/control_tests.rs:1906`），用例里让 sibling 给一个已卸载的 target 发消息把它唤醒（`:2001` 的 `"wake the unloaded target"`），并断言 target 线程被移除（`:1971`）而 root 未被加载（`:1984`）。相对引用则**不能上溯**：`.` 与 `..` 是保留名，直接报错（`agent_path.rs:132-134`）。
 
-**载体是持久化的 SQLite 消息板**：数据库文件固定为 `agent_message_board_1.sqlite`（`ext/agent-message-board/src/local.rs:55`），表结构包含 `channels` / `posts` / `subscriptions` / `deleted_boards`。
+**载体是持久化的 SQLite 消息板**：数据库文件固定为 `agent_message_board_1.sqlite`（`message-board/src/local/options.rs:37-39` 的默认名，`:41` 给出自定义命名空间的文件名），表结构包含 `channels` / `posts` / `subscriptions` / `deleted_boards`。
 
-模型侧有 9 个工具，名字写在一处常量里：`create_channel`、`get_channels`、`list_threads`、`search_posts`、`read_thread`、`read_post`、`subscribe`、`unsubscribe`、`post`（`agent-message-board/src/tools/spec.rs:10-20`）。**这是一块公告板（频道 / 帖子 / 订阅 / 搜索），不是一块可以「认领」的待办队列**——用 4.5 的框架说：codex 有「组队」，但没有「共享任务板」。
+模型侧有 11 个工具，枚举写在一处：`CreateChannel`、`UpsertChannel`、`GetChannels`、`ListThreads`、`SearchPosts`、`ReadThread`、`ReadPost`、`Subscribe`、`Unsubscribe`、`Post`、`Append`（`message-board/src/tools/selection.rs:7-20`，schema 在 `tools/spec.rs:11-16`）。**这是一块公告板（频道 / 帖子 / 订阅 / 搜索），不是一块可以「认领」的待办队列**——用 4.5 的框架说：codex 有「组队」，但没有「共享任务板」。
 
 投递语义是 codex 在这一层最锐利的设计。`MessageDeliveryMode` 只有两个值：`QueueOnly`（投递到邮箱但**不启动**空闲 Agent）与 `TriggerTurn`（投递到进行中的 turn，或唤醒空闲 Agent）（`core/src/agent/types.rs:56-61`）。`send_message` 用前者、`followup_task` 用后者，**把「传话」和「派活」明确分成两个工具**。
 
-板上的通知更严格：`inject_if_running` 加 `trigger_turn=false`，接收方不在跑就返回 `SkippedInactive`（`core/src/agent_message_board.rs:143-152`），模块头注释写着「This adapter never starts or restores recipients and never queues a notification for an idle agent.」。
+板上的通知更严格：`inject_if_running` 加 `trigger_turn=false`，接收方不在跑就返回 `SkippedInactive`（`core/src/session/inject.rs:28-48`），模块头注释写着「This adapter never starts or restores recipients and never queues a notification for an idle agent.」。
 
 会话内的邮箱则是内存态：`InputQueue` 的 `mailbox_pending_mails: Mutex<VecDeque<PendingMailboxCommunication>>`（`core/src/session/input_queue.rs:80`）。
 
@@ -987,7 +987,7 @@ sequenceDiagram
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | — | — | 消息板由单一 `SessionId` 限定成员，任何成员可改**他人**订阅（`api.rs:42-44`） | `teammate` **不能再 spawn teammate**（roster 扁平），进程内 teammate 也禁止再开后台 agent。依据是显式 throw（`AgentTool.tsx:272-280, 361-363`） |
-| 源码依据 | — | — | `agent-message-board/src/api.rs:24-34, 79-81` | `AgentTool.tsx:272-280` |
+| 源码依据 | — | — | `message-board/src/api.rs:115-118`（任一成员可改他人订阅，`:310-315` 的 `target_agent` 指明改谁） | `AgentTool.tsx:272-280` |
 
 > **设计理由**：平级 Agent 的组织若允许无限嵌套，会退化成一张**无界的通信图**（N 个 Agent 两两通信 = O(N²) 条通道）。CC 选择扁平的 team 结构，配合 `TEAMMATE_MESSAGES_UI_CAP = 50`，把复杂度钉死在可控范围。**注意配套的实测数据**：进程内 agent 在鲸鱼会话中「2 分钟起 292 个 agent 达 36.8GB RSS」——扁平化不是洁癖，是内存安全的必要约束。
 
@@ -995,8 +995,8 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | — | — | 通知准入与 turn 完成**原子绑定**；空闲 agent 被跳过；通知**不启动新工作、不跨 turn 存活**；发布与通知**解耦**（通知失败内容仍可读） | `<task-notification>` 仅在 `notified` 原子翻转后发送一次；终态任务的消息被 `isTerminalTaskStatus` 守卫丢弃 |
-| 源码依据 | — | — | `host.rs:17-37`；`agent_message_board.rs:143-189`；`local.rs:166-175` | `LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84` |
+| 做法 | — | — | 通知准入与 turn 完成**原子绑定**；收件人已卸载 → `SkippedInactive`；通知**不触发新 turn**（`trigger_turn: false`）、只投递一次且重试不回放到后续 turn；发布与通知**解耦**（通知失败内容仍可读） | `<task-notification>` 仅在 `notified` 原子翻转后发送一次；终态任务的消息被 `isTerminalTaskStatus` 守卫丢弃 |
+| 源码依据 | — | — | `message-board/src/host.rs:11-24`；`agent-message-board-host/src/lib.rs:219-259`；`message-board/src/local.rs:160-163` | `LocalAgentTask.tsx:224-240`；`InProcessTeammateTask.tsx:68-84` |
 
 > **设计理由**：**「给 Agent 发消息」实质上是一张隐式的 turn 触发器**。若允许消息唤醒空闲 Agent，就产生了「谁来为这次唤醒付费、若唤醒风暴如何处理」的失控面。codex 的做法是把通知降格为**纯投递**——只在接收方本来就要跑下一轮时顺带送达，从根上消除了唤醒风暴与跨 turn 状态泄漏。
 
@@ -1004,7 +1004,7 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:358`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:129-133`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
+| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:358`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:129-133`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`message-board/src/tools/selection.rs:7-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
 > **设计理由**（`[inference]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---
@@ -1047,7 +1047,7 @@ sequenceDiagram
 4. **不要让子 Agent 拥有父没有的权限** —— 三种实现（版本冻结 / feature 关闭 / 白名单）都指向同一条铁律。一旦允许扩权，「父 Agent 的权限边界」这个安全假设就失效了。
 5. **不要把「子 Agent 完成」等同于「资源已释放」** —— codex 的额度直到 `close` 才归还，这是有意的：若完成即释放，父就无法再追问。但反过来说，**若你的父 Agent 不会追问，就应当完成即释放**，否则额度会被僵尸占满。
 6. **不要用「分支切换」冒充「子 Agent 委派」** —— pi 的案例说明这是两件事：分支是**同一上下文内的视图切换**（串行、共享历史、无新实例），委派是**新上下文窗口**（隔离、可并行）。把两者混为一谈会导致「以为在并行探索、实际在串行切换」。
-7. **不要拿「进程级 peer 总线」冒充「Agent 级对等通信」** —— 对照 pi 的 `experimental/coordinator.ts`：它的 peer 是 session worker **进程**，拓扑是星形，且只有中心节点能广播（`coordinator.ts:424-445`）。真正的对等协作需要「成员身份 + 可达性 + 投递保证」三件套，进程总线一件都没提供；把两者混读会让架构判断失准。
+7. **不要把「进程间消息总线」当成「Agent 级对等通信」** —— 差别在**成员身份**这一层：codex 的消息板把身份拆成两元组（板由 `SessionId` 限定、发言人由 `ThreadId` 标识，每次操作都校验调用方成员资格，`message-board/src/api.rs:30-48`），CC 的 teammate 用 roster 名单约束「谁能找谁」。真正的对等协作需要「成员身份 + 可达性 + 投递保证」三件套，裸的进程通道一件都不提供；把两者混读会让架构判断失准。
 
 ---
 
@@ -1110,8 +1110,8 @@ sequenceDiagram
 | `codex-rs/protocol/src/agent_path.rs` | 15 / 59-73 / 132-134 | `AgentPath` / 绝对路径解析 / `.` 与 `..` 为保留名 |
 | `codex-rs/core/src/agent/control/target.rs` | 30 / 42 | 目标引用与绝对路径解析入口 |
 | `codex-rs/core/src/agent/control_tests.rs` | 1406 / 1482 | 兄弟直达的单测证据 |
-| `codex-rs/ext/agent-message-board/src/local.rs` | 55 | 消息板 SQLite 文件与表结构 |
-| `codex-rs/ext/agent-message-board/src/tools/spec.rs` | 10-20 | 消息板 9 个工具名 |
+| `codex-rs/message-board/src/local/options.rs` | 26-42 | 消息板 SQLite 文件名（默认 `agent_message_board_1.sqlite`） |
+| `codex-rs/message-board/src/tools/selection.rs` | 7-20 | 消息板 11 个工具枚举 |
 | `codex-rs/core/src/session/input_queue.rs` | 80 | 会话内邮箱（内存待决队列） |
 | `codex-rs/core/src/agent/role.rs` | 1-4 / 91-105 / 341-401 / 405-413 | 权限哲学 / 只能关闭 feature / 内置角色 / assets |
 | `codex-rs/core/src/agent/registry.rs` | 80-86 / 89-108 / 330-346 / 386-395 | 深度判定 / CAS 计数 / 上限 / `Drop` 回收 |
@@ -1129,10 +1129,10 @@ sequenceDiagram
 | `codex-rs/agent-roles/src/agent_role_config.rs` | 9-18 | `AgentRoleConfig` |
 | `codex-rs/agent-roles/src/loader.rs` | 23-117 | 角色发现与层合并 |
 | `codex-rs/collaboration-mode-templates/src/templates/plan.md` | 1-128 | Plan 模式提示词 |
-| `codex-rs/ext/agent-message-board/src/types.rs` | 12-64 | 消息板数据模型 |
-| `codex-rs/ext/agent-message-board/src/api.rs` | 24-34 / 35-87 / 129-145 | 成员校验 / 接口 / 投递目标 |
-| `codex-rs/ext/agent-message-board/src/host.rs` | 17-37 | **通知准入与 turn 原子绑定** |
-| `codex-rs/core/src/agent_message_board.rs` | 44-49 / 143-189 | 启用条件 / `inject_if_running` |
+| `codex-rs/message-board/src/types.rs` | 15-22 / 93-101 | `PostMetadata` / `SubscriptionState` |
+| `codex-rs/message-board/src/api.rs` | 30-48 / 55-141 / 310-315 | 成员校验 / 接口 / 投递目标 |
+| `codex-rs/message-board/src/host.rs` | 11-24 | **通知准入（`NotificationDelivery`）与投递语义** |
+| `codex-rs/core/src/session/inject.rs` | 22-49 | `inject_if_running`（无活动 turn 即退还，不入队） |
 | `codex-rs/protocol/src/protocol.rs` | 1823-1839 / 3077-3081 | Agent 状态枚举 / `MultiAgentVersion` |
 | `codex-rs/external-agent-migration/src/subagents.rs` | 57-87 | 外部 subagent 定义导入 |
 
