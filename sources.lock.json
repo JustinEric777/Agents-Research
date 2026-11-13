@@ -128,7 +128,7 @@
     "codex": {
       "repository": "https://github.com/openai/codex",
       "ref": "origin/main",
-      "commit": "5045589550122ec4f073d10e3d66a0813bcb7be0",
+      "commit": "c899e21cda29fdd422898ffa54893f67ece34039",
       "source_kind": "official_git_branch_tip",
       "last_tag": "rust-v0.170.0-alpha.2",
       "evidence": "source_readable",
@@ -185,7 +185,7 @@
         "codex-rs/tui/src/chatwidget.rs"
       ],
       "previous_ref": "bb64b894fd67158be0f874872e6d7bfe717e7368",
-      "commits_since_previous_ref": 1262
+      "commits_since_previous_ref": 1263
     },
     "claude_code": {
       "repository": "https://github.com/anthropics/claude-code",
