@@ -4,7 +4,7 @@ title: "第 9 章 · 任务与子 Agent"
 nav_order: 7
 parent: "第二部分 · 内核区"
 permalink: /ch/09/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -14,7 +14,7 @@ review_priority: P0
 
 **本章回答什么** —— 一个 Agent 如何把工作委派给「另一个 Agent」，以及被委派者如何被创建、驱动、通信、回收。
 
-> **当前基线补充（2026-11-12）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
+> **当前基线补充（2026-11-13）** —— 任务模型统一增加 `owner / initiator / parent / scope / budget / lease / cancel authority` 七个字段。pi 当前重点是 durable task graph 与 nested tool call；dsh 当前重点是 Agent Teams、parent-owned subagent catalog 和 initiator scope；codex 当前重点是 multi-agent session 与消息板；CC 以当前发行物资料为依据，无法核验的内部机制标为推断。子 Agent 不能只按「是否继承上下文」比较，必须同时验证权限继承、输出归属、重复投递、取消级联和恢复后的 join 行为。
 
 **四家分歧在哪** —— **这一层的分歧是四家中最大的**：子 Agent 的本体是另一个操作系统进程、一个可被驱动的会话、线程图上的一个节点，还是一个一等任务对象——四种答案互不兼容，且各自推导出完全不同的上下文继承、深度限制与结果回灌策略。
 
@@ -256,7 +256,7 @@ const proc = spawn(invocation.command, invocation.args, {
 
 - **隔离来自新进程，不是会话结构**：`--no-session` 意味着连会话都不落盘。
 - **结果解析**：逐行读 stdout 的 JSONL 事件流，只认 `message_end`（`index.ts:453`）——tool 结果不走独立事件，而是以 `role === 'toolResult'` 的 message 混在同一批里（`:458`）。
-- **三种编排模式**：single / parallel / chain；并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:38-39`），用 `mapWithConcurrencyLimit` 调度（`index.ts:813`）。
+- **三种编排模式**：single / parallel / chain；并行上限 `MAX_PARALLEL_TASKS = 8`、`MAX_CONCURRENCY = 4`（`index.ts:262-263`），用 `mapWithConcurrencyLimit` 调度（`index.ts:813`）。
 - **Agent 定义**从 `~/.pi/agent/agents/*.md`（带 frontmatter）发现。
 
 #### 4.1.4 内核确实没有子 Agent 概念
@@ -351,7 +351,7 @@ export function codexAppServerArgv(): string[] {
 }
 ```
 
-`CodexAppServerWire`（`.../codex/src/wire.ts:192`）管理单一 ephemeral thread/turn：`initialize` → `startThread(cwd)` → `runTurn(texts)`。权限模式映射到 `thread/start` 参数（`never` / `approve-for-me` / `dangerously-bypass-approvals-and-sandbox`，`wire.ts:32-43`）。
+`CodexAppServerWire`（`.../codex/src/wire.ts:192`）管理单一 ephemeral thread/turn：`initialize` → `startThread(cwd)` → `runTurn(texts)`。权限模式映射到 `thread/start` 参数（`never` / `approve-for-me` / `dangerously-bypass-approvals-and-sandbox`，`wire.ts:265-276`）。
 
 两者的共同点：**一次性、`inheritsParentContext=false`、无启动能力、workspace 来自父 session 的 cwd、失败文本只含固定安全事实、`dispose` 走 terminate → waitForExit 阶梯**。
 
@@ -526,7 +526,7 @@ core 侧的适配器落成 `inject_if_running(...)`：找不到线程即 `Skippe
 
 #### 4.3.6 与主循环的集成：深度集成，不是「未启用」
 
-证据链：`core/Cargo.toml:22-23` 依赖 graph-store 与 roles → `core/src/lib.rs:57` 重导出 `AgentControl` → `Session` 持有 `agent_control: LocalAgentControl`（`session/mod.rs:542`）→ turn 级注入 `multi_agent_version`（`session/turn_context.rs:345, 1184-1194`）与 `collaboration_mode`（`turn.rs:1540`）→ 工具面由 `tools/spec_plan.rs:1246` 装配。
+证据链：`core/Cargo.toml:22-23` 依赖 graph-store 与 roles → `core/src/lib.rs:57` 重导出 `AgentControl` → `Session` 持有 `agent_control: LocalAgentControl`（`session/mod.rs:564`）→ turn 级注入 `multi_agent_version`（`session/turn_context.rs:345, 1184-1194`）与 `collaboration_mode`（`turn.rs:1540`）→ 工具面由 `tools/spec_plan.rs:1246` 装配。
 
 明确**未启用/骨架**的部分已在 (1) 表中列出（`ext/agent`、`agent-identity`、`cloud-tasks`，以及默认关闭的 V2 与消息板）。
 
@@ -589,7 +589,7 @@ export type Task = {
 | `monitor_mcp` | monitor 工具 | **本构建为 stub** |
 | `dream` | `autoDream` 记忆整合子 Agent | 把隐藏的 fork agent **显式化为 UI 任务** |
 
-**「Dream」**：记忆整合子 Agent（4 阶段 orient / gather / consolidate / prune），原本不可见；`DreamTask` 只做 UI 暴露，不改变 dream agent 本身——源码注释直言 「pure UI surfacing via the existing task registry」（`src/tasks/DreamTask/DreamTask.ts:1-4`）。
+**「Dream」**：记忆整合子 Agent（4 阶段 orient / gather / consolidate / prune），原本不可见；`DreamTask` 只做 UI 暴露，不改变 dream agent 本身——源码注释直言 「pure UI surfacing via the existing task registry」（`src/tasks/DreamTask/DreamTask.ts:25-28`）。
 
 其 `kill` 会 `abortController.abort()` 并 `rollbackConsolidationLock(priorMtime)` 回滚锁（`:136-155`）。
 
@@ -697,7 +697,7 @@ export function filterToolsForAgent({ tools, isBuiltIn, isAsync=false, permissio
 promptMessages = [createUserMessage({ content: prompt })]
 ```
 
-**fork 子 Agent 继承父的完整历史**（`AgentTool.tsx:630` 的 `forkContextMessages = toolUseContext.messages`）：`buildForkedMessages` 克隆父 assistant 的全量 `tool_use` + 相同的占位 `tool_result` + 每个子 Agent 独享的 directive（`forkSubagent.ts:107-169`）；`useExactTools:true` 还会继承 `thinkingConfig` / `querySource`（`runAgent.ts:668-694`）。
+**fork 子 Agent 继承父的完整历史**（`AgentTool.tsx:512` 的 `forkContextMessages = toolUseContext.messages`）：`buildForkedMessages` 克隆父 assistant 的全量 `tool_use` + 相同的占位 `tool_result` + 每个子 Agent 独享的 directive（`forkSubagent.ts:107-169`）；`useExactTools:true` 还会继承 `thinkingConfig` / `querySource`（`runAgent.ts:668-694`）。
 
 system prompt 侧，fork 直接用父**已渲染好的字节**（`AgentTool.tsx:495-512`），普通路径才走 `getSystemPrompt()`（`:513-541`）。
 
@@ -777,11 +777,11 @@ dsh 的答案必须分两层读，因为它的两个包给的结论**正好相�
 
 #### 4.5.3 codex —— 消息板是论坛，不是任务队列
 
-codex 的对等能力由两代工具面承载：V1 把五个工具包在命名空间 `multi_agent_v1` 里（`handlers/multi_agents_spec.rs:14`），V2 改为扁平工具并默认放在 `collaboration` 命名空间下——`send_message`、`followup_task`、`interrupt_agent`、`list_agents`（`tools/spec_plan.rs:671-680`，各工具定义见 `multi_agents_spec.rs:185`、`:296`、`:342`）。
+codex 的对等能力由两代工具面承载：V1 把五个工具包在命名空间 `multi_agent_v1` 里（`handlers/multi_agents_spec.rs:14`），V2 改为扁平工具并默认放在 `collaboration` 命名空间下——`send_message`、`followup_task`、`interrupt_agent`、`list_agents`（`tools/spec_plan.rs:1507` `add_collaboration_tools`，各工具定义见 `multi_agents_spec.rs:185`、`:296`、`:342`）。
 
 **关键区别是「兄弟能不能被直接点名」**：目标解析支持绝对路径，`AgentPath::resolve` 对以 `/` 开头的引用直接构造绝对路径（`protocol/src/agent_path.rs:59-73`），解析入口在 `agent/control/target.rs:30`、`:42`。
 
-也就是说 codex 的兄弟通信**不需要经过父中转**——仓库里有一组单测直接叫 `v2_sibling_reload_preserves_shared_instructions_after_root_unloads`（`core/src/agent/control_tests.rs:1406`），并在用例里让一个 sibling 唤醒另一个 sibling（`:1482`、`:1494`）。相对引用则**不能上溯**：`.` 与 `..` 是保留名，直接报错（`agent_path.rs:132-134`）。
+也就是说 codex 的兄弟通信**不需要经过父中转**——仓库里有一个单测直接叫 `v2_reload_preserves_shared_instructions_after_root_unloads`（`core/src/agent/control_tests.rs:1906`），用例里让 sibling 给一个已卸载的 target 发消息把它唤醒（`:2001` 的 `"wake the unloaded target"`），并断言 target 线程被移除（`:1971`）而 root 未被加载（`:1984`）。相对引用则**不能上溯**：`.` 与 `..` 是保留名，直接报错（`agent_path.rs:132-134`）。
 
 **载体是持久化的 SQLite 消息板**：数据库文件固定为 `agent_message_board_1.sqlite`（`ext/agent-message-board/src/local.rs:55`），表结构包含 `channels` / `posts` / `subscriptions` / `deleted_boards`。
 
@@ -801,9 +801,9 @@ codex 的对等能力由两代工具面承载：V1 把五个工具包在命名�
 
 CC 的队友机制最「土」，也因此最容易照着做：**消息存在文件里，并发靠文件锁**。
 
-**邮箱载体**是每个队友一个 JSON 文件，路径 `~/.claude/teams/{team_name}/inboxes/{agent_name}.json`（`src/utils/teammateMailbox.ts:4-6`、`getInboxPath` `:56-62`）。写入用 `proper-lockfile` 加锁后再重读追加（`:165`），消息结构是 `{ from, text, timestamp, read, color?, summary? }`（`:43-51`）。
+**邮箱载体**是每个队友一个 JSON 文件，路径 `~/.claude/teams/{team_name}/inboxes/{agent_name}.json`（`src/utils/teammateMailbox.ts:56-58`、`getInboxPath` `:56-62`）。写入用 `proper-lockfile` 加锁后再重读追加（`:165`），消息结构是 `{ from, text, timestamp, read, color?, summary? }`（`:43-51`）。
 
-投递是**轮询式、非事件驱动**：进程式队友/领导由 `useInboxPoller` 按 `INBOX_POLL_INTERVAL_MS = 1000` 轮询（`src/hooks/useInboxPoller.ts:107`），进程内队友由 `waitForNextPromptOrShutdown` 按 500 ms 轮询（`src/utils/swarm/inProcessRunner.ts:697`）。
+投递是**轮询式、非事件驱动**：进程式队友/领导由 `useInboxPoller` 按 `INBOX_POLL_INTERVAL_MS = 1000` 轮询（`src/hooks/useInboxPoller.ts:83`），进程内队友由 `waitForNextPromptOrShutdown` 按 500 ms 轮询（`src/utils/swarm/inProcessRunner.ts:689`）。
 
 **三种后端**由 `BackendType = 'tmux' | 'iterm2' | 'in-process'` 声明（`src/utils/swarm/backends/types.ts:9`），选择优先级写成了文档注释：在 tmux 内就用 tmux（即使在 iTerm2 里）、iTerm2 且 `it2` 可用就用 iTerm2、否则 tmux 外部会话、都不可用才回退 in-process（`backends/registry.ts:128-140`、`:159`）。非交互 `-p` 模式强制走 in-process。
 
@@ -986,7 +986,7 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | — | — | 消息板由单一 `SessionId` 限定成员，任何成员可改**他人**订阅（`api.rs:79-81`） | `teammate` **不能再 spawn teammate**（roster 扁平），进程内 teammate 也禁止再开后台 agent。依据是显式 throw（`AgentTool.tsx:272-280, 361-363`） |
+| 做法 | — | — | 消息板由单一 `SessionId` 限定成员，任何成员可改**他人**订阅（`api.rs:42-44`） | `teammate` **不能再 spawn teammate**（roster 扁平），进程内 teammate 也禁止再开后台 agent。依据是显式 throw（`AgentTool.tsx:272-280, 361-363`） |
 | 源码依据 | — | — | `agent-message-board/src/api.rs:24-34, 79-81` | `AgentTool.tsx:272-280` |
 
 > **设计理由**：平级 Agent 的组织若允许无限嵌套，会退化成一张**无界的通信图**（N 个 Agent 两两通信 = O(N²) 条通道）。CC 选择扁平的 team 结构，配合 `TEAMMATE_MESSAGES_UI_CAP = 50`，把复杂度钉死在可控范围。**注意配套的实测数据**：进程内 agent 在鲸鱼会话中「2 分钟起 292 个 agent 达 36.8GB RSS」——扁平化不是洁癖，是内存安全的必要约束。

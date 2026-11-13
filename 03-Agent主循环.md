@@ -4,7 +4,7 @@ title: "第 3 章 · Agent 主循环"
 nav_order: 1
 parent: "第二部分 · 内核区"
 permalink: /ch/03/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,7 @@ review_priority: P1
 
 # 第 3 章：Agent 主循环 —— 一次「模型 → 工具 → 决策」如何被驱动
 
-> **当前基线补充（2026-11-12）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
+> **当前基线补充（2026-11-13）** —— 当前主循环按 `model call → capability projection → approval → execution → settlement → persistence → observation` 七段审计。pi 的 nested tool call、dsh 的 profile 化 loop、codex 的 multi-agent turn、CC 的发行物行为都要说明每一段的状态归属。
 
 **本章回答什么** —— 本章回答整个运行时最基础的一个问题：**谁在驱动这个循环、它什么时候停、停在哪里**。
 
@@ -242,7 +242,7 @@ message.stopReason === "length"
 
 #### 4.1.3 扩展点：4 个回调
 
-`prepareNextTurn`（`types.ts:274`）、`finishTurn`（`types.ts:260`）、`beforeToolCall`/`afterToolCall`。这是**回调式扩展**：简单、直观，但多个插件难以协作（无优先级、无链式改写、无法 reject 后由他人接管）。
+`prepareNextTurn`（`types.ts:274`）、`finishTurn`（`types.ts:326`）、`beforeToolCall`/`afterToolCall`。这是**回调式扩展**：简单、直观，但多个插件难以协作（无优先级、无链式改写、无法 reject 后由他人接管）。
 
 #### 4.1.4 状态：全内存
 
@@ -587,7 +587,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 无内置（`[code]` 靠 `prepareNextTurn` 外挂） | 无内置 token 预算（README 明示 「No built-in turn budget」），靠 `request-error` 瀑布 | 三阶段压缩 + `ContextWindowExceeded` 错误分类驱动重试（`:334`/`:737`/`:1659`） | 阻塞上限**预判**（`:628-648`，`AUTOCOMPACT_BUFFER_TOKENS=13_000` `autoCompact.ts:62-65`）+ 事后 `prompt_too_long` 处理（`:1070-1183`） |
+| 做法 | 无内置（`[code]` 靠 `prepareNextTurn` 外挂） | 无内置 token 预算（README 明示 「No built-in turn budget」），靠 `request-error` 瀑布 | 三阶段压缩 + `ContextWindowExceeded` 错误分类驱动重试（`:334`/`:737`/`:1659`） | 阻塞上限**预判**（`:628-648`，`AUTOCOMPACT_BUFFER_TOKENS=13_000` `autoCompact.ts:58-61`）+ 事后 `prompt_too_long` 处理（`:1070-1183`） |
 
 > **设计理由**：codex 与 CC 都做**事前预判**，因为它能避免一次注定失败的 API 调用；pi/dsh 把它留给上层，保持核心循环的最小化。`[inference]`：预判需要准确的 token 计量，而这依赖对 provider 计费口径的掌握——codex/CC 与 provider 关系更紧密。
 
@@ -595,7 +595,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:1934`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:170`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
+| 做法 | 无（`:244` 遇 `stopReason === "error"` 直接 return） | `agent/request-error` 瀑布决定 retry，复用 `preparedCall`（`:476-486`） | 采样本层重试 `loop{}`（`turn.rs:2079`）+ 错误分类（`TurnAborted` 逐层返回） | `withRetry.ts:84`（默认 10 次）、`MAX_529_RETRIES=3`（`:54`）、`shouldRetry` 判定（`:696`）；529 触发**模型降级**（`:335-351` 抛 `FallbackTriggeredError` → `query.ts:893-950` 捕获切换，并 strip thinking 签名 `:927-929`） |
 
 > **设计理由**（`[inference]`）：CC 的 API 错误分支**显式跳过 stop hooks**（`:1262-1265`），注释意为「不要在错误上再跑用户 hook，否则可能触发死亡螺旋」。这是四家中唯一考虑到「hook 本身可能放大故障」的实现。
 
@@ -603,7 +603,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | `AbortSignal` 层层传递，`:572/610/617/638/732/751` 六处检查；保留 partialMessage | 分类（user/parent/hook/disposed），写入 `turn/end`；保留已交付文本为 `interrupted: true` | `CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:243`）；已完成 lifecycle 不重写 | 5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对 |
+| 做法 | `AbortSignal` 层层传递，`:572/610/617/638/732/751` 六处检查；保留 partialMessage | 分类（user/parent/hook/disposed），写入 `turn/end`；保留已交付文本为 `interrupted: true` | `CancellationToken` → `dispatch_handle.abort()`（`parallel.rs:166`）；已完成 lifecycle 不重写 | 5 类 abort reason（`StreamingToolExecutor.ts:210` `getAbortReason`：`sibling_error`/`user_interrupted`/`streaming_fallback`/…）；中断时 `getRemainingResults` 生成**合成 tool_result**（`:1015-1052`），保证 tool_use/result 配对 |
 
 > **设计理由**（`[inference]`）：dsh 的分类最细，因为它要落盘；CC 的合成结果最实用，因为 Anthropic API **强制**要求 tool_use 与 tool_result 严格配对，缺一个就 400。
 
@@ -611,7 +611,7 @@ if (streamingFallbackOccured) {
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | `claude.ts:2310-2334` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:712-741`） |
+| 做法 | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | **/  /**：无内建 watchdog | `claude.ts:2509-2533` 抛流中断错误 → **非流式 fallback**（`:2508-2531`）；fallback 触发时 `onStreamingFallback` 置位（`:2509-2511`/`:2629-2630`），query 侧作废孤儿消息并重建执行器（`query.ts:678-707`） |
 
 > **设计理由**（`[inference]`）：fallback 后已流出的 thinking 块签名失效，必须撤销；CC 用 tombstone 广播给所有消费者，而不是就地删除（见 第 7 章 5.3）。
 

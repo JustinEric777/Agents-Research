@@ -4,7 +4,7 @@ title: "第 12 章 · Hook 与扩展机制"
 nav_order: 10
 parent: "第二部分 · 内核区"
 permalink: /ch/12/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,7 @@ review_priority: P1
 
 # 第 12 章：Hook 与扩展机制 —— 在哪一层留口子，留多大的口子
 
-> **当前基线补充（2026-11-12）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
+> **当前基线补充（2026-11-13）** —— 当前扩展复核把插件生命周期、卸载残留、权限边界、热重载、schema 变更和错误隔离放在同一条链上；dsh plugin profile、pi Code Mode / extension、codex hooks 和 CC 发行物能力不能只按 hook 数量比较。
 
 **本章回答什么** —— 前九章看的都是 Agent 「自己怎么做」；本章看的是「别人能让它做什么」。
 
@@ -45,7 +45,7 @@ review_priority: P1
     - **codex** —— 开了**两条互不相通的通道**——进程外的 hooks 与进程内的 `extension-api`
     - **CC** —— 则把 hooks / plugins / skills / commands / MCP / subagents **并置成六层**
 
-2. **只有 codex 同时提供进程外与进程内两种扩展，而且源码里写明了分工线**：要改写工具 payload 用 hooks，要拥有工具实现用 `ToolContributor`（`ext/extension-api/src/contributors.rs:346-351` 的注释）。**这条分工线是全章最值得抄的一句话**——它解释了为什么单靠 hook 做不了完整扩展。
+2. **只有 codex 同时提供进程外与进程内两种扩展，而且源码里写明了分工线**：要改写工具 payload 用 hooks，要拥有工具实现用 `ToolContributor`（`ext/extension-api/src/contributors.rs:402-407` 的注释）。**这条分工线是全章最值得抄的一句话**——它解释了为什么单靠 hook 做不了完整扩展。
 
 3. **hook 协议正在形成事实标准，而 dsh 用代码把它证明了**：`hooks-claude-code` 与 `hooks-codex` 两个包把 CC 与 codex 的 hook 协议**各实现了一遍**——配置结构、stdin JSON、`exit 2` 语义、matcher 语义全部对齐。但兼容的是**子集**：CC 的 27 个事件里只接线 7 个、codex 的 12 个里只接线 5 个，未支持字段采取「解析后跳过 + 告警」的有界降级。
 
@@ -186,7 +186,7 @@ beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promi
 | **消息级** | `message_start` / `_update` / `_end` | `message_end` 可替换（**必须同 role**） |
 | **工具级** | `tool_execution_start` / `_update` / `_end` / `tool_call` / `tool_result` | `tool_call` 可 `block`、可原地改 `input`；`tool_result` 可替换结果 |
 
-外加 10 个注册与动作方法：`registerTool` / `registerCommand` / `registerShortcut` / `registerFlag` / `registerMessageRenderer` / `registerMarkdownTransformer` / `registerEntryRenderer` / `registerProvider` / `sendMessage` / `appendEntry` 等（`types.ts:1426-1620`），以及一个完整的 `ctx.ui`（`types.ts:137-288`，含 `select` / `confirm` / `custom` / `setWidget` / `setFooter` / `addAutocompleteProvider` 等）。
+外加 10 个注册与动作方法：`registerTool` / `registerCommand` / `registerShortcut` / `registerFlag` / `registerMessageRenderer` / `registerMarkdownTransformer` / `registerEntryRenderer` / `registerProvider` / `sendMessage` / `appendEntry` 等（`types.ts:1717-1911`），以及一个完整的 `ctx.ui`（`types.ts:137-288`，含 `select` / `confirm` / `custom` / `setWidget` / `setFooter` / `addAutocompleteProvider` 等）。
 
 **扩展生态最直接的证据是示例数量**：`examples/extensions/` 下有 **50 余个示例**，涵盖危险命令确认、同名覆盖只读工具、动态注册工具、自定义 provider、自绘 UI 覆层、微 VM 路由、会话摘要等（完整清单一句话描述见 `examples/extensions/README.md:17-137`）。**能写出来的示例覆盖面，本身就是扩展能力的度量**。
 
@@ -213,14 +213,14 @@ for (const tool of wrappedExtensionTools as AgentTool[]) {
 pi 的错误处理有一条清晰但**不完全一致**的规则：
 
 - **普通事件处理器抛错不影响主流程**：`emit` 逐个 try/catch，记录后继续下一个（`runner.ts:1003`）——事件是旁路通知。
-- **`tool_call` 处理器抛错会阻断该工具**：`emitToolCall` **故意没有 try/catch**（`runner.ts:1134-1152`），错误冒泡并被包成阻断错误：
+- **`tool_call` 处理器抛错会阻断该工具**：`emitToolCall` **故意没有 try/catch**（`runner.ts:1260-1278`），错误冒泡并被包成阻断错误：
 
 ```ts
 // packages/coding-agent/src/core/agent-session.ts:547
 throw new Error(`Extension failed, blocking execution: ${String(err)}`);
 ```
 
-随后内核在 `prepareToolCall` 捕获，转成错误的工具结果（`agent-loop.ts:764-770`）。设计意图是「安全的默认是拒绝」——权限钩子崩了不能当作通过。
+随后内核在 `prepareToolCall` 捕获，转成错误的工具结果（`agent-loop.ts:736-742`）。设计意图是「安全的默认是拒绝」——权限钩子崩了不能当作通过。
 
 其他值得一提的边界：`message_end` 替换若改变了 role 则报错并忽略（`runner.ts:1055-1062`）；边界 `entries` 非法时**整体丢弃**并清空 `continue`（`runner.ts:962-976`），保证坏状态不写进会话树；热重载后旧 `ctx` 再被调用会抛错（`loader.ts:185-192`）。
 
@@ -461,7 +461,7 @@ try {
 - **配置读不了就不注册**：解析失败只 warn 并 return，agent 照常启动（`hooks-claude-code/src/index.ts:119`）——「它是兼容适配器而非动力工具」。
 - **非法输出按纯文本处理**，不当错误：顶层 `decision` 只接受 `approve` / `block`，`allow` / `deny` / `ask` 只在 `hookSpecificOutput.permissionDecision` 里（`codec.ts:32` 的注释明确解释了这个 schema 约束）。
 - **合并与顺序无关**：串行执行只为让 `hook/invoked` 与 `hook/result` 在日志里相邻，**结论必须与顺序无关**（`merge.ts:91`、`hooks-claude-code/README.md:95/107`）。
-- **detached 运行与 dispose 静止**：SessionStart / SubagentStart / SubagentStop 无人 await，用 `createDetachedRuns` 追踪整条链，dispose 时先 abort 再 drain，保证 `fiber.dispose()` 返回即无残留回调（`detached.ts:53`）。
+- **detached 运行与 dispose 静止**：SessionStart / SubagentStart / SubagentStop 无人 await，用 `createDetachedRuns` 追踪整条链，dispose 时先 abort 再 drain，保证 `fiber.dispose()` 返回即无残留回调（`detached.ts:43`）。
 - **有界降级而非伪造能力**：CC 侧 `updatedInput` 只解析不生效（只 warn，`hooks-claude-code/src/index.ts:181`）；codex 侧 PreToolUse 只支持 `deny`。设计原则写在类型定义里：
 
 ```ts
@@ -642,7 +642,7 @@ if enabled && (source.bypass_hook_trust || matches!(trust_status, HookTrustStatu
 设计意图是**把「配置可见」与「配置可信可执行」解耦**——hook 是任意命令执行，看见不等于该跑。
 
 - **无 hooks 配置时零开销**：feature 关闭且无插件 hook 时引擎直接空构造，不做发现（`engine/mod.rs:238-246`）。
-- **legacy `notify` 与新引擎隔离**：旧 `notify` 被包装成一个独立 `Hook` 挂在 `AfterAgent` 上，**不进** `ClaudeHooksEngine`（`registry.rs:124-129`），且源码里有待删除标记（`legacy_notify.rs:44-45` 的 TODO）。
+- **legacy `notify` 与新引擎隔离**：旧 `notify` 被包装成一个独立 `Hook` 挂在 `AfterAgent` 上，**不进** `ClaudeHooksEngine`（`registry.rs:218-223`），且源码里有待删除标记（`legacy_notify.rs:44-45` 的 TODO）。
 
 ### 4.4 Claude-Code —— 六层并置，hooks 是最强的一层
 
@@ -678,7 +678,7 @@ export const HooksSchema = lazySchema(() =>
 )
 ```
 
-**可持久化的 hook 类型有 4 种**（`HookCommandSchema = z.discriminatedUnion('type', [BashCommandHook, PromptHook, AgentHook, HttpHook])`，`src/schemas/hooks.ts:176-189`），另有 2 种仅内存（`callback` / `function`）。通用字段含 `if`（**权限规则预过滤**）、`timeout`、`statusMessage`、`once`、`async`、`asyncRewake`、`shell`（`hooks.ts:32-65`）。
+**可持久化的 hook 类型有 4 种**（`HookCommandSchema = z.discriminatedUnion('type', [BashCommandHook, PromptHook, AgentHook, HttpHook])`，`src/schemas/hooks.ts:155-168`），另有 2 种仅内存（`callback` / `function`）。通用字段含 `if`（**权限规则预过滤**）、`timeout`、`statusMessage`、`once`、`async`、`asyncRewake`、`shell`（`hooks.ts:32-65`）。
 
 执行特征三条：**全部匹配的 hook 并行执行**（`src/utils/hooks.ts:3084`）；超时按类型独立默认为 command 10min / prompt 30s / agent 60s / http 10min / async 后台 15s；超时通过 `createCombinedAbortSignal` 与父级 abort 合流（`:3089`）。
 

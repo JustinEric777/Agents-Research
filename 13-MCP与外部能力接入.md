@@ -4,7 +4,7 @@ title: "第 13 章 · MCP 与外部能力接入"
 nav_order: 1
 parent: "第三部分 · 外围区"
 permalink: /ch/13/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -18,7 +18,7 @@ review_priority: P0
 
 **读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
-> **当前基线补充（2026-11-12）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.322` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
+> **当前基线补充（2026-11-13）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.322` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
@@ -34,7 +34,7 @@ review_priority: P0
 >
 > **易混点**：本章的「能力」指**模型可调用的外部工具与资源**，不含本体内建工具（第 5 章）。MCP 在本层被当作一个整体看待；第 12 章只把 MCP server 计作「一种扩展单位」来数，两章的切分口径不同，见 2.2。
 >
-> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.322` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:117`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
+> **门控提示**：本章 CC 侧源码引用取自 npm 包 source map 还原树，**不属当前 `v2.1.322` 的同版本证据**（当前只采信发行物资料）；相关实现描述按 `[inference]` 理解，不得写成当前发行物默认行为。凡 `feature('...')` 包裹的代码，引用处须写明「还原版可见 ≠ 发布版启用」。本章已知门控点：`MCP_SKILLS`（`client.ts:241`、`:1392`）、`CHICAGO_MCP`（`client.ts:241`、`:245`、`:926`）、`KAIROS` / `KAIROS_CHANNELS`（`useManageMCPConnections.ts:473`）。
 
 ---
 
@@ -149,7 +149,7 @@ review_priority: P0
 | 分页 | resources / templates 支持 cursor 与聚合 | 交给 SDK 聚合（`tools.ts:123`） | 自建上限：100 页 / 2,048 条（`pagination.rs:9-11`） | **无**（不消费 cursor） |
 | 调用链归口 | 内置 MCP extension 注册为 pi tool，并支持 Code Mode / tool search | 统一 `ctx.tools.register`（`tools.ts:150`） | 工具表 + 一等审批动作（`mcp_tool_exposure.rs:142`、`mcp_tool_call.rs:1536`） | 规则匹配层（`permissions.ts:238-269`） |
 | 凭据处理 | OAuth credential store + headers/env | 静态 `env` / `headers`（`transport.ts:37`、`:43`） | keyring + 文件回退 + OAuth + 企业 EMA（`oauth.rs:92`、`mcp_ema.rs:29`） | SecureStorage + OAuth + XAA（`auth.ts:1376`、`xaa.ts:1-17`） |
-| 重连退避 | transient HTTP / disconnected 状态下懒重连；精确上限待补充源码复核 | 500 ms 起、30 s 封顶、10 次（`connection.ts:41-46`） | 1 s 起、30 s 封顶，且只对内置 `codex_apps` 生效（`rmcp_client.rs:106-107`） | 1 s 起、30 s 封顶、5 次，且只对非 stdio / 非 sdk（`useManageMCPConnections.ts:88-90`、`:356`） |
+| 重连退避 | transient HTTP / disconnected 状态下懒重连；精确上限待补充源码复核 | 500 ms 起、30 s 封顶、10 次（`connection.ts:41-46`） | 1 s 起、30 s 封顶，且只对内置 `codex_apps` 生效（`rmcp_client.rs:44-45`） | 1 s 起、30 s 封顶、5 次，且只对非 stdio / 非 sdk（`useManageMCPConnections.ts:88-90`、`:356`） |
 | 启动失败默认 | 默认不阻断；`--no-mcp` 可完全关闭 | 不阻断（`index.ts:128`） | 不阻断，除非 `required`（`required.rs:15`） | 不阻断（置 `failed` 并清空工具） |
 | 反向 elicitation | 当前源码入口未纳入本轮锚点，标 `unverified` | 不支持 | 三层（标准 / form 扩展 / 设备验证） | 支持，走对话框 + hooks |
 | resources | 支持 list / templates / read 三个工具 | 支持（三个共享工具） | 支持（含分页收集） | 支持（不支持订阅） |
@@ -747,7 +747,7 @@ pub enum McpServerTransportConfig {
 }
 ```
 
-`McpServerConfig` 的字段面（`mcp_types.rs:218` 起）覆盖了 `enabled` / `required` / `startup_timeout_sec` / `tool_timeout_sec` / `default_tools_approval_mode` / `enabled_tools` / `disabled_tools` / `scopes` / `oauth` / `supports_parallel_tool_calls` / `omit_tools_from` 等——**每一条都是一个可配的接入策略**，粒度远细于其余三家。
+`McpServerConfig` 的字段面（`mcp_types.rs:281` 起）覆盖了 `enabled` / `required` / `startup_timeout_sec` / `tool_timeout_sec` / `default_tools_approval_mode` / `enabled_tools` / `disabled_tools` / `scopes` / `oauth` / `supports_parallel_tool_calls` / `omit_tools_from` 等——**每一条都是一个可配的接入策略**，粒度远细于其余三家。
 
 来源仲裁是本层最重的一块。5 类来源被建模成枚举：
 
@@ -769,7 +769,7 @@ pub enum McpServerSource {
 }
 ```
 
-仲裁靠一个 `RegistrationPrecedence` 的序（`catalog.rs:115-118`），唯一被硬编码的内置 server 是 `codex_apps`（`catalog.rs:96`、`mcp/mod.rs:64`）。插件侧还有两种清单形状——`.mcp.json` 的 `mcp_servers` 键或裸 server 映射：
+仲裁靠一个 `RegistrationPrecedence` 的序（`catalog.rs:115-118`），唯一被硬编码的内置 server 是 `codex_apps`（`catalog.rs:96`、`mcp/mod.rs:133`）。插件侧还有两种清单形状——`.mcp.json` 的 `mcp_servers` 键或裸 server 映射：
 
 `codex-rs/codex-mcp/src/plugin_config.rs:44-48`
 ```rust
@@ -943,7 +943,7 @@ impl McpProtocolMode {
 
 实际发出的 capabilities 只有一项加若干受信扩展：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:1368-1389`
+`codex-rs/codex-mcp/src/rmcp_client.rs:1366-1387`
 ```rust
 let mut capabilities = ClientCapabilities::default();
 capabilities.elicitation = Some(client_elicitation_capability);
@@ -1014,7 +1014,7 @@ const MAX_TOOL_NAME_LENGTH: usize = 128;
 const CALLABLE_NAME_HASH_LEN: usize = 12;
 ```
 
-超限时的处理由 `unique_callable_parts`（`tools.rs:289`）负责：截断后追加 sha1 前缀 12 位。与 dsh 的差异是 `128` 对 `64`——codex 的目标线格式允许更长的名字，所以它的截断触发得更少。
+超限时的处理由 `unique_callable_parts`（`tools.rs:329`）负责：截断后追加 sha1 前缀 12 位。与 dsh 的差异是 `128` 对 `64`——codex 的目标线格式允许更长的名字，所以它的截断触发得更少。
 
 分页是**客户端内部收全**，并且对四个维度都设了界：
 
@@ -1079,7 +1079,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 审批不是复用某个通用动作，而是**为 MCP 建了一个专用动作类型**：
 
-`codex-rs/core/src/mcp_tool_call.rs:1713-1743`
+`codex-rs/core/src/mcp_tool_call.rs:1721-1751`
 ```rust
     let action = ApprovalAction::McpToolCall {
         id: call_id.to_string(),
@@ -1127,7 +1127,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
 
 动作随后走与内置工具同一个审批入口，但**返回值多了一维**：
 
-`codex-rs/core/src/mcp_tool_call.rs:1805-1814`
+`codex-rs/core/src/mcp_tool_call.rs:1813-1822`
 ```rust
     let approval = sess.request_approval(action, approval_context).await;
     Some(McpToolApproval {
@@ -1141,7 +1141,7 @@ if registry.register_external_with_exposure(handler, tool_exposure) && fits_agen
     })
 ```
 
-`decision` 是「批没批」，`source` 是「**谁批的**」（`Option<ApprovalResolutionSource>`，`mcp_tool_call.rs:1642`）。这一维的存在说明 codex 的审批链上不止一个裁决者——Guardian 自动复核与用户人工点同意走同一条返回路径，但下游需要知道区别。另外三种错误被映射成三种不同语义：`Rejected` → 拒绝（带理由）、`Codex(_)` → 中止、其他 → 原样透传，**没有一种会退化成「当作同意」**。
+`decision` 是「批没批」，`source` 是「**谁批的**」（`Option<ApprovalResolutionSource>`，`mcp_tool_call.rs:1817`）。这一维的存在说明 codex 的审批链上不止一个裁决者——Guardian 自动复核与用户人工点同意走同一条返回路径，但下游需要知道区别。另外三种错误被映射成三种不同语义：`Rejected` → 拒绝（带理由）、`Codex(_)` → 中止、其他 → 原样透传，**没有一种会退化成「当作同意」**。
 
 自动放行条件也被显式建模，而不是散落在各处：
 
@@ -1173,7 +1173,7 @@ pub fn mcp_permission_prompt_is_auto_approved(
 
 反向情形被单独处理，且拒绝语写得很直白：
 
-`codex-rs/core/src/mcp_tool_call.rs:1846-1854`
+`codex-rs/core/src/mcp_tool_call.rs:1854-1862`
 ```rust
     if *approval_policy == AskForApproval::Never {
         return ApprovalResolution {
@@ -1255,7 +1255,7 @@ pub struct StoredOAuthTokens {
 | `File` | `save_oauth_tokens_to_file` | `record_save_attempt(Store::File, &result)` |
 | `Keyring` | `…with_keyring_and_cleanup_file` | `record_save_attempt(telemetry::keyring(_), &result)` + 失败时 `record_secure_error` |
 
-`observation` 来自这一行开头的 `telemetry::policy(store_mode, keyring_backend_kind, Operation::Save)`（`oauth.rs:482`），它产出的是 `codex_otel::auth_storage::StorageTelemetry`。**关键在于它携带什么**——那个模块自己的文档注释就是答案：
+`observation` 来自这一行开头的 `telemetry::policy(store_mode, keyring_backend_kind, Operation::Save)`（`oauth.rs:500`），它产出的是 `codex_otel::auth_storage::StorageTelemetry`。**关键在于它携带什么**——那个模块自己的文档注释就是答案：
 
 `codex-rs/rmcp-client/src/oauth/telemetry.rs:1`
 ```rust
@@ -1322,13 +1322,21 @@ fn attach_authorization(&self, params: &mut HttpRequestParams) {
 
 最后是一条与 CC 同构但更严的机制：codex 允许用本地命令产出 HTTP 头，并对它设了独立的执行预算：
 
-`codex-rs/rmcp-client/src/http_headers.rs:43-44`
+`codex-rs/http-headers-helper/src/lib.rs:21-22`
 ```rust
 const HELPER_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_HELPER_OUTPUT_BYTES: usize = 64 * 1024;
 ```
 
-即：**外部命令可以参与鉴权，但它的输出被当作不可信输入**（限时 10 秒、限长 64 KiB）。CC 的 `headersHelper` 是同一模式的实现，但它多了一道工作区信任检查（见 4.4.6）。
+即：**外部命令可以参与鉴权，但它的输出被当作不可信输入**（限时 10 秒、限长 64 KiB）。执行预算已从 `rmcp-client` 抽到独立的 `codex-http-headers-helper` crate，调用侧只负责组装与缓存。
+
+调用侧的三条约束决定了这套机制不会变成「任意头注入」：
+
+- **只在同源请求上注入**：`prepare_request` 先比对 `Url::origin()`，不同源直接原样放行（`rmcp-client/src/http_headers.rs:152-154`）。
+- **显式凭据优先**：helper 给出的 `Authorization` 会被请求里已有的 bearer/OAuth 覆盖，不反向覆盖（`:186-194`）。
+- **重定向一律 `Stop`**：避免跨跳把 helper 头带到第三方主机（`:185`），并对 `proxy-authorization` 单独做跳转校验（`:296-307`）。
+
+刷新策略也从「每次 401 重跑」改成 **epoch 分组**：401/403 先推进 `refresh_epoch`，同一批被拒请求共享一次 helper 调用，值没变就不重试（`:105-134`、`:242-272`）。CC 的 `headersHelper` 是同一模式的实现，但它多了一道工作区信任检查（见 4.4.6）。
 
 #### 4.3.7 生命周期：required 才阻断，其余降级重连
 
@@ -1342,7 +1350,7 @@ pub(crate) struct McpConnectionSet {
     network_policy_metadata: Option<Arc<dyn NetworkPolicyMetadataProvider>>,
     servers: HashMap<McpServerKey, McpServerView>,
     pub(crate) event_stream_connection: Option<Arc<EventStreamConnectionSettings>>,
-    disabled_servers: Vec<String>,
+    disabled_servers: Vec<McpServerKey>,
     required_servers: Vec<McpServerKey>,
     optional_startup_deadline: OnceLock<tokio::time::Instant>,
     tool_plugin_context: Arc<ToolPluginContext>,
@@ -1357,7 +1365,7 @@ pub(crate) struct McpConnectionSet {
 
 启动结果被汇总成一个三分清单（就绪 / 取消 / 失败）并以事件发出，**失败不是错误而是事件**：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:1246-1260`
+`codex-rs/codex-mcp/src/connection_manager.rs:1237-1251`
 ```rust
                 for (key, outcome) in outcomes {
                     let Some(server_name) = legacy_name(key) else {
@@ -1401,7 +1409,7 @@ pub(crate) struct McpConnectionSet {
 
 失败之后还会**自动排一次后台重连**，而不是等用户手动操作：
 
-`codex-rs/codex-mcp/src/connection_manager.rs:1171-1173`
+`codex-rs/codex-mcp/src/connection_manager.rs:1159-1161`
 ```rust
 if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
     async_managed_client.reconnect_failed_startup().await;
@@ -1410,7 +1418,7 @@ if matches!(&outcome, Err(StartupOutcomeError::Failed { .. })) {
 
 超时的两个默认值把「连接」与「调用」分开给：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:122-126`
+`codex-rs/codex-mcp/src/rmcp_client.rs:124-128`
 ```rust
 pub(crate) const DEFAULT_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) const DEFAULT_TOOL_TIMEOUT: Duration = Duration::from_secs(300);
@@ -1421,7 +1429,7 @@ const CODEX_APPS_RECONNECT_MAX_BACKOFF: Duration = Duration::from_secs(30);
 
 退避公式带一个封顶的指数与五次封顶：
 
-`codex-rs/codex-mcp/src/rmcp_client.rs:266-271`
+`codex-rs/codex-mcp/src/rmcp_client.rs:272-277`
 ```rust
 fn codex_apps_reconnect_backoff(consecutive_failures: u32) -> Duration {
     let exponent = consecutive_failures.saturating_sub(1).min(5);
@@ -1910,7 +1918,7 @@ server 日志通知也没有处理器：`notifications/message` 在 `src/service
 
 ## 五、横向对比矩阵
 
-> **当前基线说明（2026-11-12）**：本矩阵的 pi 列已按 `v1.5.2` 重标：MCP 客户端在 `v1.4.0` 下沉为独立包 `packages/mcp/`（client / oauth / transports），`v1.5.2` 又在 `packages/mcp/src/output-limit.ts` 增加了一层 20 KiB 的模型可见输出上限；扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
+> **当前基线说明（2026-11-13）**：本矩阵的 pi 列已按 `v1.5.2` 重标：MCP 客户端在 `v1.4.0` 下沉为独立包 `packages/mcp/`（client / oauth / transports），`v1.5.2` 又在 `packages/mcp/src/output-limit.ts` 增加了一层 20 KiB 的模型可见输出上限；扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
 
 一次外部工具调用要连穿四层，其中只有「注册」与「判定」两处是本层与其他层的接口。把这四个接口画出来，本章与其他章的接缝就清楚了。
 
@@ -2057,7 +2065,7 @@ flowchart TD
 | 放弃后 | 当前源码 / unverified | 注销工具、清空 instructions | 保留上次目录 | 置 `failed`，等用户手动重连 |
 | 覆盖范围缺口 | 当前源码 / unverified | 无 | **只覆盖 `codex_apps`** | **不覆盖 stdio / sdk** |
 | 源码依据 | — | `connection.ts:211-245`、`:41-46` | `rmcp_client.rs:278-283` | `useManageMCPConnections.ts:88-90`、`:447-450` |
-| 依据（缺口） | — | — | `rmcp_client.rs:106-107` 的常量名带 `CODEX_APPS_` 前缀 | `useManageMCPConnections.ts:356` |
+| 依据（缺口） | — | — | `rmcp_client.rs:123-124` 的常量名带 `CODEX_APPS_` 前缀 | `useManageMCPConnections.ts:356` |
 
 > **设计理由**：**「不是所有断开都该重连」是三家的一致判断**，只是各自的表达不同。dsh 用稳定窗区分「抖动」与「崩溃循环」；CC 用传输类型区分「进程没了」与「链路断了」；codex 则把重连预算只投给它唯一能验证的 server。三种表达指向同一个经验：**盲目重连会把「已损坏的连接」变成「持续的负载」**。
 

@@ -4,7 +4,7 @@ title: "第 7 章 · 消息 / 事件 / Session"
 nav_order: 5
 parent: "第二部分 · 内核区"
 permalink: /ch/07/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P0
@@ -18,7 +18,7 @@ review_priority: P0
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
-> **当前基线补充（2026-11-12）** —— 事实源不再只比较「消息怎样存」。pi 自 `v1.4.0` 起把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-55`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`e8f7b93a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`6bfdc75f`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.322` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
+> **当前基线补充（2026-11-13）** —— 事实源不再只比较「消息怎样存」。pi 自 `v1.4.0` 起把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-55`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`e8f7b93a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`50455895`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.322` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
@@ -124,16 +124,16 @@ review_priority: P0
 
 | 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 消息联合类型 | `Message`（4 成员）`ai/types.ts:553` | `Message`（role map）`llm/message.ts:196` | `ResponseItem`（enum）`models.rs:1011` | `Message`（9 成员）`types/message.ts:124-134` |
+| 消息联合类型 | `Message`（4 成员）`ai/types.ts:553` | `Message`（role map）`llm/message.ts:196` | `ResponseItem`（enum）`models.rs:1133` | `Message`（9 成员）`types/message.ts:124-134` |
 | 消息基类 | `AgentMessage` `agent/types.ts:370` | `MessageBase`（id + content + **source**） | 各 enum 变体自带字段 | `MessageBase`（uuid/parentUuid/…）`message.ts:6-17` |
-| 内容块 | `TextContent`/`ThinkingContent`/`ToolCall`/`ImageContent` `ai/types.ts:364-386` | `ContentBlockMap` 声明合并 `llm/types.ts:138` | `ContentItem` 4 变体 `models.rs:878` | 复用 Anthropic API 的 block 结构 |
-| 溯源字段 | `byTaskId`：哪次 durable 工作写的 `types.ts:441-442` | **显式 `source`** `llm/message.ts:136` | 隐式（role） | `origin?` + `sourceToolAssistantUUID` |
+| 内容块 | `TextContent`/`ThinkingContent`/`ToolCall`/`ImageContent` `ai/types.ts:364-386` | `ContentBlockMap` 声明合并 `llm/types.ts:138` | `ContentItem` 4 变体 `models.rs:912` | 复用 Anthropic API 的 block 结构 |
+| 溯源字段 | `byTaskId`：哪次 durable 工作写的 `types.ts:164-165` | **显式 `source`** `llm/message.ts:136` | 隐式（role） | `origin?` + `sourceToolAssistantUUID` |
 | 语义轴 | `model` / `data` 双载荷 `types.ts:428-443` | **`ContextForm`** `llm/message.ts:55` | `MessagePhase`（commentary/final_answer） | `isMeta` / `isVirtual` / `isCompactSummary` |
-| 事件/条目 | `EntryRecord` + 6 种 kind `entries.ts:14-34` | `SessionEvent`（声明合并）`types.ts:493` | `TurnItem`（20+ 型，UI/协议视图）`items.rs:46` | `Message` 联合即事件（无独立日志） |
+| 事件/条目 | `EntryRecord` + 6 种 kind `entries.ts:10-30` | `SessionEvent`（声明合并）`types.ts:493` | `TurnItem`（20+ 型，UI/协议视图）`items.rs:11` | `Message` 联合即事件（无独立日志） |
 | 顺序标识 | `EntryId`（存储层铸，单调） | `seq`（branded，连续） | Vec 位置 + 三版本号 | `uuid` + `parentUuid` |
 | Session 头 | 提交标记 `MainMarker` `storage/jsonl/storage.ts:43-48` | `SessionHeader` `types.ts:94` | —（rollout 元数据） | `sessionId` + 项目目录 |
 | 分支 | **无条目级分支**；会话级 `ConversationRecord.parent` `types.ts:400-403` | `session/end-seed` 继承标记 | `forked_from_ordinal_exclusive` | `parentUuid` 分叉 |
-| 未知类型策略 | kind 是字符串；未知 kind 照常保留、只是没有 `is()` 窄化 | **`ignorable` 守卫** `types.ts:511` | serde tag 失败即错 | 宽松影子类型（`[key:string]: unknown`） |
+| 未知类型策略 | kind 是字符串；未知 kind 照常保留、只是没有 `is()` 窄化 | **`ignorable` 守卫** `types.ts:468` | serde tag 失败即错 | 宽松影子类型（`[key:string]: unknown`） |
 | 删除标记 | 用 `edits: omit` 从视图移出 | ✗（用 `surfaceOp.replace`） | ✗（重写 history） | **`TombstoneMessage`** `message.ts:82-84` |
 | 协议转换 | `convertToLlm` + adapter | `deriveEventMessage` 纯函数 | **无转换** | `normalizeMessagesForAPI` `messages.ts:1989` |
 
@@ -283,7 +283,7 @@ export type SessionEvent<T> = { ... }
 ignorable?: true      // ← 关键守卫字段
 ```
 
-**三件套声明合并**：`SessionEventMap`（`types.ts:281`）、`ContentBlockMap`（`llm/types.ts:138`）、`MessageSourceMap`（`llm/message.ts:136`）。插件可 `declare module` 增类型，**核心零改动**——compaction 的四个事件就是这样挂进来的（第 6 章）。
+**三件套声明合并**：`SessionEventMap`（`types.ts:157`）、`ContentBlockMap`（`llm/types.ts:138`）、`MessageSourceMap`（`llm/message.ts:136`）。插件可 `declare module` 增类型，**核心零改动**——compaction 的四个事件就是这样挂进来的（第 6 章）。
 
 #### 4.2.2 消息：强制的 source + 语义轴
 
@@ -562,7 +562,7 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 编译期 union，无运行时概念 | `ignorable` 守卫（`types.ts:511`）——未知事件若无标记，**拒绝重建**。源码注释（`[code]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」 | serde tag 反序列化失败即错 | 宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传 |
+| 做法 | 编译期 union，无运行时概念 | `ignorable` 守卫（`types.ts:468`）——未知事件若无标记，**拒绝重建**。源码注释（`[code]`）：「forgotten marker over-refuses（不便）而不是 silently resuming a gutted session（灾难）」 | serde tag 反序列化失败即错 | 宽松影子类型（`[key: string]: unknown`）——**静默容忍**，未知字段直接透传 |
 
 > **设计理由**：dsh 的 fail-closed 与 CC 的 fail-open 是两种极端，取决于定位——dsh 要保证「恢复出来的会话与用户实际经历一致」，CC 要保证「旧版本能打开新版本写的会话」。
 
@@ -595,7 +595,7 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 会话级 `parent` 边（`types.ts:400-403`）；条目层无继承边 | `session/end-seed` **一等日志事件**（`types.ts:427`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
+| 做法 | 会话级 `parent` 边（`types.ts:400-403`）；条目层无继承边 | `session/end-seed` **一等日志事件**（`types.ts:183`）+ `inheritedEventCount`——fork 语义可审计、可重放 | `forked_from_ordinal_exclusive`（按序列位置截断） | `parentUuid` 分叉 + `logicalParentUuid`（压缩边界用） |
 
 > **设计理由**（`[inference]`）：dsh 把 fork 边界做成事件而非隐式约定，是为了让「一段历史从哪来」在日志里可查——这对多 agent 协作（父子会话）是必需的。
 
@@ -611,7 +611,7 @@ normalizeMessagesForAPI()
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | `findLatestHeadMarker` 直接取最新 head 标记，压缩边界由它决定、无需比对下标（`types.ts:1013`、`context.ts:267-271`） | `foldSurface` 折叠出不变量 | `InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章） | `findLastCompactBoundaryIndex`（`messages.ts:4618`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`） |
+| 做法 | `findLatestHeadMarker` 直接取最新 head 标记，压缩边界由它决定、无需比对下标（`types.ts:1390`、`context.ts:267-271`） | `foldSurface` 折叠出不变量 | `InitialHistory::Resumed` + `CompactedItem` 回填（见 第 8 章） | `findLastCompactBoundaryIndex`（`messages.ts:4643`）/ `getMessagesAfterCompactBoundary`（`:4643`）在 API 前切到最近 boundary 之后；`preservedSegment` 重连并清 stale `usage`（防 resume 后立即 autocompact，`:1920-1939`） |
 
 > **设计理由**：这里的分歧是「谁来负责不重复压缩」。pi 用 `findLatestHeadMarker` 取到最新窗口起点，天然不会重复压缩已压过的段，codex 用 `InitialHistory::Resumed` 回填，dsh 直接折叠 surface 得出不变量，CC 的处理最完整——它不仅要「切对段」，还要**防止刚打开就再次触发自动压缩**。这个坑源于旧 token 计数在加载之后不再成立。
 

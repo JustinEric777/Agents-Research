@@ -4,7 +4,7 @@ title: "第 11 章 · 模型调用与 Provider"
 nav_order: 9
 parent: "第二部分 · 内核区"
 permalink: /ch/11/
-reviewed_at: 2026-11-12
+reviewed_at: 2026-11-13
 baseline: current
 evidence_mode: mixed
 review_priority: P1
@@ -12,7 +12,7 @@ review_priority: P1
 
 # 第 11 章：模型调用与 Provider 抽象 —— 把 N 种线协议归一成一套事件词汇表
 
-> **当前基线补充（2026-11-12）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
+> **当前基线补充（2026-11-13）** —— 当前 Provider 比较新增 capability negotiation、模型目录新鲜度、reasoning / tool / streaming 事件兼容性、重试幂等和费用观测；不能只按统一接口数量判断抽象质量。
 
 **本章回答什么** —— 前八章看的都是 Agent 自己的骨架；本章拆的是那个一直被当作黑盒的部件：它怎么把「我要一段回复」翻译成一次 HTTP 流式请求，怎么把各家千奇百怪的 SSE 事件收敛成循环能消费的东西，以及在限流、截断、超窗、参数非法时如何不失体面地收场。
 
@@ -51,7 +51,7 @@ review_priority: P1
 
 2. **归一化的边界位置，决定了换 provider 要改哪一层**：pi 与 dsh 的边界画在**适配器之内**（对外只出统一事件，原生形态不外泄）；codex 画在 **SSE 解析层**（`codex-api/src/sse/responses.rs` 是唯一的原生事件消化点）；CC 画在**调用方**（`claude.ts:1979` 的 `switch (part.type)`）——只有「全世界只有一家 provider」才付得起这个代价。
 
-3. **codex 走的是收敛路线，且执行得非常彻底**：`WireApi` 枚举**只剩 `Responses` 一个变体**，配置里写 `wire_api = "chat"` 会直接报错并附修复指引与讨论区链接（`model-provider-info/src/lib.rs:95`、`:125`），内置 provider 也从 5 个降到 4 个（`ollama-chat` 一并移除）。**这与 pi 的 41 家 provider 是两个极端**——一个赌「协议会统一」，一个赌「长尾永远存在」。
+3. **codex 走的是收敛路线，且执行得非常彻底**：`WireApi` 枚举**只剩 `Responses` 一个变体**，配置里写 `wire_api = "chat"` 会直接报错并附修复指引与讨论区链接（`model-provider-info/src/lib.rs:117`、`:125`），内置 provider 也从 5 个降到 4 个（`ollama-chat` 一并移除）。**这与 pi 的 41 家 provider 是两个极端**——一个赌「协议会统一」，一个赌「长尾永远存在」。
 
 4. **两个项目在核心层真的打通了**：dsh 的 `llm-pi-ai` 直接依赖 `@earendil-works/pi-ai ^0.85.1`（`llm-pi-ai/package.json:44`），并且**给它打了补丁**——`patches/@earendil-works__pi-ai@0.85.1.patch` 删掉了 4 个适配器里「每收一个 delta 就全量重解析参数 JSON」的 O(n²) 调用。配套的设计方法论更值得记：dsh 让 `llm-deepseek`（自己写）与 `llm-pi-ai`（借用）跑**同一套 `StreamChunk`**，并在注释里写下「**任何两者都表达不了的东西，就是核心词汇表的 bug**」——用双实现验证抽象的完备性。
 
@@ -128,13 +128,13 @@ review_priority: P1
 
 | 概念 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| **provider 标识** | `ProviderId = KnownProvider \| string`（41 项已知，`types.ts:35`） | 路由键字符串 `LlmProviderInfo.id`（`llm/src/types.ts:224`） | `ModelProviderInfo`（20 字段配置结构，`model-provider-info/src/lib.rs:134`） | `APIProvider` 四值枚举（`model/providers.ts:4`） |
-| **模型标识** | `Model<TApi>` 对象（`types.ts:982`），含 cost / contextWindow / maxTokens | `(provider, id)` 二元组 → `LlmResolvedModelInfo`（`llm/src/types.ts:400`） | `ModelInfo`（`models-manager`），provider 侧只有 slug 字符串 | 仅 `ModelName: string`（`model/model.ts:32`），无结构 |
+| **provider 标识** | `ProviderId = KnownProvider \| string`（41 项已知，`types.ts:35`） | 路由键字符串 `LlmProviderInfo.id`（`llm/src/types.ts:224`） | `ModelProviderInfo`（20 字段配置结构，`model-provider-info/src/lib.rs:149`） | `APIProvider` 四值枚举（`model/providers.ts:4`） |
+| **模型标识** | `Model<TApi>` 对象（`types.ts:982`），含 cost / contextWindow / maxTokens | `(provider, id)` 二元组 → `LlmResolvedModelInfo`（`llm/src/types.ts:454`） | `ModelInfo`（`models-manager`），provider 侧只有 slug 字符串 | 仅 `ModelName: string`（`model/model.ts:32`），无结构 |
 | **provider × model 是否两套标识** | **是**（`provider` + `api` + `id` 三个维度） | **是**（路由键 + 模型 id） | **是**（provider 配置 + 模型 slug） | **否**（模型名自带 provider 语义，由 env 决定走哪家） |
 | **模型清单来源** | **构建期生成**：`providers/*.models.ts`（41 个 shard）+ `data/*.json` | 各 adapter 的 `listModels()` / `resolveModel()`，可注册模型发现 | **远端 `/models` + 磁盘缓存**（TTL 300s）+ 内置 bundled `models.json` | **硬编码矩阵**：4 provider × 11 模型的 ID 常量表（`model/configs.ts:87-97`） |
 | **未知模型怎么办** | `getModel` 返回 undefined → 调用方处理 | adapter `resolveModel()` 决定，凭据缺失则 `MISSING_CREDENTIAL` fail-loud | **最长前缀匹配 → 失败回落 fallback 元数据 + `warn!`（按 272k 上下文）** | `getModelCosts` 回退默认价并打点 `tengu_unknown_model_cost` |
-| **协议数** | 10 个 `KnownApi` 线协议（`types.ts:17`） | 由 adapter 决定（pi-ai 侧 3 个 `PROTOCOLS`） | **1 个**（`WireApi::Responses`，chat 已删） | 1 个（Anthropic Messages，含 3P 变体） |
-| **统一事件词汇表** | `AssistantMessageEvent`，**12 种**（`types.ts:652`） | `StreamChunk`，**7 种**（`llm/src/types.ts:440`） | `ResponseEvent`，**17 种**（`codex-api/src/common.rs:80`） | **无**（原生 `stream_event` 直通） |
+| **协议数** | 10 个 `KnownApi` 线协议（`types.ts:64`） | 由 adapter 决定（pi-ai 侧 3 个 `PROTOCOLS`） | **1 个**（`WireApi::Responses`，chat 已删） | 1 个（Anthropic Messages，含 3P 变体） |
+| **统一事件词汇表** | `AssistantMessageEvent`，**12 种**（`types.ts:538`） | `StreamChunk`，**7 种**（`llm/src/types.ts:496`） | `ResponseEvent`，**17 种**（`codex-api/src/common.rs:117`） | **无**（原生 `stream_event` 直通） |
 | **归一化边界** | 适配器内部 | 契约层（adapter 的 `translate`） | SSE 解析层（`sse/responses.rs`） | 调用方（`claude.ts:1979`） |
 | **请求级重试默认** | **0 次**（`provider-retry.ts:109`，交由 harness 层 3 次） | **5 次**（`retry-policy.ts:14`） | **4 次**（请求）/ **5 次**（流，`model-provider-info/src/lib.rs:64-65`） | **10 次**（`withRetry.ts:52`），529 另限 3 次 |
 | **退避算法** | `min(0.5·2^n, 8)s` × 25% 抖动 | `min(initial·2^(n-1), max)` × 10% 抖动，initial 500ms / max 10s | `base·2^(n-1)` × **0.9~1.1 抖动**，base 200ms | `min(500·2^(n-1), max)` + 25% 抖动 |
@@ -243,8 +243,8 @@ flowchart TB
 
 | 步骤 | 位置 |
 |---|---|
-| 选模型（harness） | `packages/durable/src/harness/generation.ts:135-139`：`runtime.models.getModel(provider, modelId)`，取不到即 `failNoModel` |
-| 组装（系统提示词分节） | `generation.ts:155-176`：`runtime.context` → `replaySections` → `planSystemEntries` |
+| 选模型（harness） | `packages/durable/src/harness/generation.ts:189-193`：`runtime.models.getModel(provider, modelId)`，取不到即 `failNoModel` |
+| 组装（系统提示词分节） | `generation.ts:211-232`：`runtime.context` → `replaySections` → `planSystemEntries` |
 | 消息转换 | 交给 ai 包的 provider 适配器：`generation.ts:484` 只传 `{ messages: [...messages] }` |
 | 发起 | `generation.ts:484` `runtime.models.streamSimple(model, …)`（v1.4.0 已无 `drive.gate.admit`，并发由 Session 行与 task 调度器保证） |
 | 凭据注入 | `packages/ai/src/models.ts:856` `applyAuth()`，`:879` 用 `auth.baseUrl` 覆盖 `requestModel.baseUrl` |
@@ -390,7 +390,7 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 | 流形态 | **按块驱动**，块内有明确起止 | **扁平 chunk**，无块概念 |
 | 文本累积 | `block.text += event.delta.text`（`anthropic-messages.ts:676-685`） | 惰性建块 `ensureTextBlock()`（`openai-completions.ts:474`） |
 | 工具参数 | `input_json_delta` 累积 `partialJson` 后 `parseStreamingJson`（`:699-710`、`:740`） | 按 `tool_calls[].index`/`id` **自建块**（`:494` `ensureToolCallBlock()`、`:401` `toolCallBlocksByIndex`） |
-| 停因映射 | `:1494` `mapStopReason` | `openai-completions.ts:1554` 把 `content_filter` 映射为错误 |
+| 停因映射 | `:1494` `mapStopReason` | `openai-completions.ts:1576` 把 `content_filter` 映射为错误 |
 
 > **设计理由**（`[code]`）：这两个适配器合计 3,246 行（1520 + 1726），其中大半是「把扁平流补成块结构」和「跨 SDK 探测错误字段」。**归一化的成本不会消失，只会转移**——pi 选择让适配器承担，换来上层只认 12 种事件。
 
@@ -426,7 +426,7 @@ providerInfo():210 · providerRetryPolicy():219 · imageRequestPricing():232
 listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream():285
 ```
 
-服务类 `LlmRuntime`（`index.ts:337`）对外公开 `listProviders` / `discoverModels` / `resolveModelInfo` / `resolveCallConfig` / `prepareCall` / `stream` 等（`:473`–`:1112`）。
+服务类 `LlmRuntime`（`index.ts:86`）对外公开 `listProviders` / `discoverModels` / `resolveModelInfo` / `resolveCallConfig` / `prepareCall` / `stream` 等（`:473`–`:1112`）。
 
 **`providerRetryPolicy()` 在 adapter 上，不在 runtime 上**——这是关键分工：重试策略是**provider 的属性**，不是运行时的全局配置。
 
@@ -497,7 +497,7 @@ listModels():243 · resolveModel():256 · prepareCall():273 · abstract stream()
 | 按路由重建 provider（清空内置集合） | `llm-pi-ai/src/models.ts:31` `createModels()` → `:42` `createProvider()` |
 | 协议表（三种） | `llm-pi-ai/src/provider.ts:47` `PROTOCOLS = { openai-completions, openai-responses, anthropic-messages }` |
 | 复用 pi-ai 的 catalog provider 实现 | `provider.ts:144` `reuseCatalogProvider()` |
-| per-request 凭据解析 | `llm-pi-ai/src/index.ts:183` `resolveApiKey` |
+| per-request 凭据解析 | `llm-pi-ai/src/index.ts:208` `resolveApiKey` |
 | 凭据记账（写回 `llm-pi-ai/<id>`） | `llm-pi-ai/src/auth.ts:36` `recordKeyFor` |
 | **显式拒绝 `stop` 参数** | `llm-pi-ai/src/adapter.ts:334` |
 | 非图片模型的图片 → `UNSUPPORTED_CONTENT` | `adapter.ts:359` |
@@ -564,7 +564,7 @@ export interface TokenMeasurement {
 }
 ```
 
-`TokenMeter` 服务（`token-meter/src/index.ts:101`，`inject = ['sessionProjections'] :106`）从 **durable session log 回放**测量，而非内存累加。无 usage 时回落 `baseline.kind='estimated'`（`:176-180`）。
+`TokenMeter` 服务（`token-meter/src/index.ts:98`，`inject = ['sessionProjections'] :106`）从 **durable session log 回放**测量，而非内存累加。无 usage 时回落 `baseline.kind='estimated'`（`:176-180`）。
 
 **明确不算钱**：
 
@@ -598,7 +598,7 @@ override resolve(ref: CredentialRef): Promise<ResolvedCredential | undefined> {
 }
 ```
 
-**关键纪律**：已命名但解析不到的引用**直接 fail-loud 为 `MISSING_CREDENTIAL`，不回退到环境发现**（`llm-pi-ai/src/index.ts:189-205`）；只有未命名时才下探 ambient。格式错误另码 `INVALID_CREDENTIAL`（`llm/src/index.ts:149` `assertUsableApiKey`）。
+**关键纪律**：已命名但解析不到的引用**直接 fail-loud 为 `MISSING_CREDENTIAL`，不回退到环境发现**（`llm-pi-ai/src/index.ts:189-205`）；只有未命名时才下探 ambient。格式错误另码 `INVALID_CREDENTIAL`（`llm/src/index.ts:166` `assertUsableApiKey`）。
 
 > **设计理由**（`[inference]`）：静默回退是凭据系统最危险的失败模式——用户以为在用 A 账号，实际用了环境里残留的 B 账号。dsh 选择「宁可启动失败也不猜」。
 
@@ -684,14 +684,14 @@ if let Some(built_in_provider) = model_providers.get_mut(&key) {
 
 | 步骤 | 位置 |
 |---|---|
-| turn 循环发起采样 | `codex-rs/core/src/session/turn.rs:1584` `run_sampling_request` → `:2448` `try_run_sampling_request` |
+| turn 循环发起采样 | `codex-rs/core/src/session/turn.rs:1894` `run_sampling_request` → `:2896` `try_run_sampling_request` |
 | client 按 wire_api 分派 | `core/src/client.rs:2132` `ModelClientSession::stream`（`:2143-2145`） |
-| 走 Responses 路径 | `core/src/client.rs:1609` `stream_responses_api` |
-| 构造请求体 | `core/src/client.rs:881` `build_responses_request` |
+| 走 Responses 路径 | `core/src/client.rs:1957` `stream_responses_api` |
+| 构造请求体 | `core/src/client.rs:1162` `build_responses_request` |
 | 发流式请求 | `codex-api/src/endpoint/responses.rs:70` `stream_request` → `:123` `stream_encoded` |
 | 重试包裹 | `codex-client/src/retry.rs:82` `run_with_retry` |
-| **原生事件消化** | `codex-api/src/sse/responses.rs:575` `process_sse_with_treatment` → `:353` `process_responses_event` |
-| 映射为内部事件 | `core/src/client.rs:2257` `map_response_stream`、`:2280` `map_response_events` |
+| **原生事件消化** | `codex-api/src/sse/responses.rs:599` `process_sse_with_treatment` → `:353` `process_responses_event` |
+| 映射为内部事件 | `core/src/client.rs:2117` `map_response_stream`、`:2280` `map_response_events` |
 | turn 消费 | `session/turn.rs:3094` `resampling.next()`、`:3107` `match event` |
 
 ```rust
@@ -834,7 +834,7 @@ const MAX_REQUEST_MAX_RETRIES: u64 = 100;
 |---|---|---|
 | 流中断 | 按 `stream_max_retries` 重试（默认 5） | `:50-66`、`:113-134` |
 | 连接类错误 | 专用退避 **5s → 60s 倍增** | `:16-17`、`:89-91` |
-| 重试耗尽且 WebSocket 可用 | **永久切 HTTP 并重置预算** | `:96-111`，`core/src/client.rs:644-663` `force_http_fallback` |
+| 重试耗尽且 WebSocket 可用 | **永久切 HTTP 并重置预算** | `:96-111`，`core/src/client.rs:788-807` `force_http_fallback` |
 
 ```mermaid
 flowchart LR
@@ -862,7 +862,7 @@ pub fn bundled_models_response() -> Result<ModelsResponse, serde_json::Error> {
 }
 ```
 
-缓存 TTL 300s、文件 `models_cache.json`（`models-manager/src/manager.rs:31-32`）；刷新策略三态 `Online` / `Offline` / `OnlineIfUncached`（`:85-92`）。
+缓存 TTL 300s、文件 `models_cache.json`（`models-manager/src/manager.rs:120-121`）；刷新策略三态 `Online` / `Offline` / `OnlineIfUncached`（`:85-92`）。
 
 **找不到模型时不报错，而是回落到 fallback 元数据**：
 
@@ -933,7 +933,9 @@ pub struct TokenUsage {
 
 **没有 cost 字段**——全仓搜索 `usd`/`price_per` 在 `protocol/` 与 `core/src/session/` 下零命中。取而代之的是 `codex_rollout_budget_units`：一个「共享 rollout 预算单位」，配合 `RateLimits(RateLimitSnapshot)` 事件构成订阅制的额度模型。
 
-累计点 `codex-rs/core/src/session/mod.rs:4675-4686` `record_token_usage_info`（仅 `Some` 时累计）。参与压缩预算：`core/src/session/context_window.rs:58-110`（`active_context_tokens = sess.get_total_token_usage()` 与阈值比较）。
+累计点 `codex-rs/core/src/session/mod.rs:5756-5768` `record_token_usage_info`（仅 `Some` 时累计）。参与压缩预算的是 `core/src/session/context_window.rs:53-130` 的 `context_window_token_status`：它不再返回单个布尔值，而是返回 `ContextWindowTokenStatus` 结构（`:8-20`），把「全量上下文用量」「auto-compact 作用域用量」「全窗口硬上限」「turn 末阈值」拆成独立字段。
+
+作用域有两种（`:61-81`）：`Total` 直接拿全量上下文比阈值，`BodyAfterPrefix` 只算初始前缀之后新增的 token。判定 `token_limit_reached` 时还会叠加 fallback buffer（`:98-110`），并单独检查模型全窗口是否已满——因此 codex 的「该压缩了」是**作用域 + 缓冲 + 硬上限三者取并**。
 
 ---
 
@@ -1124,7 +1126,7 @@ FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRet
 // 注释解释：为避免工具重复执行（inc-4258）
 ```
 
-超时：请求级 `timeout: API_TIMEOUT_MS || 600s`（`client.ts:144`）；非流式 fallback 独立超时（远程 120s / 否则 300s，`claude.ts:807`）；流式静默看门狗 `[code]` 走 `CLAUDE_ENABLE_STREAM_WATCHDOG`，空闲 90s 主动 abort（`claude.ts:1874-1927`）。
+超时：请求级 `timeout: API_TIMEOUT_MS || 600s`（`client.ts:144`）；非流式 fallback 独立超时（远程 120s / 否则 300s，`claude.ts:1875`）；流式静默看门狗 `[code]` 走 `CLAUDE_ENABLE_STREAM_WATCHDOG`，空闲 90s 主动 abort（`claude.ts:1874-1927`）。
 
 #### 4.4.6 计量：算钱，且对 0 值做守卫
 
@@ -1139,7 +1141,7 @@ FOREGROUND_529_RETRY_SOURCES   // 前台白名单；非前台立即抛 CannotRet
 // :144  getModelCosts —— 未知模型回退默认并打点 tengu_unknown_model_cost（:166）
 ```
 
-> **设计理由**（`[inference]`）：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:764`）。
+> **设计理由**（`[inference]`）：`> 0` 守卫的理由写得很清楚——`message_delta` 经常带 0，直接赋值会把 `message_start` 里的真实值覆盖掉。**这是流式 usage 的通用陷阱**，但只有 CC 与 pi 显式防御（pi 注释为 「Preserves input_tokens from message_start when proxies omit it in message_delta」，`anthropic-messages.ts:632`）。
 
 #### 4.4.7 鉴权：OAuth 与 API key 二选一
 
