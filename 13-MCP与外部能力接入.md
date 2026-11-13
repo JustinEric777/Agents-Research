@@ -14,11 +14,11 @@ review_priority: P0
 
 **本章回答什么** —— 本章回答内核之外最近的一层：模型能调用的工具，除了本体自带的那些，**还从哪来、怎么进来、进来之后受不受同一套管束**。它是第 5 章与第 12 章共同悬置的前提——第 5 章把 MCP 写进「工具的 5 类来源」，第 12 章把接入细节整段指给了本章，两处都只给了名字，没给界定。
 
-**四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `v1.2.0` 已内置 MCP extension，并把 MCP 工具、资源、OAuth、重连和 Code Mode 暴露组合到同一运行时；dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物资料和明确推断为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
+**四家分歧在哪** —— 当前基线下四家仍然采用不同的能力边界：pi `origin/main`（`275dde41`，末次标签 `v1.5.2`）已内置 MCP extension，并把 MCP 工具、资源、OAuth、重连和 Code Mode 暴露组合到同一运行时；dsh 以插件化客户端接入，codex 以独立 MCP 子系统承载，CC 以发行物资料和明确推断为准。当前比较重点从「是否支持」升级为**身份、授权、资源、能力变更、重连和数据出站**。
 
 **读完能拿到什么** —— 读完本章你能得到三样东西：四家在这一层上的形态谱、一套判断「外部能力该被当作扩展还是当作能力」的判据，以及五条可直接落地的规则。
 
-> **当前基线补充（2026-11-13）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `v1.2.0` 的 durable / Code Mode 能力、codex `rust-v0.163.0-alpha.13` 的 MCP resources 与协议演进、dsh 的 profile 化接入、CC `v2.1.322` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
+> **当前基线补充（2026-11-13）** —— MCP 复核不再只比较 initialize、工具发现和调用。pi `origin/main`（`275dde41`）的 durable / Code Mode 能力、codex `origin/main`（`69231e11`）的 MCP resources 与协议演进、dsh `origin/master`（`39163dd3`）的 profile 化接入、CC `v2.1.322` 的发行行为都要求额外检查 server 身份、OAuth scope、资源读取权限、能力变更、重连幂等和数据出站。所有无法从 CC 当前发行物直接验证的源码级结论必须降级为 `release` 或 `probe`。
 
 > **本层定位**：L13，第三部分 · 外围区的第一站。它向内接第 5 章的工具定义、第 10 章的权限链、第 12 章的扩展单位，向外接第 1 章的配置与凭据。
 >
@@ -57,7 +57,7 @@ review_priority: P0
     - **CC** —— 不设名字上限、只把描述截到 2048（`client.ts:218`）；碰撞时在 skip-prefix 模式下允许 MCP 工具覆写内建名（`client.ts:1760-1773`）
     - **小结** —— 都产出 `mcp__<server>__<tool>`
 
-4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth，且各自把「企业授权」做成独立协议；dsh 当前客户端以静态 `env` / `headers` 注入为主；pi `v1.2.0` 已提供 MCP OAuth challenge、credential store 和登录入口，但企业托管能力仍需补充具体源码路径。[inference]
+4. **凭据是四家分化最陡的一节**：codex 与 CC 各有一整套 OAuth，且各自把「企业授权」做成独立协议；dsh 当前客户端以静态 `env` / `headers` 注入为主；pi `origin/main`（`275dde41`）已提供 MCP OAuth challenge、credential store 和登录入口，但企业托管能力仍需补充具体源码路径。[inference]
 
 5. **「外部能力不可用不应拖垮内核」是三家共识** [code][code]
 

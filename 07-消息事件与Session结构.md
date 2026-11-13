@@ -18,7 +18,7 @@ review_priority: P0
 
 **读完能拿到什么** —— 不先读懂这一层，前面几章的很多结论都会缺根因。
 
-> **当前基线补充（2026-11-13）** —— 事实源不再只比较「消息怎样存」。pi 自 `v1.4.0` 起把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-62`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`e8f7b93a`）继续以 append-only session log 与 surface 投影分离；codex 主干（`c899e21c`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.322` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
+> **当前基线补充（2026-11-13）** —— 事实源不再只比较「消息怎样存」。pi 自 `v1.4.0` 起把 `Harness`、`TaskGraph`、`LiveDoc` 等 durable 对象提升为公开运行时概念（`packages/durable/src/index.ts:41-62`），并在此后删掉了旧的 `parentId` 树与 `Branch` 游标，改为「条目日志 + `head` 起点 + `edits` 覆盖」；dsh 主干（`39163dd3`）继续以 append-only session log 与 surface 投影分离；codex 主干（`69231e11`）的多 Agent 与 app-server 事件要求额外记录 thread、turn、agent 和连接归属；CC `v2.1.322` 以发行物资料或明确推断为依据，不能把本地还原源码当作同版本实现。当前结论必须额外回答 **owner、initiator、parent、scope、replay authority**，否则无法支撑第 8、9、14、15 章。
 
 > **本层定位**：L7，L3–L6 全部设计差异的**根源层**。
 >
