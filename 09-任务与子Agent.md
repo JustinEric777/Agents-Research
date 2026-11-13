@@ -163,7 +163,7 @@ L3 主循环 ──┬── L4 工具调用调度 ──→ L5 工具定义/投
 
 会话记录上只有两条边，都不产生新 Agent：
 
-`packages/durable/src/types.ts:429-441`
+`packages/durable/src/types.ts:450-462`
 ```ts
 export type ConversationRecord = {
 	readonly id: ConversationId;
@@ -191,7 +191,7 @@ export type ConversationRecord = {
 
 真正的父子**任务**拓扑在 `ToolTask` 里。一次工具调用可以发起嵌套调用，被发起的那次调用是一个独立的 `ToolTask`，以 `parent` 字段挂成子任务：
 
-`packages/durable/src/harness/tool.ts:63-83`
+`packages/durable/src/harness/tool.ts:71-91`
 ```ts
 /**
  * A model-issued call, read from its assistant entry, or a nested call a running tool made through `executeTool()`,
@@ -218,7 +218,7 @@ export type ToolTaskInput =
 
 结果不回写进父任务的记录，而是**每次嵌套调用一份文档**：
 
-`packages/durable/src/harness/tool.ts:117-125`
+`packages/durable/src/harness/tool.ts:135-143`
 ```ts
 export const NestedCallDoc = defineDocFamily<NestedCallState, null>({
 	kind: "pi.tool.nested-call",
@@ -740,11 +740,11 @@ flowchart TB
 
 pi 的核心只承认**父子（ownership / subtree）**一种跨会话关系，并且在两处把它写成硬校验。
 
-其一是**创建时**：一段会话要么挂在某个 `parent` 之下，要么由某个 task 拥有；声明 owner 时会去查这个 task 是否存在，不存在直接抛错（`packages/durable/src/session/transaction.ts:306-320`）。子任务还有两条额外约束——必须活在 owner 的会话里，且**不允许是 background**（`:408-419`）。
+其一是**创建时**：一段会话要么挂在某个 `parent` 之下，要么由某个 task 拥有；声明 owner 时会去查这个 task 是否存在，不存在直接抛错（`packages/durable/src/session/transaction.ts:382-390`）。子任务还有两条额外约束——必须活在 owner 的会话里，且**不允许是 background**（`:482-488`）。
 
-其二是**操作时**：只能中止自己**直接拥有**的任务，比较的是记录上的 `owner` 字段，不一致就抛 `Task <id> is not owned by task <owner>`（`packages/durable/src/harness/scheduler.ts:2209-2219`）。
+其二是**操作时**：只能中止自己**直接拥有**的任务，比较的是记录上的 `owner` 字段，不一致就抛 `Task <id> is not owned by task <owner>`（`packages/durable/src/harness/scheduler.ts:2931-2940`）。
 
-换句话说，pi 不是「没实现兄弟通信」，而是**根本不允许跨兄弟引用**——你的可操作范围在结构上就是你的子树。而「子树」这个概念仍然保留，只是落到了 `TaskOwnership.creator` 这条边上，注释写明它用于归属、子树中止与子树空闲等待（`packages/durable/src/types.ts:404`）。
+换句话说，pi 不是「没实现兄弟通信」，而是**根本不允许跨兄弟引用**——你的可操作范围在结构上就是你的子树。而「子树」这个概念仍然保留，只是落成了 `TaskOwnership` 这个二选一判别联合（`{ kind: "conversation" }` 或 `{ kind: "task", taskId }`，`packages/durable/src/types.ts:403`）再加上任务记录上的 `owner` 字段：注释写明它用于归属、子树中止与子树空闲等待。
 
 还有一处需要更正上一版的判断：旧版仓库里那个带 `peer` 语义的 `coding-agent/src/experimental/coordinator.ts`（会话级星形进程路由）在 v1.4.0 已被删除，`experimental/` 目录只剩 `source-resolver.ts`。也就是说 pi 现在**连会话级的进程路由都不再内置**——多进程协作整体交给 `chord` 的 host / link 抽象（第 15 章）。
 
@@ -1004,7 +1004,7 @@ sequenceDiagram
 
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
-| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:355`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:128-132`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
+| 做法 | 不适用——pi 没有对等协作实体，会话只有归属（`ConversationOwnership`，`packages/durable/src/session/transaction.ts:358`）与任务级嵌套，没有「认领」这类跨 Agent 争抢 | 认领用**乐观并发**——先比 `expectedRevision`，不匹配抛 `TEAM_TASK_STALE_REVISION`（`packages/team/agent-team/src/task-board.ts:128-132`）；`claim` 分支继续检查「已被他人占用」（`TEAM_TASK_ALREADY_CLAIMED`）与「前置依赖未就绪」（`TEAM_TASK_BLOCKED`）（`:142-148`） | 不适用——消息板是论坛（频道 / 帖子 / 订阅），不存在认领概念（`ext/agent-message-board/src/tools/spec.rs:10-20`） | 认领用**悲观并发**——`proper-lockfile` 锁住任务文件后重读，检查 `owner` 与 `blockedBy` 再写 `owner`（`src/utils/tasks.ts:541-570`）；需要跨任务原子检查（「这个 agent 是否已忙」）时升级为任务列表级锁的 `claimTaskWithBusyCheck`（`:618-640`） |
 
 > **设计理由**（`[inference]`）：两家都认定「认领」的读-改-写必须原子，分歧只在手段——dsh 用版本号（乐观，冲突时让调用方重试），CC 用文件锁（悲观，冲突时让调用方排队）。区别在**失败成本的形状**：版本号冲突是一次**可重试的失败**，作为错误返回给模型后它可以直接重读再试；文件锁则是**让模型等**，而 Agent 场景下等待意味着 token 与时间双双空转，并且没有退避策略可调。**因此 Agent 之间争抢同一份工作时，乐观并发通常更合适。**
 ---

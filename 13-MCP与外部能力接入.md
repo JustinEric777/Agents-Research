@@ -169,7 +169,7 @@ review_priority: P0
 
 `v1.2.0` 明确包含 built-in MCP integration。`packages/coding-agent/src/extensions/mcp/runtime.ts:138-152` 定义 `McpServerConnection`、连接状态、工具列表、资源能力和 OAuth challenge；`tools.ts:78-92` 将外部工具规范化为 `mcp__<server>__<tool>`，并在 64 字符上限下追加 hash；`resources.ts:192-205` 暴露 resources / resource templates / read 的统一工具定义；`cli/args.ts:328` 提供 `--no-mcp`，因此 MCP 是否启用是运行时策略，而不是是否存在实现的问题。
 
-durable 与 Code Mode 仍是 pi 当前能力面的重要组成：`packages/durable/src/index.ts:40-61` 导出 `Harness`、`LiveDoc`、`TaskGraph` 和 `NestedCallDoc`，`packages/codemode/src/runtime/host.ts:68-79` 为每次脚本执行启动独立 QuickJS worker。两条能力面与 MCP 的关系需要通过 tool exposure 和 nested call 共同分析，不能再把 MCP 归入「扩展自实现」。
+durable 与 Code Mode 仍是 pi 当前能力面的重要组成：`packages/durable/src/index.ts:41-62` 导出 `Harness`、`LiveDoc`、`TaskGraph` 和 `NestedCallDoc`，`packages/codemode/src/runtime/host.ts:68-79` 为每次脚本执行启动独立 QuickJS worker。两条能力面与 MCP 的关系需要通过 tool exposure 和 nested call 共同分析，不能再把 MCP 归入「扩展自实现」。
 
 #### 4.1.2 当前已确认边界
 
@@ -270,7 +270,7 @@ getAllRegisteredTools(): RegisteredTool[] {
 
 **约束一：`pi.exec` 不足以替代 MCP 的 stdio 长连接。** 它的实现是一次性的——`stdio` 由 `["ignore", "pipe", "pipe"]` 构成，stdin 被丢弃，函数在收齐输出后 resolve，不返回常驻句柄：
 
-`packages/coding-agent/src/core/exec.ts:58-62`
+`packages/coding-agent/src/core/exec.ts:60-64`
 ```ts
 const proc = spawn(command, args, {
     cwd,
@@ -1918,7 +1918,7 @@ server 日志通知也没有处理器：`notifications/message` 在 `src/service
 
 ## 五、横向对比矩阵
 
-> **当前基线说明（2026-11-13）**：本矩阵的 pi 列已按 `v1.5.2` 重标：MCP 客户端在 `v1.4.0` 下沉为独立包 `packages/mcp/`（client / oauth / transports），`v1.5.2` 又在 `packages/mcp/src/output-limit.ts` 增加了一层 20 KiB 的模型可见输出上限；扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
+> **当前基线说明（2026-11-13）**：本矩阵的 pi 列已按 `origin/main`（`275dde41`，含 `v1.5.2` 之后 156 个提交）重标：MCP 客户端在 `v1.4.0` 下沉为独立包 `packages/mcp/`（client / oauth / transports），`v1.5.2` 又在 `packages/mcp/src/output-limit.ts` 增加了一层 20 KiB 的模型可见输出上限；扩展层 `packages/coding-agent/src/extensions/mcp/` 仍负责运行时装配。`当前源码 / unverified` 表示本轮已确认存在当前源码入口，但该行的具体运行时行为尚缺完整源码路径核对，不表示「不支持」。当前入口与证明范围见[结论与源码证据]({{ site.baseurl }}/appendix/claims/)中的 `pi.*` 条目。
 
 一次外部工具调用要连穿四层，其中只有「注册」与「判定」两处是本层与其他层的接口。把这四个接口画出来，本章与其他章的接缝就清楚了。
 

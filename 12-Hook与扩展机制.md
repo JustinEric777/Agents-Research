@@ -176,7 +176,7 @@ beforeToolCall?: (context: BeforeToolCallContext, signal?: AbortSignal) => Promi
 
 #### 4.1.2 外壳的 36 个事件与 10 个 register
 
-外壳把内核回调接到自己的事件总线上（`transformContext` → `emitContext`，`sdk.ts:390-393`；`beforeToolCall`/`afterToolCall` → `emitToolCall`/`emitToolResult`，`agent-session.ts:530-584`），对外暴露 `ExtensionAPI`（`core/extensions/types.ts:1592-1987`）。它的 `on()` 有 **36 个重载**（`types.ts:1354-1419`），可按粒度分五组：
+外壳把内核回调接到自己的事件总线上（`transformContext` → `emitContext`，`sdk.ts:390-393`；`beforeToolCall`/`afterToolCall` → `emitToolCall`/`emitToolResult`，`agent-session.ts:532-586`），对外暴露 `ExtensionAPI`（`core/extensions/types.ts:1592-1987`）。它的 `on()` 有 **36 个重载**（`types.ts:1354-1419`），可按粒度分五组：
 
 | 粒度 | 事件 | 能力 |
 |---|---|---|
@@ -893,7 +893,7 @@ flowchart TD
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 重载时 `invalidate()` 旧 runner，旧 `ctx` 再调用会抛错 | **框架级保证**：effect/listener/service 随 fiber dispose 一起移除；detached 链 dispose 时先 abort 再 drain | `shutdown()` 关闭信号量 → `abort_all` → join，避免会话残留进程 | 热重载 plugin hooks；子进程由套在 `Promise.race` 的 abort 收束 |
-| 源码依据 | `loader.ts:185-192`、`agent-session.ts:3295-3315` | `vendor/cordis/README.md:61`、`hook-protocol/src/detached.ts:53` | `engine/command_runner.rs:180-187` | `loadPluginHooks.ts:147-148`、`utils/hooks.ts:1273` |
+| 源码依据 | `loader.ts:185-192`、`agent-session.ts:3308-3328` | `vendor/cordis/README.md:61`、`hook-protocol/src/detached.ts:53` | `engine/command_runner.rs:180-187` | `loadPluginHooks.ts:147-148`、`utils/hooks.ts:1273` |
 
 > **设计理由**：**pi**：用抛错代替静默失效；**dsh**：`dispose()` 返回即代表无残留回调；**codex**：`shutdown()` 返回即代表无残留子进程
 

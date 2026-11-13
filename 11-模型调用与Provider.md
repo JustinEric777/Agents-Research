@@ -243,14 +243,14 @@ flowchart TB
 
 | 步骤 | 位置 |
 |---|---|
-| 选模型（harness） | `packages/durable/src/harness/generation.ts:189-193`：`runtime.models.getModel(provider, modelId)`，取不到即 `failNoModel` |
-| 组装（系统提示词分节） | `generation.ts:211-232`：`runtime.context` → `replaySections` → `planSystemEntries` |
-| 消息转换 | 交给 ai 包的 provider 适配器：`generation.ts:484` 只传 `{ messages: [...messages] }` |
-| 发起 | `generation.ts:484` `runtime.models.streamSimple(model, …)`（v1.4.0 已无 `drive.gate.admit`，并发由 Session 行与 task 调度器保证） |
+| 选模型（harness） | `packages/durable/src/harness/generation.ts:208-213`：`runtime.models.getModel(provider, modelId)`，取不到即 `failNoModel` |
+| 组装（系统提示词分节） | `generation.ts:231-252`：`runtime.context` → `replaySections` → `planSystemEntries` |
+| 消息转换 | 交给 ai 包的 provider 适配器：`generation.ts:548` 只传 `{ messages: [...messages] }` |
+| 发起 | `generation.ts:548` `runtime.models.streamSimple(model, …)`（v1.4.0 已无 `drive.gate.admit`，并发由 Session 行与 task 调度器保证） |
 | 凭据注入 | `packages/ai/src/models.ts:856` `applyAuth()`，`:879` 用 `auth.baseUrl` 覆盖 `requestModel.baseUrl` |
-| 适配器循环 | `packages/ai/src/api/anthropic-messages.ts:530` `iterateAnthropicEvents()`，`:696` 处消费 |
-| 消费侧 | `generation.ts:485-491`：只在 partial 有内容时更新 `pending`，按 `progress.partialIntervalMs` 节流 |
-| 帧编码（可恢复） | `generation.ts:459-482` `flush()`：同步拷贝 partial → 单次在途提交 → 收尾等在途完成（取代旧版 `frameEncoder.encode`） |
+| 适配器循环 | `packages/ai/src/api/anthropic-messages.ts:767` `iterateAnthropicEvents()`，`:951` 处消费 |
+| 消费侧 | `generation.ts:549-555`：只在 partial 有内容时更新 `pending`，按 `progress.partialIntervalMs` 节流 |
+| 帧编码（可恢复） | `generation.ts:523-546` `flush()`：同步拷贝 partial → 单次在途提交 → 收尾等在途完成（取代旧版 `frameEncoder.encode`） |
 
 #### 4.1.4 鉴权：三层回退 + 8 种订阅登录
 
@@ -262,7 +262,7 @@ flowchart TB
 return provider.auth.apiKey ? resolveApiKey(requestAuthContext, provider.auth.apiKey, provider.id, undefined, signal) : undefined;
 ```
 
-环境变量名表集中在 `env-api-keys.ts:79`（`envMap`）；特殊项单独处理：`envMap` 里 anthropic 走三变量（`:75`）、bedrock 支持六种 AWS 来源（`:168`）、vertex 走 ADC（`:156`）。
+环境变量名表集中在 `env-api-keys.ts:79`（`envMap`）；特殊项单独处理：`envMap` 里 anthropic 走三变量（`:75`）、bedrock 支持六种 AWS 来源（`:169`）、vertex 走 ADC（`:157`）。
 
 **OAuth / 订阅登录有 8 种**（`auth/oauth/load.ts:14`）：anthropic、openaiCodex、githubCopilot、openrouter、kimiCoding、meta、xai、radius。刷新用双检锁：
 
@@ -316,9 +316,9 @@ const retry =
 const until = retry ? runtime.now() + retryDelayMs(policy, attempt) : 0;
 ```
 
-拿到 `until` 之后，同一次提交里既追加 assistant 消息、又把任务状态写成 `sleeping`（`generation.ts:569-580`）。**这让「等 2 秒再试」变成「睡 2 秒再试」**：进程在这期间重启也不会丢——重启后仍是那条 `sleeping` 记录，到期即被唤醒（见 第 14 章 4.1.4）。旧版的 `assistant.effect_pending → assistant.retry_wait` 内存状态机已随 `runtime/drive/**` 一起删除。
+拿到 `until` 之后，同一次提交里既追加 assistant 消息、又把任务状态写成 `sleeping`（`generation.ts:633-644`）。**这让「等 2 秒再试」变成「睡 2 秒再试」**：进程在这期间重启也不会丢——重启后仍是那条 `sleeping` 记录，到期即被唤醒（见 第 14 章 4.1.4）。旧版的 `assistant.effect_pending → assistant.retry_wait` 内存状态机已随 `runtime/drive/**` 一起删除。
 
-另一个细节是**溢出永不重试**：`overflow` 为真时直接转去压上下文（`generation.ts:544-558`），因为只有压缩才能让下一次请求放得下。
+另一个细节是**溢出永不重试**：`overflow` 为真时直接转去压上下文（`generation.ts:608-622`），因为只有压缩才能让下一次请求放得下。
 
 请求级重试若被显式打开，判定优先看服务端提示：
 
@@ -388,7 +388,7 @@ export function calculateCost<TApi extends Api>(model: Model<TApi>, usage: Usage
 | 维度 | Anthropic | OpenAI Completions |
 |---|---|---|
 | 流形态 | **按块驱动**，块内有明确起止 | **扁平 chunk**，无块概念 |
-| 文本累积 | `block.text += event.delta.text`（`anthropic-messages.ts:676-685`） | 惰性建块 `ensureTextBlock()`（`openai-completions.ts:474`） |
+| 文本累积 | `block.text += event.delta.text`（`anthropic-messages.ts:674-683`） | 惰性建块 `ensureTextBlock()`（`openai-completions.ts:474`） |
 | 工具参数 | `input_json_delta` 累积 `partialJson` 后 `parseStreamingJson`（`:699-710`、`:740`） | 按 `tool_calls[].index`/`id` **自建块**（`:494` `ensureToolCallBlock()`、`:401` `toolCallBlocksByIndex`） |
 | 停因映射 | `:1494` `mapStopReason` | `openai-completions.ts:1576` 把 `content_filter` 映射为错误 |
 
@@ -1237,7 +1237,7 @@ return expiresWithBuffer >= expiresAt
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | 主动抛错并把临时字段（`index`/`partialJson`）剥掉，**不让流式草稿进入会话历史** | 未完成时关闭上游迭代器；只保留**可见前缀**（`live.interruptedBlocks()`） | 未收到 `response.completed` 即关闭 → 报错；**SSE 无 `Last-Event-ID` 续传**，只能整请求重发 | 只有 `content_block_stop` 才产出消息，故 partial 不落库；流式失败降级到非流式 |
-| 源码依据 | `anthropic-messages.ts:791`、`:817`（注释 `:820`） | `llm/src/index.ts:1093-1098`；`agent.ts:431` | `sse/responses.rs:603-609`；重试 `core/src/responses_retry.rs:113-134` | `claude.ts:2171`、`:2551` |
+| 源码依据 | `anthropic-messages.ts:789`、`:815`（注释 `:818`） | `llm/src/index.ts:1093-1098`；`agent.ts:431` | `sse/responses.rs:603-609`；重试 `core/src/responses_retry.rs:113-134` | `claude.ts:2171`、`:2551` |
 
 > **设计理由**（`[inference]`）：pi 的注释 「partialJson is only a streaming scratch buffer; never persist it」 与 CC 的「只有块结束才产出」是同一个原则——**流式中间态一律不得污染事实源**。这与第 7 章「消息模型」互相印证。
 
@@ -1246,7 +1246,7 @@ return expiresWithBuffer >= expiresAt
 | 项 | pi | dsh | codex | CC |
 |---|---|---|---|---|
 | 做法 | Anthropic 只覆盖非 null 字段（保 `message_start` 真值）；OpenAI 兜底读 `choice.usage`（Moonshot 等） | `usage` chunk 可选；无 usage 时回落 `baseline.kind='estimated'` | `Completed.token_usage` 是 `Option`；仅 `Some` 时累计 | `updateUsage` 对 undefined 直接返回拷贝；输入类 token 用 `> 0` 守卫 |
-| 源码依据 | `anthropic-messages.ts:763-765`；`openai-completions.ts:569-571` | `token-meter/src/index.ts:176-180` | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` | `claude.ts:2928`、`:2932-2945` |
+| 源码依据 | `anthropic-messages.ts:761-763`；`openai-completions.ts:569-571` | `token-meter/src/index.ts:176-180` | `codex-api/src/common.rs:99-106`；`session/mod.rs:4675` | `claude.ts:2928`、`:2932-2945` |
 
 > **设计理由**（`[inference]`）：四家都不因缺 usage 而失败。CC 与 pi 更进一步做**零值守卫**，因为流式协议里「缺失」常被表达成 `0`，和「真的是 0」无法区分。
 
